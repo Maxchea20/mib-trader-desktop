@@ -1,4 +1,4 @@
-"""Hands-free auto-trader.
+﻿"""Hands-free auto-trader.
 
 Evaluates the Brain (all 10 agents + HTF regime) on each new candle close of the
 auto-trade timeframe and manages a single AUTO paper position:
@@ -20,6 +20,7 @@ from . import paper_trading
 
 CONFIG = {
     "enabled": True,
+    "mode": "PAPER",
     "timeframe": "15m",
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
@@ -52,6 +53,10 @@ def update(payload: Dict) -> Dict:
         new_enabled = bool(payload["enabled"])
         turned_on = new_enabled and not CONFIG["enabled"]
         CONFIG["enabled"] = new_enabled
+    if "mode" in payload:
+        mode = str(payload["mode"]).upper()
+        if mode in ("PAPER", "LIVE"):
+            CONFIG["mode"] = mode
     if payload.get("timeframe"):
         CONFIG["timeframe"] = str(payload["timeframe"])
     for k in ("notional_usd", "sl_atr_mult", "tp_atr_mult"):
@@ -109,6 +114,11 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["last_state"] = state
     STATE["last_eval_at"] = int(time.time())
 
+    if CONFIG.get("mode") == "LIVE":
+        STATE["last_action"] = "LIVE MODE - NO ORDER"
+        STATE["last_reason"] = "Live execution is not enabled"
+        return STATE
+
     open_auto = _open_auto()
     if state in ("LONG", "SHORT"):
         if open_auto is None:
@@ -127,3 +137,5 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = f"NO-TRADE ({state})"
         STATE["last_reason"] = f"Brain {state}"
     return STATE
+
+

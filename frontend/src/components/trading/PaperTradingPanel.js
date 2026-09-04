@@ -8,6 +8,138 @@ import { dirStyle, fmt } from "../../lib/style";
 
 const fmtTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
+
+const LiveTradingControls = () => {
+  const [allocation, setAllocation] = useState(10);
+  const [leverage, setLeverage] = useState(10);
+  const [slPct, setSlPct] = useState(1.0);
+  const [tpPct, setTpPct] = useState(2.0);
+
+  return (
+    <div className="panel mb-3 p-3" data-testid="live-trading-controls">
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-head font-bold text-slate-200 tracking-wide">
+          LIVE AUTO-TRADE CONTROLS
+        </div>
+        <span className="font-mono-t text-[10px] text-amber-400 border border-amber-500/40 bg-amber-500/5 px-2 py-1 rounded-sm">
+          REAL ACCOUNT
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">ACCOUNT BALANCE</div>
+          <div className="font-mono-t text-lg text-slate-100">? USDT</div>
+        </div>
+
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">AVAILABLE</div>
+          <div className="font-mono-t text-lg text-slate-100">? USDT</div>
+        </div>
+
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">UNREALIZED PNL</div>
+          <div className="font-mono-t text-lg text-slate-400">?</div>
+        </div>
+
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">REALIZED PNL</div>
+          <div className="font-mono-t text-lg text-slate-400">?</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <div className="widget-label mb-1">AUTO-TRADE CAPITAL</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={allocation}
+              onChange={(e) => setAllocation(e.target.value)}
+              className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
+            />
+            <span className="font-mono-t text-xs text-slate-400">%</span>
+          </div>
+        </div>
+
+        <div>
+          <div className="widget-label mb-1">LEVERAGE</div>
+          <div className="flex gap-1">
+            {[10, 20, 50, 100].map((x) => (
+              <button
+                key={x}
+                onClick={() => setLeverage(x)}
+                className={`flex-1 px-2 py-1.5 border font-mono-t text-[10px] rounded-sm transition-colors ${
+                  leverage === x
+                    ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                    : "border-[#1d2635] bg-[#0d121b] text-slate-400"
+                }`}
+              >
+                {x}x
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="widget-label mb-1">POSITION NOTIONAL</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] font-mono-t text-xs text-slate-400 rounded-sm">
+            ? USDT
+          </div>
+        </div>
+
+        <div>
+          <div className="widget-label mb-1">EXECUTION</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">
+            AI CONTROLLED
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+        <div>
+          <div className="widget-label mb-1">STOP LOSS</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={slPct}
+              onChange={(e) => setSlPct(e.target.value)}
+              className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
+            />
+            <span className="font-mono-t text-xs text-slate-400">%</span>
+          </div>
+        </div>
+
+        <div>
+          <div className="widget-label mb-1">TAKE PROFIT</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={tpPct}
+              onChange={(e) => setTpPct(e.target.value)}
+              className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
+            />
+            <span className="font-mono-t text-xs text-slate-400">%</span>
+          </div>
+        </div>
+
+        <div>
+          <div className="widget-label mb-1">MODE</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">
+            LIVE AUTO-TRADE
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 font-mono-t text-[10px] text-slate-500">
+        AI determines LONG / SHORT, entry and exit. Live execution is not enabled yet.
+      </div>
+    </div>
+  );
+};
+
 const Pnl = ({ v, pct }) => {
   if (v === null || v === undefined) return <span className="text-slate-500">—</span>;
   const c = v >= 0 ? "text-emerald-400" : "text-rose-400";
@@ -135,13 +267,24 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
 
   const openTrades = trades.filter((t) => t.status === "OPEN");
   const autoOn = auto?.config?.enabled;
+  const mode = auto?.config?.mode || "PAPER";
+
+  const toggleMode = async () => {
+    const next = mode === "PAPER" ? "LIVE" : "PAPER";
+    setAuto((p) => ({ ...(p || {}), config: { ...(p?.config || {}), mode: next } }));
+    try {
+      const a = await updateAutotrade({ mode: next });
+      setAuto(a);
+      refresh();
+    } catch (e) {}
+  };
 
   return (
     <div className="mt-4" data-testid="paper-panel">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-2 px-0.5">
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-emerald-400" />
-          <span className="font-head font-bold text-slate-200 tracking-wide text-lg">PAPER TRADING</span>
+          <span className="font-head font-bold text-slate-200 tracking-wide text-lg">{mode === "LIVE" ? "LIVE TRADING" : "PAPER TRADING"}</span>
           <span className="widget-label">Persistent · Simulated · Auto SL/TP</span>
         </div>
 
@@ -160,6 +303,19 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
               <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-black transition-all ${autoOn ? "left-4" : "left-0.5"}`} />
             </span>
             <span className={autoOn ? "text-emerald-400" : "text-slate-500"}>{autoOn ? "ON" : "OFF"}</span>
+          </button>
+
+          <button
+            onClick={toggleMode}
+            data-testid="trading-mode-toggle"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border font-mono-t text-[11px] transition-colors ${
+              mode === "PAPER"
+                ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300"
+                : "border-amber-500/60 bg-amber-500/10 text-amber-300"
+            }`}
+          >
+            <span className="text-slate-400">MODE</span>
+            <span>{mode}</span>
           </button>
 
           <button
@@ -182,6 +338,8 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
           {auto.state?.last_reason ? ` (${auto.state.last_reason})` : ""}
         </div>
       )}
+
+      {mode === "LIVE" && <LiveTradingControls />}
 
       {/* stats */}
       {stats && (
