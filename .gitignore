@@ -94,3 +94,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+*.db
+*.db-shm
+*.db-wal
