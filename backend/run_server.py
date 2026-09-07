@@ -39,24 +39,46 @@ def _default_data_dir() -> Path:
     return Path.home() / ".local" / "share" / "mib-trader"
 
 
+def _is_frozen() -> bool:
+    """True only when running as a PyInstaller-packaged executable, not
+    when run from source via `python run_server.py`. This distinction is
+    the whole fix: the AppData redirect below makes sense for a packaged
+    .exe (whose working directory is a temp extraction folder that
+    disappears), but actively breaks dev-mode source runs by silently
+    pointing at a different, empty database than the one sitting right
+    next to the code with all your actual accumulated history."""
+    return getattr(sys, "frozen", False)
+
+
 def _ensure_defaults() -> None:
-    data_dir = _default_data_dir()
-    data_dir.mkdir(parents=True, exist_ok=True)
+    if _is_frozen():
+        data_dir = _default_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("MARKET_DB_PATH", str(data_dir / "market_data.db"))
 
-    os.environ.setdefault("MARKET_DB_PATH", str(data_dir / "market_data.db"))
-    os.environ.setdefault("CORS_ORIGINS", "tauri://localhost,http://localhost:1420")
+        # server.py calls load_dotenv() against a path next to itself,
+        # which is meaningless inside a frozen bundle. If the desktop host
+        # wrote a real .env-style file into the data dir, load it from
+        # there instead.
+        env_file = data_dir / ".env"
+        if env_file.exists():
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(env_file)
+            except Exception:
+                pass
+    else:
+        # Running from source: keep the database exactly where it's
+        # always lived — right next to this file, in backend/. This
+        # matches the original (pre-desktop-packaging) behavior, and is
+        # where all real accumulated candle history, paper trades, and
+        # logged backtest runs actually are. server.py's own
+        # load_dotenv(ROOT_DIR / '.env') already handles .env loading for
+        # this case, so nothing extra is needed here.
+        local_db = Path(__file__).resolve().parent / "market_data.db"
+        os.environ.setdefault("MARKET_DB_PATH", str(local_db))
 
-    # server.py calls load_dotenv() against a path next to itself, which
-    # is meaningless inside a frozen bundle. If the desktop host wrote a
-    # real .env-style file into the data dir (for locally-testing this
-    # binary outside Tauri), load it from there instead.
-    env_file = data_dir / ".env"
-    if env_file.exists():
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(env_file)
-        except Exception:
-            pass
+    os.environ.setdefault("CORS_ORIGINS", "tauri://localhost,http://localhost:1420,http://localhost:3000")
 
 
 def main() -> None:

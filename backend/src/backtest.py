@@ -36,9 +36,9 @@ def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict) -> Dict:
 
 
 def run_backtest(timeframe: str, lookback: int = 150, forward: int = 8, step: int = 3) -> Dict:
-    lookback = max(20, min(int(lookback), 400))
+    lookback = max(20, min(int(lookback), 2000))
     forward = max(1, min(int(forward), 48))
-    step = max(1, min(int(step), 10))
+    step = max(1, min(int(step), 20))
 
     need = ANALYSIS_LOOKBACK + lookback + forward
     candles = dao.read_candles(timeframe, limit=need)

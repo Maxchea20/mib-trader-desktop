@@ -1,75 +1,384 @@
-"""AGENT 1 — MARKET STRUCTURE.
-Detects HH/HL/LH/LL, Break of Structure (BOS) and Change of Character (CHoCH)
-to determine structural direction.
 """
-import numpy as np
-from ..contract import AgentResult, LONG, SHORT, NEUTRAL, neutral, clamp
-from ..indicators import arrays, find_pivots
+AGENT 1 — MARKET STRUCTURE.
+
+Consumes the shared MarketState structure map.
+
+The MarketState builder is the single source of truth for:
+- HH / HL / LH / LL
+- structural regime
+- BOS / CHoCH
+- swing strength
+- structural break distance
+- support / resistance location
+
+This agent converts that shared information into the standard
+AgentResult contract consumed by the Brain.
+"""
+
+from typing import Optional
+
+from ..contract import (
+    AgentResult,
+    LONG,
+    SHORT,
+    NEUTRAL,
+    neutral,
+    clamp,
+)
+from ..market_state.builder import build_market_state
+
 
 AGENT_ID = "market_structure"
 
 
-def analyze(candles, timeframe: str) -> AgentResult:
-    if len(candles) < 30:
-        return neutral(AGENT_ID, timeframe, "Not enough candles")
-    a = arrays(candles)
-    piv = find_pivots(a["high"], a["low"], left=3, right=3)
-    highs = [p for p in piv if p["type"] == "H"]
-    lows = [p for p in piv if p["type"] == "L"]
-    if len(highs) < 2 or len(lows) < 2:
-        return neutral(AGENT_ID, timeframe, "Insufficient swing points")
+def _direction_from_structure(
+    hh: bool,
+    hl: bool,
+    lh: bool,
+    ll: bool,
+) -> str:
+    """
+    Determine structural direction from the shared HH/HL/LH/LL state.
 
-    last_highs = highs[-2:]
-    last_lows = lows[-2:]
-    hh = last_highs[-1]["price"] > last_highs[-2]["price"]
-    hl = last_lows[-1]["price"] > last_lows[-2]["price"]
-    lh = last_highs[-1]["price"] < last_highs[-2]["price"]
-    ll = last_lows[-1]["price"] < last_lows[-2]["price"]
+    Full structures have priority.
 
-    evidence = []
-    close = float(a["close"][-1])
-    last_swing_high = last_highs[-1]["price"]
-    last_swing_low = last_lows[-1]["price"]
+    Mixed structures remain neutral rather than forcing a directional
+    interpretation.
+    """
 
-    direction = NEUTRAL
-    score = 0
     if hh and hl:
-        direction, score = LONG, 2
-        evidence.append("Higher High + Higher Low → bullish structure")
-    elif lh and ll:
-        direction, score = SHORT, 2
-        evidence.append("Lower High + Lower Low → bearish structure")
-    elif hh or hl:
-        direction, score = LONG, 1
-        evidence.append("Partial bullish structure")
-    elif lh or ll:
-        direction, score = SHORT, 1
-        evidence.append("Partial bearish structure")
+        return LONG
 
-    # BOS: price closes beyond last swing high/low
-    bos = None
-    if close > last_swing_high:
-        bos = "bullish"
-        evidence.append(f"Bullish BOS: close broke swing high {last_swing_high:.1f}")
-        if direction == SHORT:
-            evidence.append("CHoCH: bearish→bullish shift")
-            direction = LONG
-        score += 1
-    elif close < last_swing_low:
-        bos = "bearish"
-        evidence.append(f"Bearish BOS: close broke swing low {last_swing_low:.1f}")
-        if direction == LONG:
-            evidence.append("CHoCH: bullish→bearish shift")
-            direction = SHORT
-        score += 1
+    if lh and ll:
+        return SHORT
 
-    confidence = clamp(45 + score * 13, 0, 95)
-    strength = clamp(score * 22, 0, 100)
+    return NEUTRAL
+
+
+def _structure_score(
+    direction: str,
+    hh: bool,
+    hl: bool,
+    lh: bool,
+    ll: bool,
+    event: str,
+) -> int:
+    """
+    Convert structural evidence into a small deterministic score.
+
+    This is intentionally separate from confidence.
+
+    The Brain later combines this AgentResult with the other agents.
+    """
+
+    if direction == LONG:
+        score = 0
+
+        if hh:
+            score += 1
+
+        if hl:
+            score += 1
+
+        if event in ("BOS", "CHoCH"):
+            score += 1
+
+        return score
+
+    if direction == SHORT:
+        score = 0
+
+        if lh:
+            score += 1
+
+        if ll:
+            score += 1
+
+        if event in ("BOS", "CHoCH"):
+            score += 1
+
+        return score
+
+    return 0
+
+
+def _confidence_from_state(
+    direction: str,
+    regime: str,
+    event: str,
+    swing_strength: float,
+    break_distance_atr: float,
+) -> float:
+    """
+    Calculate deterministic structural confidence.
+
+    Confidence reflects the quality of the structural evidence,
+    not whether an entry should happen.
+    """
+
     if direction == NEUTRAL:
-        confidence = 30
-    key_levels = [
-        {"label": "Swing High", "price": round(last_swing_high, 2), "type": "resistance"},
-        {"label": "Swing Low", "price": round(last_swing_low, 2), "type": "support"},
-    ]
-    return AgentResult(AGENT_ID, direction, confidence, strength, evidence,
-                       key_levels, timeframe, valid=True)
+        return 30.0
+
+    confidence = 45.0
+
+    # Strong structural regime.
+    if (
+        (direction == LONG and regime == "BULLISH")
+        or
+        (direction == SHORT and regime == "BEARISH")
+    ):
+        confidence += 10.0
+
+    # Structural event adds confirmation.
+    if event == "BOS":
+        confidence += 10.0
+
+    elif event == "CHoCH":
+        confidence += 8.0
+
+    # Swing significance.
+    confidence += min(float(swing_strength) * 0.12, 12.0)
+
+    # Break displacement.
+    if break_distance_atr >= 1.0:
+        confidence += 8.0
+
+    elif break_distance_atr >= 0.5:
+        confidence += 4.0
+
+    return clamp(confidence, 0.0, 95.0)
+
+
+def _build_evidence(
+    direction: str,
+    structure,
+) -> list:
+    evidence = []
+
+    hh = structure.hh
+    hl = structure.hl
+    lh = structure.lh
+    ll = structure.ll
+
+    if hh and hl:
+        evidence.append(
+            "Higher High + Higher Low → bullish structure"
+        )
+
+    elif lh and ll:
+        evidence.append(
+            "Lower High + Lower Low → bearish structure"
+        )
+
+    elif lh and hl:
+        evidence.append(
+            "Lower High + Higher Low → structural compression"
+        )
+
+    elif hh and ll:
+        evidence.append(
+            "Higher High + Lower Low → structural expansion"
+        )
+
+    else:
+        evidence.append(
+            f"Mixed structure → {structure.structure_sequence}"
+        )
+
+    event = structure.event
+
+    if event.event == "BOS":
+        if event.direction == LONG:
+            evidence.append(
+                "Bullish BOS: price broke the latest swing high"
+            )
+
+        elif event.direction == SHORT:
+            evidence.append(
+                "Bearish BOS: price broke the latest swing low"
+            )
+
+    elif event.event == "CHoCH":
+        if event.direction == LONG:
+            evidence.append(
+                "CHoCH: structure shifted from bearish to bullish"
+            )
+
+        elif event.direction == SHORT:
+            evidence.append(
+                "CHoCH: structure shifted from bullish to bearish"
+            )
+
+    if event.distance_atr > 0:
+        evidence.append(
+            f"Structural break distance: "
+            f"{event.distance_atr:.2f} ATR"
+        )
+
+    if structure.swing_high_strength > 0:
+        evidence.append(
+            f"Latest swing high strength: "
+            f"{structure.swing_high_strength:.0f}%"
+        )
+
+    if structure.swing_low_strength > 0:
+        evidence.append(
+            f"Latest swing low strength: "
+            f"{structure.swing_low_strength:.0f}%"
+        )
+
+    return evidence
+
+
+def _build_key_levels(
+    state,
+) -> list:
+    levels = []
+
+    if state.location.resistance is not None:
+        levels.append(
+            {
+                "label": "Swing High",
+                "price": round(
+                    state.location.resistance,
+                    2,
+                ),
+                "type": "resistance",
+            }
+        )
+
+    if state.location.support is not None:
+        levels.append(
+            {
+                "label": "Swing Low",
+                "price": round(
+                    state.location.support,
+                    2,
+                ),
+                "type": "support",
+            }
+        )
+
+    return levels
+
+
+def analyze(
+    candles,
+    timeframe: str,
+    market_state: Optional[object] = None,
+) -> AgentResult:
+    """
+    Analyze market structure using the shared MarketState.
+
+    `market_state` is optional for backwards compatibility.
+
+    If it is not supplied, the agent builds one locally from the same
+    candles. This allows existing callers/tests to continue working
+    while the main engine migrates to explicitly shared state.
+    """
+
+    if len(candles) < 30:
+        return neutral(
+            AGENT_ID,
+            timeframe,
+            "Not enough candles",
+        )
+
+    try:
+        state = (
+            market_state
+            if market_state is not None
+            else build_market_state(
+                candles,
+                symbol="UNKNOWN",
+                timeframe=timeframe,
+            )
+        )
+
+    except Exception as exc:
+        return neutral(
+            AGENT_ID,
+            timeframe,
+            f"MarketState error: {exc}",
+        )
+
+    structure = state.structure
+
+    direction = _direction_from_structure(
+        hh=structure.hh,
+        hl=structure.hl,
+        lh=structure.lh,
+        ll=structure.ll,
+    )
+
+    event = structure.event.event
+
+    score = _structure_score(
+        direction=direction,
+        hh=structure.hh,
+        hl=structure.hl,
+        lh=structure.lh,
+        ll=structure.ll,
+        event=event,
+    )
+
+    if direction == LONG:
+        swing_strength = structure.swing_high_strength
+
+    elif direction == SHORT:
+        swing_strength = structure.swing_low_strength
+
+    else:
+        swing_strength = max(
+            structure.swing_high_strength,
+            structure.swing_low_strength,
+        )
+
+    confidence = _confidence_from_state(
+        direction=direction,
+        regime=structure.regime,
+        event=event,
+        swing_strength=swing_strength,
+        break_distance_atr=structure.break_distance_atr,
+    )
+
+    evidence = _build_evidence(
+        direction=direction,
+        structure=structure,
+    )
+
+    evidence.append(
+        f"Market phase: {state.market_phase}"
+    )
+
+    evidence.append(
+        f"Range position: "
+        f"{state.volatility.range_position_pct:.1f}%"
+    )
+
+    key_levels = _build_key_levels(state)
+
+    strength = clamp(
+        score * 22.0
+        + min(swing_strength * 0.20, 20.0),
+        0.0,
+        100.0,
+    )
+
+    if direction == NEUTRAL:
+        strength = clamp(
+            min(swing_strength * 0.20, 30.0),
+            0.0,
+            100.0,
+        )
+
+    return AgentResult(
+        AGENT_ID,
+        direction,
+        round(confidence, 1),
+        round(strength, 1),
+        evidence,
+        key_levels,
+        timeframe,
+        valid=True,
+    )

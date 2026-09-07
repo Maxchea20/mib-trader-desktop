@@ -9,9 +9,10 @@ from .. import settings
 from ..contract import LONG, SHORT
 
 
-def detect_conflict(agents: List, bias: str) -> Dict:
-    CONFLICT = settings.conflict()
-    AGENT_WEIGHTS = settings.weights()
+def detect_conflict(agents: List, bias: str, weights_override: Dict = None,
+                     conflict_override: Dict = None) -> Dict:
+    CONFLICT = conflict_override if conflict_override is not None else settings.conflict()
+    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
     long_w = 0.0
     short_w = 0.0
     strong_long = []

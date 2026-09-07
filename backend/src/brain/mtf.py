@@ -9,10 +9,11 @@ from .. import settings
 from ..contract import LONG, SHORT, NEUTRAL
 
 
-def regime_from_agents(agents_by_tf: Dict[str, List]) -> Dict:
+def regime_from_agents(agents_by_tf: Dict[str, List], weights_override: Dict = None,
+                        htf_gate_override: Dict = None) -> Dict:
     """Compute HTF regime from agent outputs on 4h and 1d."""
-    HTF_GATE = settings.htf_gate()
-    AGENT_WEIGHTS = settings.weights()
+    HTF_GATE = htf_gate_override if htf_gate_override is not None else settings.htf_gate()
+    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
     tf_scores = {}
     for tf, agents in agents_by_tf.items():
         num = 0.0
@@ -46,9 +47,9 @@ def regime_from_agents(agents_by_tf: Dict[str, List]) -> Dict:
     }
 
 
-def apply_gate(ltf_bias: str, regime: str) -> Dict:
+def apply_gate(ltf_bias: str, regime: str, htf_gate_override: Dict = None) -> Dict:
     """Return the extra requirements imposed by the HTF gate on an LTF trade."""
-    HTF_GATE = settings.htf_gate()
+    HTF_GATE = htf_gate_override if htf_gate_override is not None else settings.htf_gate()
     extra_score = 0.0
     extra_conf = 0.0
     relation = "neutral"

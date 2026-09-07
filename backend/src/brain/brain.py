@@ -14,13 +14,13 @@ from .conflict import detect_conflict
 from .mtf import apply_gate
 
 
-def _base_consensus(agents: List) -> Dict:
+def _base_consensus(agents: List, weights_override: Dict = None) -> Dict:
     """Base Consensus Score = Σ(direction × confidence × weight) / Σ weights."""
     num = 0.0
     den = 0.0
     contributions = []
     active = 0
-    AGENT_WEIGHTS = settings.weights()
+    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
     for res in agents:
         if not res.valid:
             continue
@@ -39,10 +39,12 @@ def _base_consensus(agents: List) -> Dict:
             "sum_weights": round(den, 2), "contributions": contributions}
 
 
-def decide(agents: List, price: float, timeframe: str, htf: Dict) -> Dict:
-    AGENT_WEIGHTS = settings.weights()
-    ENTRY = settings.entry()
-    base = _base_consensus(agents)
+def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_override: Dict = None,
+           entry_override: Dict = None, conflict_override: Dict = None,
+           htf_gate_override: Dict = None) -> Dict:
+    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
+    ENTRY = entry_override if entry_override is not None else settings.entry()
+    base = _base_consensus(agents, weights_override)
     consensus = base["base_consensus"]
 
     # PHASE F — directional bias
@@ -58,14 +60,14 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict) -> Dict:
     confluence_bonus = sum(z["bonus"] for z in zones[:3])
 
     # PHASE E — conflict
-    conflict = detect_conflict(agents, bias)
+    conflict = detect_conflict(agents, bias, weights_override, conflict_override)
 
     # base confidence from |consensus| + confluence − conflict penalty
     confidence = clamp(abs(consensus) + confluence_bonus - conflict["penalty"], 0, 100)
 
     # PHASE C — HTF gate
     regime = htf.get("regime", NEUTRAL)
-    gate = apply_gate(bias, regime)
+    gate = apply_gate(bias, regime, htf_gate_override)
     entry_score_req = ENTRY["entry_min_score"] + gate["extra_score_required"]
     entry_conf_req = ENTRY["entry_min_confidence"] + gate["extra_confidence_required"]
 
@@ -83,7 +85,7 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict) -> Dict:
     # PHASE F — final state resolution
     state, why = _resolve_state(
         bias, consensus, confidence, base["active_agents"], conflict, gate,
-        entry_score_req, entry_conf_req, regime,
+        entry_score_req, entry_conf_req, regime, entry_override,
     )
 
     return {
@@ -111,8 +113,8 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict) -> Dict:
 
 
 def _resolve_state(bias, consensus, confidence, active, conflict, gate,
-                   score_req, conf_req, regime):
-    ENTRY = settings.entry()
+                   score_req, conf_req, regime, entry_override=None):
+    ENTRY = entry_override if entry_override is not None else settings.entry()
     why = []
     # AVOID conditions (explicit vetoes / poor conditions)
     if active < ENTRY["min_valid_agents"]:
@@ -140,7 +142,7 @@ def _resolve_state(bias, consensus, confidence, active, conflict, gate,
 
     # bias exists but not ready → WAIT
     if mag < score_req:
-        why.append(f"{bias} bias but consensus {consensus:+.0f} < required {score_req:.0f}")
+        why.append(f"{bias} bias but consensus strength {mag:.0f} < required {score_req:.0f}")
     if confidence < conf_req:
         why.append(f"Confidence {confidence:.0f}% < required {conf_req:.0f}%")
     if gate["relation"] == "counter-trend":

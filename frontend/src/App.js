@@ -24,6 +24,10 @@ function App() {
   const [live, setLive] = useState(null);
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
+
+  const [structureVisible, setStructureVisible] = useState(true);
+  const [fvgVisible, setFvgVisible] = useState(true);
+
   const [syncStatus, setSyncStatus] = useState(null);
   const [hoveredType, setHoveredType] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -97,14 +101,17 @@ function App() {
     loadSync();
 
     const t1 = setInterval(loadTicker, 20000);
+
     const t2 = setInterval(
       () => loadCandles(tfRef.current),
       8000
     );
+
     const t3 = setInterval(
       () => loadAnalysis(tfRef.current),
       12000
     );
+
     const t4 = setInterval(loadSync, 15000);
 
     return () => {
@@ -117,7 +124,7 @@ function App() {
     loadSync,
   ]);
 
-    // live WebSocket price feed
+  // live WebSocket price feed
   useEffect(() => {
     let closed = false;
     let reconnectTimer = null;
@@ -307,8 +314,10 @@ function App() {
 
       <main className="pt-16 px-3 pb-6 max-w-[1800px] mx-auto">
         <div className="grid grid-cols-12 gap-3">
+
           {/* LAYER 1 — market data (left) */}
           <section className="col-span-12 xl:col-span-8 flex flex-col gap-3">
+
             <div className="flex items-center justify-between px-0.5">
               <div className="flex items-center gap-2">
                 <span className="font-head font-bold text-slate-200 tracking-wide text-lg">
@@ -339,17 +348,88 @@ function App() {
               </button>
             </div>
 
-            <div className="panel h-[420px]">
+            <div className="panel h-[420px] relative">
+
+              {/* CHART OVERLAY TOGGLES */}
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
+
+                {/* STRUCTURE TOGGLE */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStructureVisible(
+                      (visible) => !visible
+                    )
+                  }
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] tracking-wide transition-colors ${
+                    structureVisible
+                      ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300"
+                      : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      structureVisible
+                        ? "bg-cyan-400"
+                        : "bg-slate-600"
+                    }`}
+                  />
+
+                  STRUCTURE{" "}
+                  {structureVisible
+                    ? "ON"
+                    : "OFF"}
+                </button>
+
+                {/* FVG TOGGLE */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFvgVisible(
+                      (visible) => !visible
+                    )
+                  }
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] tracking-wide transition-colors ${
+                    fvgVisible
+                      ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300"
+                      : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      fvgVisible
+                        ? "bg-emerald-400"
+                        : "bg-slate-600"
+                    }`}
+                  />
+
+                  FVG{" "}
+                  {fvgVisible
+                    ? "ON"
+                    : "OFF"}
+                </button>
+
+              </div>
+
               {candles.length > 0 ? (
                 <CandleChart
                   candles={candles}
                   levels={levels}
-                  fvgZones={fvgZones}
+                  fvgZones={
+                    fvgVisible
+                      ? fvgZones
+                      : []
+                  }
                   confluenceZones={
                     confluenceZones
                   }
                   livePrice={livePrice}
                   timeframe={timeframe}
+                  marketState={
+                    structureVisible
+                      ? analysis?.market_state
+                      : null
+                  }
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center widget-label">
@@ -374,6 +454,7 @@ function App() {
 
           {/* LAYER 2 — brain (right) */}
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
+
             <div className="flex items-center gap-2 px-0.5">
               <span className="font-head font-bold text-slate-200 tracking-wide text-lg">
                 BRAIN DECISION
@@ -391,6 +472,7 @@ function App() {
             <ExplainabilityPanel
               brain={analysis?.brain}
             />
+
           </section>
         </div>
 

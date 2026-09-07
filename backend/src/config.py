@@ -35,16 +35,23 @@ ANALYSIS_LOOKBACK = 320
 # --- PHASE B: Agent weights (V1 assumptions) -----------------------------
 # Higher weight == more influence on the base consensus score.
 AGENT_WEIGHTS = {
-    "market_structure": 1.4,
-    "trend": 1.3,
-    "breakout": 1.1,
-    "momentum": 1.2,
-    "volume": 1.0,
-    "support_resistance": 1.1,
-    "fibonacci": 0.8,
-    "fair_value_gap": 0.9,
-    "pattern": 0.8,
-    "elliott_wave": 0.5,   # subjective/soft input — intentionally low weight
+    # Rescaled to a 0-1 range (was 0.5-1.4) by dividing every original
+    # value by the old max (1.4, market_structure). The Brain's consensus
+    # formula is a weighted AVERAGE (Σ(dir×conf×weight)/Σweight), so only
+    # the RATIOS between weights affect behavior — dividing every weight
+    # by the same constant preserves those ratios exactly and produces
+    # mathematically identical decisions. This is a display/UX change
+    # only, not a behavioral one.
+    "market_structure": 1.0,
+    "trend": 0.9286,
+    "breakout": 0.7857,
+    "momentum": 0.8571,
+    "volume": 0.7143,
+    "support_resistance": 0.7857,
+    "fibonacci": 0.5714,
+    "fair_value_gap": 0.6429,
+    "pattern": 0.5714,
+    "elliott_wave": 0.3571,   # subjective/soft input — intentionally low weight
 }
 
 # --- PHASE C: HTF gate rules (V1 assumptions) ----------------------------

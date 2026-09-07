@@ -55,6 +55,13 @@ def snapshot():
     }
 
 
+WEIGHT_MIN = 0.0
+WEIGHT_MAX = 1.0  # matches the rescaled 0-1 default range in config.py —
+# see the comment there for why this is a pure display-range change with
+# zero effect on brain behavior, since only the ratios between weights
+# matter to the consensus formula, not their absolute scale.
+
+
 def update(payload: dict) -> dict:
     """Merge numeric overrides. Only existing keys are accepted."""
     for section in ("agent_weights", "htf_gate", "confluence", "conflict", "entry"):
@@ -68,9 +75,12 @@ def update(payload: dict) -> dict:
             if isinstance(target[k], list):
                 continue
             try:
-                target[k] = float(v)
+                num = float(v)
             except (TypeError, ValueError):
                 continue
+            if section == "agent_weights":
+                num = max(WEIGHT_MIN, min(WEIGHT_MAX, num))
+            target[k] = num
     return snapshot()
 
 
