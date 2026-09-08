@@ -75,7 +75,7 @@ def update(payload: Dict) -> Dict:
     return status()
 
 
-def _open(side: str, price: float, tf: str, brain: Dict, candles) -> None:
+def _open(side: str, price: float, tf: str, brain: Dict, candles, decision_id: Optional[str] = None) -> None:
     a = arrays(candles)
     _atr = atr(a["high"], a["low"], a["close"], 14)
     if _atr <= 0:
@@ -91,6 +91,7 @@ def _open(side: str, price: float, tf: str, brain: Dict, candles) -> None:
         notional_usd=CONFIG["notional_usd"], timeframe=tf,
         brain_state=brain.get("state", ""), consensus=brain.get("consensus_score", 0),
         confidence=brain.get("confidence", 0), note="auto-trade", source="AUTO",
+        decision_id=decision_id,
     )
 
 
@@ -114,6 +115,23 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["last_state"] = state
     STATE["last_eval_at"] = int(time.time())
 
+    # --- Decision logging: purely observational, cannot affect anything
+    # below this point. Wrapped here even though observe() already
+    # catches its own exceptions internally — defense in depth per the
+    # spec's "logging must never block the trading engine" requirement.
+    decision_id = None
+    try:
+        from .market_data import manager as _mgr
+        ticker = _mgr.live_status().get("ticker") or {}
+        from . import decision_log
+        decision_id = decision_log.logger.observe(
+            result, CONFIG["sl_atr_mult"], CONFIG["tp_atr_mult"], CONFIG["notional_usd"],
+            bid=ticker.get("bid"), ask=ticker.get("ask"),
+        )
+    except Exception:
+        pass
+    # --- end decision logging ---
+
     if CONFIG.get("mode") == "LIVE":
         STATE["last_action"] = "LIVE MODE - NO ORDER"
         STATE["last_reason"] = "Live execution is not enabled"
@@ -122,12 +140,12 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     open_auto = _open_auto()
     if state in ("LONG", "SHORT"):
         if open_auto is None:
-            _open(state, price, tf, brain, candles)
+            _open(state, price, tf, brain, candles, decision_id)
             STATE["last_action"] = f"OPEN {state}"
             STATE["last_reason"] = f"Brain {state} @ consensus {brain.get('consensus_score')}"
         elif open_auto["side"] != state:
             paper_trading.close_trade(open_auto["id"], price, "FLIP")
-            _open(state, price, tf, brain, candles)
+            _open(state, price, tf, brain, candles, decision_id)
             STATE["last_action"] = f"FLIP -> {state}"
             STATE["last_reason"] = f"Brain flipped to {state}"
         else:
@@ -137,5 +155,3 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = f"NO-TRADE ({state})"
         STATE["last_reason"] = f"Brain {state}"
     return STATE
-
-

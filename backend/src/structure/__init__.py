@@ -30,29 +30,9 @@ from ..market_state.builder import build_market_state
 
 AGENT_ID = "market_structure"
 
-
-def _direction_from_structure(
-    hh: bool,
-    hl: bool,
-    lh: bool,
-    ll: bool,
-) -> str:
-    """
-    Determine structural direction from the shared HH/HL/LH/LL state.
-
-    Full structures have priority.
-
-    Mixed structures remain neutral rather than forcing a directional
-    interpretation.
-    """
-
-    if hh and hl:
-        return LONG
-
-    if lh and ll:
-        return SHORT
-
-    return NEUTRAL
+BREAK_DISTANCE_CAP = 1.5  # ATR distance at which break-quality scoring
+# maxes out — same style/caveat as LEVEL_BREAK_ATR_CAP in the Breakout
+# agent (unvalidated, named and adjustable, not a proven-optimal number).
 
 
 def _structure_score(
@@ -139,12 +119,16 @@ def _confidence_from_state(
     # Swing significance.
     confidence += min(float(swing_strength) * 0.12, 12.0)
 
-    # Break displacement.
-    if break_distance_atr >= 1.0:
-        confidence += 8.0
-
-    elif break_distance_atr >= 0.5:
-        confidence += 4.0
+    # Break displacement — smoothly scaled by ATR-normalized distance,
+    # not a coarse step function. Previously this only granted credit at
+    # two fixed thresholds (0.5 and 1.0 ATR), meaning a 0.01 ATR break
+    # and a 0.49 ATR break received identical (zero) credit despite
+    # being meaningfully different in quality — a tiny break shouldn't
+    # get the same treatment as a break that's most of the way to a
+    # "meaningful" one. BREAK_DISTANCE_CAP is the ATR distance at which
+    # this component maxes out; same "unvalidated but named and
+    # findable" caveat as every other threshold in this codebase.
+    confidence += clamp(break_distance_atr / BREAK_DISTANCE_CAP, 0.0, 1.0) * 12.0
 
     return clamp(confidence, 0.0, 95.0)
 
@@ -308,12 +292,12 @@ def analyze(
 
     structure = state.structure
 
-    direction = _direction_from_structure(
-        hh=structure.hh,
-        hl=structure.hl,
-        lh=structure.lh,
-        ll=structure.ll,
-    )
+    # Direction now comes straight from the shared MarketState, which is
+    # the single source of truth for it (see market_state/builder.py) —
+    # this agent no longer recomputes its own separate direction from
+    # hh/hl/lh/ll, which used to silently disagree with (and override)
+    # the correctly-event-aware value builder.py had already worked out.
+    direction = structure.direction
 
     event = structure.event.event
 
@@ -375,6 +359,24 @@ def analyze(
             0.0,
             100.0,
         )
+
+    # Explicit summary line — makes the regime/direction/event
+    # separation visible directly in the evidence, not just inferable
+    # from reading the other lines. This is the exact distinction this
+    # rebuild exists to surface: regime describes the swing SHAPE,
+    # direction describes CURRENT BIAS, and a market can be, for
+    # example, structurally EXPANDING while carrying a clear SHORT bias
+    # from its most recent confirmed break — these are no longer
+    # collapsed into each other.
+    evidence.append(
+        f"Structure sequence: {structure.structure_sequence} | "
+        f"Regime: {structure.regime} | "
+        f"Latest event: {event if event != 'NONE' else 'none'} | "
+        f"Break distance: {structure.break_distance_atr:.2f} ATR | "
+        f"Direction: {direction} | "
+        f"Structural confidence: {confidence:.0f}% | "
+        f"Structural strength: {strength:.0f}%"
+    )
 
     return AgentResult(
         AGENT_ID,

@@ -64,6 +64,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE paper_trades ADD COLUMN source TEXT DEFAULT 'MANUAL'")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE paper_trades ADD COLUMN decision_id TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -84,7 +88,7 @@ def _pnl(side: str, entry: float, exit_price: float, qty: float):
 def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[float],
                tp_price: Optional[float], notional_usd: float, timeframe: str = "",
                brain_state: str = "", consensus: float = 0.0, confidence: float = 0.0,
-               note: str = "", source: str = "MANUAL") -> Dict:
+               note: str = "", source: str = "MANUAL", decision_id: Optional[str] = None) -> Dict:
     side = LONG if str(side).upper() == LONG else SHORT
     entry_price = float(entry_price)
     notional_usd = max(1.0, float(notional_usd))
@@ -100,13 +104,26 @@ def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[fl
         conn.execute(
             """INSERT INTO paper_trades
                (id, symbol, timeframe, side, status, entry_price, sl_price, tp_price,
-                qty, notional_usd, opened_at, brain_state, consensus, confidence, note, source)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                qty, notional_usd, opened_at, brain_state, consensus, confidence, note, source, decision_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tid, symbol, timeframe, side, "OPEN", entry_price, float(sl_price),
              float(tp_price), qty, notional_usd, now, brain_state, float(consensus),
-             float(confidence), note, source),
+             float(confidence), note, source, decision_id),
         )
         conn.commit()
+
+    # Observational only — never affects the trade itself, which is
+    # already fully committed above by the time this runs.
+    try:
+        from . import decision_log
+        decision_log.logger.record_trade_execution(
+            trade_id=tid, decision_id=decision_id, setup_id=None,
+            direction=side, entry_price=entry_price, position_size=notional_usd,
+            stop_loss=float(sl_price), take_profit=float(tp_price),
+        )
+    except Exception:
+        pass
+
     return get_trade(tid)
 
 
@@ -131,6 +148,16 @@ def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional
             (int(time.time()), exit_price, reason, pnl, pct, tid),
         )
         conn.commit()
+
+    try:
+        from . import decision_log
+        decision_log.logger.record_trade_outcome(
+            trade_id=tid, exit_price=exit_price, pnl=pnl, exit_reason=reason,
+            entry_price=t["entry_price"], sl_price=t.get("sl_price"),
+        )
+    except Exception:
+        pass
+
     return get_trade(tid)
 
 

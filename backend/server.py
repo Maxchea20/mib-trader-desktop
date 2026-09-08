@@ -18,6 +18,7 @@ from src import settings as runtime_settings
 from src import backtest as backtest_engine
 from src import backtest_log
 from src import backtest_walkforward
+from src import decision_log
 from src import walkforward_log
 from src import paper_trading
 from src import autotrader
@@ -401,6 +402,65 @@ async def autotrade_status():
 @api_router.put("/autotrade")
 async def autotrade_update(req: AutoTradeReq):
     return autotrader.update(req.model_dump(exclude_none=True))
+
+
+# --- Decision Logging diagnostics ------------------------------------
+# Read-only, per the spec's "backend logging comes first, no UI changes
+# yet" priority — these exist so the questions the spec cares about
+# (how many setups, how often does HTF block, which agents pass most)
+# can actually be answered, without yet building any dashboard around
+# them.
+@api_router.get("/decisions/stats")
+async def decision_stats(since_hours: int = Query(24)):
+    import time as _time
+    since_ts = int(_time.time()) - since_hours * 3600
+    return decision_log.logger.get_diagnostic_stats(since_ts)
+
+
+@api_router.get("/decisions/recent")
+async def decisions_recent(limit: int = Query(20)):
+    with decision_log.db._conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM decisions ORDER BY timestamp DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return {"decisions": [dict(r) for r in rows]}
+
+
+@api_router.get("/decisions/{decision_id}")
+async def decision_detail(decision_id: str):
+    with decision_log.db._conn() as conn:
+        decision = conn.execute(
+            "SELECT * FROM decisions WHERE decision_id=?", (decision_id,)
+        ).fetchone()
+        if decision is None:
+            return {"error": "decision_not_found"}
+        agents = conn.execute(
+            "SELECT * FROM agent_decisions WHERE decision_id=?", (decision_id,)
+        ).fetchall()
+    return {"decision": dict(decision), "agents": [dict(a) for a in agents]}
+
+
+@api_router.get("/setups/{setup_id}")
+async def setup_detail(setup_id: str):
+    with decision_log.db._conn() as conn:
+        setup = conn.execute("SELECT * FROM setups WHERE id=?", (setup_id,)).fetchone()
+        if setup is None:
+            return {"error": "setup_not_found"}
+        checkpoints = conn.execute(
+            "SELECT * FROM market_checkpoints WHERE setup_id=? ORDER BY timestamp", (setup_id,)
+        ).fetchall()
+        changes = conn.execute(
+            "SELECT * FROM market_changes WHERE setup_id=? ORDER BY timestamp", (setup_id,)
+        ).fetchall()
+        decisions = conn.execute(
+            "SELECT * FROM decisions WHERE setup_id=? ORDER BY timestamp", (setup_id,)
+        ).fetchall()
+    return {
+        "setup": dict(setup),
+        "checkpoints": [dict(c) for c in checkpoints],
+        "changes": [dict(c) for c in changes],
+        "decisions": [dict(d) for d in decisions],
+    }
 
 
 app.include_router(api_router)

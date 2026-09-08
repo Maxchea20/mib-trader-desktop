@@ -171,23 +171,20 @@ def _build_structure(
         state.ll = last_low.price < previous_low.price
 
     # ---------------------------------------------------------
-    # Structural regime
+    # Structural regime — purely from the swing SEQUENCE (HH/HL/
+    # LH/LL). This is a classification of the swing SHAPE, and is
+    # intentionally independent of directional bias — see below.
     # ---------------------------------------------------------
 
     if state.hh and state.hl:
-        state.direction = "LONG"
         state.regime = "BULLISH"
     elif state.lh and state.ll:
-        state.direction = "SHORT"
         state.regime = "BEARISH"
     elif state.lh and state.hl:
-        state.direction = "NEUTRAL"
         state.regime = "COMPRESSION"
     elif state.hh and state.ll:
-        state.direction = "NEUTRAL"
         state.regime = "EXPANSION"
     else:
-        state.direction = "NEUTRAL"
         state.regime = "TRANSITION"
 
     # ---------------------------------------------------------
@@ -214,6 +211,21 @@ def _build_structure(
     # - close must CROSS the level
     # - current structure direction determines BOS vs CHoCH
     # ---------------------------------------------------------
+
+    # REGIME != DIRECTION.
+    #
+    # A market can be structurally EXPANDING (HH+LL) or COMPRESSING
+    # (LH+HL) while still carrying a clear directional bias from its
+    # most recently confirmed break — regime describes the swing SHAPE,
+    # direction describes CURRENT BIAS, and they are genuinely
+    # independent questions. Previously this variable lived only inside
+    # the `if candles:` block below, and its final value was discarded
+    # entirely — direction was instead hardcoded to "NEUTRAL" for any
+    # regime except pure BULLISH/BEARISH, silently throwing away exactly
+    # the information this variable already tracked correctly.
+    #
+    # Equivalent to LuxAlgo's swingTrend.bias.
+    structure_direction = "NEUTRAL"
 
     events: List[StructureEvent] = []
 
@@ -242,9 +254,6 @@ def _build_structure(
 
         high_crossed = False
         low_crossed = False
-
-        # Equivalent to LuxAlgo's swingTrend.bias.
-        structure_direction = "NEUTRAL"
 
         previous_close = None
 
@@ -375,6 +384,25 @@ def _build_structure(
 
         # Keep latest useful structural events.
         state.events = events[-50:]
+
+    # ---------------------------------------------------------
+    # Direction — resolved from the latest confirmed BOS/CHoCH when one
+    # exists (that's what `structure_direction` ends up holding after
+    # the event loop above), falling back to swing-sequence inference
+    # only when no directional event has occurred at all. This is the
+    # fix: direction now reflects actual recent price action, not just
+    # which of the four swing-shape buckets the regime happens to fall
+    # into.
+    # ---------------------------------------------------------
+
+    if structure_direction != "NEUTRAL":
+        state.direction = structure_direction
+    elif state.hh and state.hl:
+        state.direction = "LONG"
+    elif state.lh and state.ll:
+        state.direction = "SHORT"
+    else:
+        state.direction = "NEUTRAL"
 
     # ---------------------------------------------------------
     # Current/latest structure event

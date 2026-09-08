@@ -163,9 +163,28 @@ def analyze(candles, timeframe: str) -> AgentResult:
         recent_high = float(np.max(high[-LOOKBACK - 1:-1]))
         recent_low = float(np.min(low[-LOOKBACK - 1:-1]))
         c = float(close[-1])
+        h_last, l_last = float(high[-1]), float(low[-1])
         pos = (c - recent_low) / max(recent_high - recent_low, 1e-9)
+
+        # A wick that crosses the level without a confirming close is
+        # real, distinct information — not the same thing as price
+        # sitting quietly mid-range. Surfacing it separately is exactly
+        # what distinguishes "an attempted breakout that got rejected"
+        # from "nothing happening," per spec sections 6/13.
+        evidence = [f"Price inside range ({recent_low:.1f}–{recent_high:.1f})"]
+        if h_last > recent_high and c <= recent_high:
+            evidence = [
+                "Bullish breakout rejection — price wicked above resistance but closed back inside range",
+                f"Resistance: {recent_high:.1f}, wick high: {h_last:.1f}, close: {c:.1f}",
+            ]
+        elif l_last < recent_low and c >= recent_low:
+            evidence = [
+                "Bearish breakdown rejection — price wicked below support but closed back inside range",
+                f"Support: {recent_low:.1f}, wick low: {l_last:.1f}, close: {c:.1f}",
+            ]
+
         return AgentResult(AGENT_ID, NEUTRAL, clamp(30 + abs(pos - 0.5) * 20, 0, 60),
-                           20, [f"Price inside range ({recent_low:.1f}–{recent_high:.1f})"],
+                           20, evidence,
                            [{"label": "Range High", "price": round(recent_high, 2), "type": "resistance"},
                             {"label": "Range Low", "price": round(recent_low, 2), "type": "support"}],
                            timeframe, valid=True)
