@@ -378,6 +378,32 @@ def analyze(
         f"Structural strength: {strength:.0f}%"
     )
 
+    # Reversal Monitor evidence — CHoCH is an early warning, not an
+    # automatic confirmation. This surfaces exactly where a candidate
+    # currently stands, separate from the structural direction/regime
+    # above, per the explicit "these are separate fields" requirement.
+    rev = structure.reversal
+    if rev.state != "NONE":
+        evidence.append(
+            f"Reversal candidate: {rev.direction} | "
+            f"CHoCH price: {rev.choch_price:.1f} | "
+            f"Broken level: {rev.broken_level:.1f}"
+        )
+        level_hold_failed = rev.state == "FAILED" and "broken" in (rev.reason or "").lower()
+        evidence.append(
+            f"Level hold: {'FAIL' if level_hold_failed else 'PASS'} | "
+            f"Follow-through: {rev.followthrough_atr:.2f} ATR | "
+            f"Retest: {'PASS' if rev.retested else 'n/a'} | "
+            f"New swing confirmed: {'YES' if rev.new_swing_confirmed else 'no'}"
+        )
+        evidence.append(
+            f"Reversal confirmation score: {rev.score:.0f}/100 | "
+            f"Reversal confidence: {rev.confidence:.0f}% | "
+            f"Reversal strength: {rev.strength:.0f}% | "
+            f"Bars since CHoCH: {rev.candles_since_choch}"
+        )
+        evidence.append(f"Reversal state: {rev.state}" + (f" ({rev.reason})" if rev.reason else ""))
+
     return AgentResult(
         AGENT_ID,
         direction,

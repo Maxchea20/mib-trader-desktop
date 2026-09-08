@@ -7,11 +7,16 @@ import numpy as np
 from .models import (
     LocationState,
     MarketState,
+    ReversalCandidate,
     StructureEvent,
     StructureState,
     SwingPoint,
     VolatilityState,
 )
+
+
+def clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
 
 
 # ---------------------------------------------------------------------
@@ -32,6 +37,25 @@ from .models import (
 PIVOT_REFERENCE_MINUTES = 75
 PIVOT_MIN_WINDOW = 3
 PIVOT_MAX_WINDOW = 15
+
+# --- Reversal Monitor V1 constants ---
+# All illustrative/unvalidated starting parameters, same caveat as every
+# other threshold in this codebase — named here so they're easy to find
+# and tune once real data exists to calibrate against.
+MAX_REVERSAL_CANDIDATE_BARS = 12  # max bars a candidate stays pending
+# before expiring as FAILED — NOT a "wait N bars then confirm" timer,
+# purely a stale-candidate safety net (see _track_reversal docstring).
+MIN_MEANINGFUL_FOLLOWTHROUGH_ATR = 0.30
+FOLLOWTHROUGH_FULL_ATR = 1.0     # follow-through score maxes out here
+LEVEL_HOLD_FULL_ATR = 0.5        # level-hold score maxes out here
+BREAK_QUALITY_FULL_ATR = 1.0     # break-quality score maxes out here
+RETEST_TOLERANCE_ATR = 0.3       # price must come back within this much
+# of the broken level (without closing through it) to count as a retest
+REVERSAL_CONFIRMATION_THRESHOLD = 70.0
+W_LEVEL_HOLD = 30.0
+W_FOLLOWTHROUGH = 25.0
+W_NEW_SWING = 30.0
+W_BREAK_QUALITY = 15.0
 
 _TIMEFRAME_MINUTES = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440,
@@ -138,6 +162,183 @@ def _calculate_swing_strength(
     strength = (distance / atr) * 20.0
 
     return float(np.clip(strength, 0.0, 100.0))
+
+
+def _track_reversal(events, swing_highs, swing_lows, high, low, close,
+                     timestamps, pivot_right: int) -> "ReversalCandidate":
+    """Reversal Monitor V1.
+
+    A CHoCH is an early warning, not a confirmed reversal. This walks the
+    SAME candle window that already produced `events` a second time,
+    tracking whatever the most recent CHoCH has done since it fired:
+    does price hold beyond the broken level, does it show real
+    follow-through, and — the requirement that actually distinguishes a
+    genuine transition from a false alarm — does a NEW confirmed swing
+    subsequently form agreeing with the new direction (a fresh Higher
+    Low after a bullish CHoCH, a fresh Lower High after a bearish one).
+
+    This is a SEPARATE, ADDITIVE pass — it does not modify, and does not
+    need to touch, the existing BOS/CHoCH detection loop at all. It only
+    reads that loop's output (`events`) plus the already-confirmed swing
+    lists, so the existing, tested detection logic is completely
+    unaffected by this addition.
+
+    Anti-lookahead: at loop position i, only candles [0..i] are ever
+    read. A swing point only counts as "known" once its own pivot_right
+    confirmation lag has passed (s.index + pivot_right <= i) — the exact
+    same confirmation-timing rule the existing event loop already uses
+    for activating swing highs/lows, applied here too so a reversal is
+    never confirmed using a swing that wouldn't actually have been known
+    yet at that point in history.
+
+    Deliberately NOT the Breakout agent's follow-through code — the
+    question here is different ("did structure actually transition,"
+    not "did price clear a level convincingly"), so this is written
+    fresh, even though the general shape (walk the given window forward
+    once, no external state needed) is the same reasonable idea.
+    """
+    n = len(close)
+    ts_to_idx = {int(ts): i for i, ts in enumerate(timestamps)}
+    event_by_idx = {}
+    for e in events:
+        if e.timestamp is not None:
+            idx = ts_to_idx.get(int(e.timestamp))
+            if idx is not None:
+                event_by_idx[idx] = e
+
+    candidate = ReversalCandidate()
+
+    for i in range(n):
+        evt = event_by_idx.get(i)
+
+        if evt is not None and evt.event == "CHoCH":
+            # A fresh CHoCH always starts a NEW candidate — structure
+            # has moved on again, so any prior still-pending candidate
+            # is superseded rather than left dangling.
+            atr_at_choch = _calculate_atr(high[:i + 1], low[:i + 1], close[:i + 1], 14) if i >= 15 else 0.0
+            candidate = ReversalCandidate(
+                state="CANDIDATE",
+                direction=evt.direction,
+                choch_timestamp=int(timestamps[i]),
+                choch_price=float(close[i]),
+                broken_level=evt.reference_price,
+                origin_structure_direction=("SHORT" if evt.direction == "LONG" else "LONG"),
+                atr_at_choch=atr_at_choch,
+                choch_distance_atr=evt.distance_atr,
+            )
+            continue  # the CHoCH candle itself isn't "subsequent" yet
+
+        if candidate.state != "CANDIDATE":
+            continue
+
+        choch_idx = ts_to_idx.get(candidate.choch_timestamp)
+        if choch_idx is None or i <= choch_idx:
+            continue
+
+        c = float(close[i])
+        candidate.candles_since_choch = i - choch_idx
+        atr_ref = candidate.atr_at_choch
+
+        if candidate.direction == "LONG":
+            excursion = c - candidate.choch_price
+            candidate.max_favorable_excursion = max(candidate.max_favorable_excursion, excursion)
+            candidate.max_adverse_excursion = min(candidate.max_adverse_excursion, excursion)
+
+            # A) Broken level hold — hard fail on close-through, per
+            # spec: "do not treat a wick alone as confirmation" applies
+            # symmetrically here — a wick below the level doesn't fail
+            # the candidate either, only a CLOSE does.
+            if c < candidate.broken_level:
+                candidate.state = "FAILED"
+                candidate.reason = "Close returned below broken LH"
+                continue
+
+            if atr_ref > 0 and not candidate.retested and (c - candidate.broken_level) / atr_ref <= RETEST_TOLERANCE_ATR:
+                candidate.retested = True
+
+            candidate.followthrough_atr = (c - candidate.choch_price) / atr_ref if atr_ref > 0 else 0.0
+        else:  # SHORT
+            excursion = candidate.choch_price - c
+            candidate.max_favorable_excursion = max(candidate.max_favorable_excursion, excursion)
+            candidate.max_adverse_excursion = min(candidate.max_adverse_excursion, excursion)
+
+            if c > candidate.broken_level:
+                candidate.state = "FAILED"
+                candidate.reason = "Close returned above broken HL"
+                continue
+
+            if atr_ref > 0 and not candidate.retested and (candidate.broken_level - c) / atr_ref <= RETEST_TOLERANCE_ATR:
+                candidate.retested = True
+
+            candidate.followthrough_atr = (candidate.choch_price - c) / atr_ref if atr_ref > 0 else 0.0
+
+        # C) New structural swing — must be CONFIRMED as of candle i
+        # (respecting the same pivot_right lag the rest of the system
+        # uses), and must itself form the correct HL/LH relative to the
+        # swing immediately before it in the sequence.
+        if not candidate.new_swing_confirmed:
+            if candidate.direction == "LONG":
+                relevant = [s for s in swing_lows if s.index > choch_idx and s.index + pivot_right <= i]
+                if relevant:
+                    newest = relevant[-1]
+                    prior = [s for s in swing_lows if s.index < newest.index]
+                    if prior and newest.price > prior[-1].price:
+                        candidate.new_swing_confirmed = True
+            else:
+                relevant = [s for s in swing_highs if s.index > choch_idx and s.index + pivot_right <= i]
+                if relevant:
+                    newest = relevant[-1]
+                    prior = [s for s in swing_highs if s.index < newest.index]
+                    if prior and newest.price < prior[-1].price:
+                        candidate.new_swing_confirmed = True
+
+        # D) Confirmation score — a quality measurement, not a
+        # replacement for the structural swing requirement below.
+        level_hold_score = clamp(
+            abs(c - candidate.broken_level) / atr_ref / LEVEL_HOLD_FULL_ATR, 0, 1
+        ) * W_LEVEL_HOLD if atr_ref > 0 else 0.0
+        followthrough_score = clamp(candidate.followthrough_atr / FOLLOWTHROUGH_FULL_ATR, 0, 1) * W_FOLLOWTHROUGH
+        new_swing_score = W_NEW_SWING if candidate.new_swing_confirmed else 0.0
+        break_quality_score = clamp(candidate.choch_distance_atr / BREAK_QUALITY_FULL_ATR, 0, 1) * W_BREAK_QUALITY
+
+        candidate.score = level_hold_score + followthrough_score + new_swing_score + break_quality_score
+
+        # Confirmation requires BOTH the score threshold AND the
+        # structural swing condition — score alone is not sufficient,
+        # per the explicit requirement that this not become "high score
+        # without the market actually having transitioned."
+        if candidate.score >= REVERSAL_CONFIRMATION_THRESHOLD and candidate.new_swing_confirmed:
+            candidate.state = "CONFIRMED"
+            candidate.reason = "Reversal confirmed"
+            continue
+
+        # Stale-candidate protection — a maximum validity window, not a
+        # blind "wait N bars then confirm" timer. Confirmation still
+        # only happens from the market-behavior conditions above; this
+        # only prevents an indefinitely-pending candidate.
+        if candidate.candles_since_choch >= MAX_REVERSAL_CANDIDATE_BARS:
+            candidate.state = "FAILED"
+            candidate.reason = "REVERSAL_CANDIDATE_EXPIRED"
+            continue
+
+    # Confidence/strength — deliberately different concepts. Confidence
+    # never jumps straight to a high number just because a CHoCH fired;
+    # it has to earn it through the score. Strength reflects the actual
+    # size of the move achieved so far (MFE), independent of how
+    # confident the evidence is that it's real.
+    if candidate.state == "CANDIDATE":
+        candidate.confidence = clamp(15.0 + candidate.score * 0.55, 0, 70)
+    elif candidate.state == "CONFIRMED":
+        candidate.confidence = clamp(50.0 + candidate.score * 0.44, 0, 94)
+    else:
+        candidate.confidence = 0.0
+
+    if candidate.atr_at_choch > 0:
+        candidate.strength = clamp(abs(candidate.max_favorable_excursion) / candidate.atr_at_choch * 25.0, 0, 100)
+    else:
+        candidate.strength = 0.0
+
+    return candidate
 
 
 def _build_structure(
@@ -621,6 +822,25 @@ def build_market_state(
     candles=candles,
     pivot_right=pivot_window,
 )
+
+    # Reversal Monitor V1 — separate, additive pass reading the events
+    # _build_structure() just produced. Never modifies anything about
+    # the existing structure/event computation above; if this ever
+    # threw, it would only affect state.structure.reversal, not
+    # direction/regime/event/hh/hl/lh/ll or the events list itself.
+    if candles and len(candles) >= 30:
+        try:
+            _ts = np.asarray([int(c["ts"]) for c in candles], dtype=np.int64)
+            structure.reversal = _track_reversal(
+                events=structure.events,
+                swing_highs=swing_highs,
+                swing_lows=swing_lows,
+                high=a["high"], low=a["low"], close=a["close"],
+                timestamps=_ts,
+                pivot_right=pivot_window,
+            )
+        except Exception:
+            pass  # reversal monitor failure must never break structure itself
 
     if swing_highs:
         structure.swing_high_strength = swing_highs[-1].strength

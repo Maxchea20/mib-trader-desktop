@@ -163,25 +163,63 @@ def analyze(candles, timeframe: str) -> AgentResult:
         recent_high = float(np.max(high[-LOOKBACK - 1:-1]))
         recent_low = float(np.min(low[-LOOKBACK - 1:-1]))
         c = float(close[-1])
+        o_last = float(open_[-1])
         h_last, l_last = float(high[-1]), float(low[-1])
+        v_last = volume
         pos = (c - recent_low) / max(recent_high - recent_low, 1e-9)
+
+        _atr_neutral = atr(high, low, close, 14)
 
         # A wick that crosses the level without a confirming close is
         # real, distinct information — not the same thing as price
         # sitting quietly mid-range. Surfacing it separately is exactly
         # what distinguishes "an attempted breakout that got rejected"
         # from "nothing happening," per spec sections 6/13.
-        evidence = [f"Price inside range ({recent_low:.1f}–{recent_high:.1f})"]
+        rejection_lines = []
         if h_last > recent_high and c <= recent_high:
-            evidence = [
+            rejection_lines = [
                 "Bullish breakout rejection — price wicked above resistance but closed back inside range",
                 f"Resistance: {recent_high:.1f}, wick high: {h_last:.1f}, close: {c:.1f}",
             ]
         elif l_last < recent_low and c >= recent_low:
-            evidence = [
+            rejection_lines = [
                 "Bearish breakdown rejection — price wicked below support but closed back inside range",
                 f"Support: {recent_low:.1f}, wick low: {l_last:.1f}, close: {c:.1f}",
             ]
+
+        # Full ATR-normalized diagnostic detail, matching the original
+        # spec's own "inside range" example — this was previously only a
+        # single generic line, even though the active LONG/SHORT path
+        # already had this level of detail. Genuinely no breakout
+        # occurred here, so there's nothing to compute Level/Displacement/
+        # Body-quality/Follow-through FROM (those describe a specific
+        # breakout candle, which doesn't exist in this branch) — Follow-
+        # through is correctly "N/A", not a fabricated zero.
+        if _atr_neutral > 0:
+            dist_to_resistance_atr = (recent_high - c) / _atr_neutral
+            dist_to_support_atr = (c - recent_low) / _atr_neutral
+            candle_range_atr = (h_last - l_last) / _atr_neutral
+            vol_z = _volume_zscore(v_last)
+            atr_series = _rolling_atr_series(high, low, close, period=14, count=21)
+            if len(atr_series) >= 2:
+                atr_baseline = float(np.mean(atr_series[:-1]))
+                atr_expansion = (_atr_neutral / atr_baseline) if atr_baseline > 0 else 1.0
+            else:
+                atr_expansion = 1.0
+        else:
+            dist_to_resistance_atr = dist_to_support_atr = candle_range_atr = vol_z = 0.0
+            atr_expansion = 1.0
+
+        evidence = (rejection_lines if rejection_lines else
+                   [f"Price inside range ({recent_low:.1f}–{recent_high:.1f})", "No confirmed breakout"])
+        evidence += [
+            f"Distance to resistance: {dist_to_resistance_atr:.2f} ATR",
+            f"Distance to support: {dist_to_support_atr:.2f} ATR",
+            f"Volume Z-score: {vol_z:+.2f}",
+            f"Candle range: {candle_range_atr:.2f} ATR",
+            f"ATR expansion: {atr_expansion:.2f}x",
+            "Follow-through: N/A",
+        ]
 
         return AgentResult(AGENT_ID, NEUTRAL, clamp(30 + abs(pos - 0.5) * 20, 0, 60),
                            20, evidence,

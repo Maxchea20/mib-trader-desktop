@@ -25,6 +25,34 @@ class StructureEvent:
 
 
 @dataclass
+class ReversalCandidate:
+    """A CHoCH is an early warning, not a confirmed reversal — this
+    tracks whether it actually develops into one. See builder.py's
+    _track_reversal() for the state machine. Separate from
+    StructureState.direction/regime/event on purpose: a market can have
+    a CANDIDATE reversal pending while its confirmed direction/regime
+    haven't changed yet."""
+    state: str = "NONE"  # NONE, CANDIDATE, CONFIRMED, FAILED
+    direction: str = "NEUTRAL"  # LONG, SHORT, NEUTRAL
+    choch_timestamp: Optional[int] = None
+    choch_price: Optional[float] = None
+    broken_level: Optional[float] = None
+    origin_structure_direction: str = "NEUTRAL"
+    atr_at_choch: float = 0.0
+    choch_distance_atr: float = 0.0
+    candles_since_choch: int = 0
+    max_favorable_excursion: float = 0.0
+    max_adverse_excursion: float = 0.0
+    followthrough_atr: float = 0.0
+    new_swing_confirmed: bool = False
+    retested: bool = False
+    score: float = 0.0
+    confidence: float = 0.0
+    strength: float = 0.0
+    reason: str = ""
+
+
+@dataclass
 class StructureState:
     direction: str = "NEUTRAL"
     regime: str = "NEUTRAL"
@@ -56,6 +84,8 @@ class StructureState:
     )
 
     events: List[StructureEvent] = field(default_factory=list)
+
+    reversal: ReversalCandidate = field(default_factory=ReversalCandidate)
 
 
 @dataclass
