@@ -202,6 +202,13 @@ class WalkForwardRunReq(BaseModel):
     # for this run only — separate from htf_timeframes above, which
     # controls WHICH timeframes feed the gate, not these numeric knobs.
     # Omit for live.
+    pivot_window_override: Optional[int] = None  # None = use the new
+    # dynamic per-timeframe swing-detection window (the live default,
+    # anchored so 15m stays at window=5, unchanged). Pass an int (e.g. 5)
+    # to force the OLD fixed window for an A/B comparison against the
+    # new dynamic default — this is a structural-detection parameter,
+    # not one of the four Settings-page panels, but gets the same
+    # test-safely-never-touches-live treatment.
 
 
 @api_router.post("/backtest/walkforward/run")
@@ -246,6 +253,7 @@ async def walkforward_run(req: WalkForwardRunReq):
         weights_override=weights, htf_timeframes=req.htf_timeframes,
         use_htf_gate=req.use_htf_gate, entry_override=entry_override,
         conflict_override=conflict_override, htf_gate_override=htf_gate_override,
+        pivot_window_override=req.pivot_window_override,
     )
     run_id = backtest_walkforward.runner.start(bt)
     return {"id": run_id, "status": "started"}

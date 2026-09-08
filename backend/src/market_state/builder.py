@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -12,6 +12,40 @@ from .models import (
     SwingPoint,
     VolatilityState,
 )
+
+
+# ---------------------------------------------------------------------
+# Dynamic pivot window
+#
+# A fixed candle-count window means something different on every
+# timeframe: 5 candles on 1m is 5 minutes of noise-filtering, but 5
+# candles on 1d is a full week. This scales the window so it represents
+# a comparable SPAN OF REAL TIME across timeframes, anchored to 15m
+# (the live trading timeframe) so nothing changes there.
+#
+# Anchor: 15m currently uses window=5, i.e. 5*15=75 minutes each side.
+# Every other timeframe solves for the candle count that covers roughly
+# that same 75-minute span, clamped to a sane range so 1m doesn't demand
+# an absurdly long wait (75 candles) and 1d doesn't collapse to under 3
+# (too few to call a real pivot).
+# ---------------------------------------------------------------------
+PIVOT_REFERENCE_MINUTES = 75
+PIVOT_MIN_WINDOW = 3
+PIVOT_MAX_WINDOW = 15
+
+_TIMEFRAME_MINUTES = {
+    "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440,
+}
+
+
+def pivot_window_for_timeframe(timeframe: str) -> int:
+    """Returns the pivot left/right window size (each side) for a given
+    timeframe. See module docstring above for the reasoning."""
+    minutes = _TIMEFRAME_MINUTES.get(timeframe)
+    if not minutes:
+        return 5  # unknown timeframe string — fall back to the old fixed default
+    raw = PIVOT_REFERENCE_MINUTES / minutes
+    return max(PIVOT_MIN_WINDOW, min(PIVOT_MAX_WINDOW, round(raw)))
 
 
 def _get_arrays(candles) -> Dict[str, np.ndarray]:
@@ -112,6 +146,7 @@ def _build_structure(
     close: float,
     atr: float,
     candles=None,
+    pivot_right: int = 5,
 ) -> StructureState:
     state = StructureState()
 
@@ -193,7 +228,13 @@ def _build_structure(
             dtype=np.int64,
         )
 
-        pivot_right = 5
+        # pivot_right now comes in as a function parameter — see the
+        # module-level pivot_window_for_timeframe() and the caller in
+        # build_market_state(). Previously this was a second, separately
+        # hardcoded `= 5` here that had to be manually kept in sync with
+        # the window passed to _find_pivots() elsewhere — an easy thing
+        # to accidentally drift out of sync. Now there's exactly one
+        # source of truth for this value.
 
         # Active structural pivots.
         active_high = None
@@ -438,6 +479,7 @@ def build_market_state(
     candles,
     symbol: str,
     timeframe: str,
+    pivot_window_override: Optional[int] = None,
 ) -> MarketState:
     if len(candles) < 30:
         raise ValueError(
@@ -464,13 +506,25 @@ def build_market_state(
 
     # ---------------------------------------------------------
     # Swing detection
+    #
+    # Window size is dynamic by default — scaled per-timeframe by
+    # pivot_window_for_timeframe() rather than a single fixed number
+    # applied everywhere (see that function's docstring for why). Pass
+    # pivot_window_override to force the OLD fixed-5 behavior instead,
+    # e.g. for an A/B backtest comparing dynamic vs fixed.
     # ---------------------------------------------------------
+
+    pivot_window = (
+        pivot_window_override
+        if pivot_window_override is not None
+        else pivot_window_for_timeframe(timeframe)
+    )
 
     pivots = _find_pivots(
         a["high"],
         a["low"],
-        left=5,
-        right=5,
+        left=pivot_window,
+        right=pivot_window,
     )
 
     swing_highs = [
@@ -537,6 +591,7 @@ def build_market_state(
     close=close,
     atr=atr,
     candles=candles,
+    pivot_right=pivot_window,
 )
 
     if swing_highs:

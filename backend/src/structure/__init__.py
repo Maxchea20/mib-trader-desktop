@@ -266,6 +266,7 @@ def analyze(
     candles,
     timeframe: str,
     market_state: Optional[object] = None,
+    pivot_window_override: Optional[int] = None,
 ) -> AgentResult:
     """
     Analyze market structure using the shared MarketState.
@@ -273,8 +274,10 @@ def analyze(
     `market_state` is optional for backwards compatibility.
 
     If it is not supplied, the agent builds one locally from the same
-    candles. This allows existing callers/tests to continue working
-    while the main engine migrates to explicitly shared state.
+    candles — in which case `pivot_window_override` lets a caller (e.g.
+    the walk-forward backtest, for an A/B test) force the OLD fixed-5
+    pivot window instead of the new per-timeframe dynamic default. Live
+    trading never sets this, so it always gets the dynamic window.
     """
 
     if len(candles) < 30:
@@ -292,6 +295,7 @@ def analyze(
                 candles,
                 symbol="UNKNOWN",
                 timeframe=timeframe,
+                pivot_window_override=pivot_window_override,
             )
         )
 

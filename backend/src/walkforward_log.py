@@ -47,6 +47,7 @@ def init_db() -> None:
                 htf_gate_json       TEXT,
                 htf_timeframes_json TEXT,
                 use_htf_gate        INTEGER,
+                pivot_window_forced INTEGER,
                 actual_days_tested  REAL,
                 data_shortfall      INTEGER,
                 trades              INTEGER,
@@ -70,6 +71,7 @@ def init_db() -> None:
             ("used_custom_entry", "INTEGER"), ("entry_json", "TEXT"),
             ("used_custom_conflict", "INTEGER"), ("conflict_json", "TEXT"),
             ("used_custom_htf_gate_values", "INTEGER"), ("htf_gate_json", "TEXT"),
+            ("pivot_window_forced", "INTEGER"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE walkforward_runs ADD COLUMN {col} {coltype}")
@@ -106,6 +108,7 @@ def record(result: Dict) -> Dict:
         "htf_gate_json": json.dumps(result.get("htf_gate_used", {})),
         "htf_timeframes_json": json.dumps(cfg.get("htf_timeframes", [])),
         "use_htf_gate": 1 if cfg.get("use_htf_gate", True) else 0,
+        "pivot_window_forced": cfg.get("pivot_window_forced"),  # None = dynamic default
         "actual_days_tested": result.get("actual_days_tested"),
         "data_shortfall": 1 if result.get("data_shortfall") else 0,
         "trades": stats.get("trades"),
@@ -125,7 +128,7 @@ def record(result: Dict) -> Dict:
                 weights_json, used_custom_entry, entry_json,
                 used_custom_conflict, conflict_json,
                 used_custom_htf_gate_values, htf_gate_json,
-                htf_timeframes_json, use_htf_gate,
+                htf_timeframes_json, use_htf_gate, pivot_window_forced,
                 actual_days_tested, data_shortfall, trades,
                 win_rate, profit_factor, avg_r, net_pnl, return_pct,
                 final_balance, note)
@@ -134,7 +137,7 @@ def record(result: Dict) -> Dict:
                        :used_custom_weights, :weights_json, :used_custom_entry,
                        :entry_json, :used_custom_conflict, :conflict_json,
                        :used_custom_htf_gate_values, :htf_gate_json,
-                       :htf_timeframes_json, :use_htf_gate,
+                       :htf_timeframes_json, :use_htf_gate, :pivot_window_forced,
                        :actual_days_tested, :data_shortfall,
                        :trades, :win_rate, :profit_factor, :avg_r,
                        :net_pnl, :return_pct, :final_balance, :note)""",

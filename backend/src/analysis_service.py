@@ -160,6 +160,7 @@ def run_agents(
     candles: List[Dict],
     timeframe: str,
     market_state=None,
+    pivot_window_override=None,
 ) -> List[AgentResult]:
     results = []
 
@@ -175,6 +176,7 @@ def run_agents(
                     candles,
                     timeframe,
                     market_state=market_state,
+                    pivot_window_override=pivot_window_override,
                 )
             else:
                 res = analyzer(candles, timeframe)

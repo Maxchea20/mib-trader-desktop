@@ -52,7 +52,8 @@ SHORT = "SHORT"
 
 def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict,
                     weights_override: Optional[Dict] = None,
-                    htf_gate_override: Optional[Dict] = None) -> Dict:
+                    htf_gate_override: Optional[Dict] = None,
+                    pivot_window_override: Optional[int] = None) -> Dict:
     """Identical approach to the existing backtest.py: slice HTF candles to
     only those at-or-before the simulated bar's timestamp, so the regime
     gate never sees the future. This is the load-bearing anti-lookahead
@@ -71,7 +72,8 @@ def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict,
     if not agents_by_tf:
         res = {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
     else:
-        by_tf = {tf: svc.run_agents(c, tf) for tf, c in agents_by_tf.items()}
+        by_tf = {tf: svc.run_agents(c, tf, pivot_window_override=pivot_window_override)
+                 for tf, c in agents_by_tf.items()}
         res = regime_from_agents(by_tf, weights_override, htf_gate_override)
     cache[key] = res
     return res
@@ -85,7 +87,8 @@ class WalkForwardBacktest:
                  htf_timeframes: Optional[List[str]] = None, use_htf_gate: bool = True,
                  entry_override: Optional[Dict[str, float]] = None,
                  conflict_override: Optional[Dict[str, float]] = None,
-                 htf_gate_override: Optional[Dict[str, float]] = None):
+                 htf_gate_override: Optional[Dict[str, float]] = None,
+                 pivot_window_override: Optional[int] = None):
         self.timeframe = timeframe
         self.days = days
         self.start_balance = start_balance
@@ -103,6 +106,13 @@ class WalkForwardBacktest:
         self.entry_override = entry_override
         self.conflict_override = conflict_override
         self.htf_gate_override = htf_gate_override
+        # None = use the new dynamic per-timeframe pivot window (the live
+        # default). Pass an int (e.g. 5) to force the OLD fixed window
+        # instead, for an A/B comparison of dynamic vs fixed swing
+        # detection — this is NOT one of the four Settings-page panels,
+        # it's a structural-detection parameter, but it gets the same
+        # "test safely, never touches live" treatment.
+        self.pivot_window_override = pivot_window_override
 
         # Independent from the live HTF_TIMEFRAMES config on purpose — this
         # lets a backtest test "what if the regime gate looked at 1h/30m
@@ -202,9 +212,9 @@ class WalkForwardBacktest:
             if len(window) < 30:
                 equity_curve.append({"ts": ts, "equity": round(balance, 2)})
                 continue
-            agents = svc.run_agents(window, tf)
+            agents = svc.run_agents(window, tf, pivot_window_override=self.pivot_window_override)
             if self.use_htf_gate:
-                htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override)
+                htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override, self.pivot_window_override)
             else:
                 htf = {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
             decision = brain_engine.decide(agents, close_price, tf, htf, self.weights_override,
@@ -255,6 +265,7 @@ class WalkForwardBacktest:
                 "used_custom_entry": self.entry_override is not None,
                 "used_custom_conflict": self.conflict_override is not None,
                 "used_custom_htf_gate_values": self.htf_gate_override is not None,
+                "pivot_window_forced": self.pivot_window_override,  # None = used the new dynamic default
                 "htf_timeframes": self.htf_timeframes,
                 "use_htf_gate": self.use_htf_gate,
             },
