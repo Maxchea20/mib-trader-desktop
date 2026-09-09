@@ -271,10 +271,10 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
         "long_evidence": base["long_evidence"],
         "short_evidence": base["short_evidence"],
         "neutral_agents": base["neutral_agents"],
-        "setup_state": "SETUP_FORMING" if setup["score"] >= 30 else "NO_SETUP",
+        "setup_state": setup["state"],
         "setup_score": setup["score"],
         "setup_detail": setup,
-        "trigger_state": "TRIGGER_PENDING" if trigger["score"] > 0 else "NO_TRIGGER",
+        "trigger_state": trigger["state"],
         "trigger_score": trigger["score"],
         "trigger_detail": trigger,
         "location_score": location["score"],
@@ -295,6 +295,11 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
 
 def _resolve_state(bias, consensus, directional_confidence, brain_confidence, active, conflict, gate,
                    score_req, conf_req, regime, setup, trigger, location, extension, entry_override=None):
+    """A genuine step-by-step walk through the decision hierarchy (spec
+    section 23) — each step can be the one that stops progress, and the
+    internal decision_state reflects exactly which step that was. The
+    external `state` (LONG/SHORT/WAIT/AVOID) is derived from this but
+    stays the unchanged 4-value contract autotrader.py depends on."""
     ENTRY = entry_override if entry_override is not None else settings.entry()
     why = []
     blocking = []
@@ -328,21 +333,44 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
         return STATE_WAIT, "NEUTRAL", why, blocking
 
     mag = abs(consensus)
+    bias_word = "LONG" if bias == LONG else "SHORT"
 
-    # STEP 7-9: trigger / location / timing — a real setup without an
-    # actual trigger is explicitly NOT an entry (spec sections 13-16)
+    # STEP 6: setup formation — a directional lean exists, but has it
+    # actually developed into a real, role-diverse setup yet?
+    if setup["state"] in ("NO_SETUP", "SETUP_FORMING"):
+        why.append(f"{bias} directional lean present (consensus {consensus:+.0f}) but setup "
+                  f"only {setup['state']} ({setup['score']:.0f}/100) — {setup['detail']}")
+        blocking.append("setup not yet developed")
+        return STATE_WAIT, f"BIAS_{bias_word}", why, blocking
+
+    # STEP 7: entry trigger — setup exists, but has an actual actionable
+    # event happened? (spec sections 13-16 — this is the core setup vs
+    # trigger distinction)
     if trigger["score"] <= 0:
-        why.append(f"{bias} setup forming (setup score {setup['score']:.0f}) but no actionable "
+        why.append(f"{bias} setup {setup['state']} (score {setup['score']:.0f}) but no actionable "
                   f"trigger has occurred yet — {trigger['detail']}")
         blocking.append("no valid entry trigger")
-        state_label = "SETUP_LONG" if bias == LONG else "SETUP_SHORT"
-        return STATE_WAIT, state_label, why, blocking
+        return STATE_WAIT, f"SETUP_{bias_word}", why, blocking
 
+    # STEP 8: location — is the trigger happening somewhere meaningful?
+    if location["score"] < 35:
+        why.append(f"{bias} trigger valid ({trigger['detail']}) but location quality is weak "
+                  f"({location['score']:.0f}/100) — {location.get('detail', '')}")
+        blocking.append("poor location")
+        return STATE_WAIT, "WAIT_POOR_LOCATION", why, blocking
+
+    # STEP 9: timing / extension — genuinely new logic (max_extension_pct
+    # previously unused anywhere in the codebase, confirmed by direct
+    # inspection)
     if extension["state"] == "EXTENDED":
-        why.append(f"{bias} trigger valid but price already extended "
-                  f"({extension.get('detail', '')})")
+        why.append(f"{bias} trigger valid but price already extended — {extension.get('detail', '')}")
         blocking.append("extended")
         return STATE_WAIT, "WAIT_EXTENDED", why, blocking
+
+    # HTF as an explicit gating step (spec section 12) — counter-trend
+    # is allowed, never a hard block, but called out on its own when
+    # it's specifically the reason the entry bar isn't cleared yet.
+    htf_is_blocking = gate["relation"] == "counter-trend" and mag < score_req
 
     # STEP 10-11: Brain confidence + entry score/confidence thresholds
     ready = mag >= score_req and directional_confidence >= conf_req
@@ -350,30 +378,32 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
         why.append(f"Consensus {consensus:+.0f} ≥ required {score_req:.0f}")
         why.append(f"Directional confidence {directional_confidence:.0f}% ≥ required {conf_req:.0f}%")
         why.append(f"Valid {bias} trigger: {trigger['detail']}")
-        why.append(f"Setup quality {setup['score']:.0f}, location {location['score']:.0f}, "
+        why.append(f"Setup quality {setup['score']:.0f} ({setup['state']}), location {location['score']:.0f}, "
                   f"Brain confidence {brain_confidence:.0f}%")
         if gate["relation"] == "aligned":
             why.append(f"Aligned with HTF regime ({regime})")
         elif gate["relation"] == "counter-trend":
             why.append(f"Counter-trend to HTF regime ({regime}) — passed the higher bar anyway")
-        state_label = "FIRE_LONG" if bias == LONG else "FIRE_SHORT"
-        return (STATE_LONG if bias == LONG else STATE_SHORT), state_label, why, blocking
+        return (STATE_LONG if bias == LONG else STATE_SHORT), f"FIRE_{bias_word}", why, blocking
 
-    # Setup + trigger exist but entry thresholds not yet met → WAIT, explained precisely
+    # Setup + trigger + location + timing all pass, but entry
+    # thresholds not yet met → WAIT, with the SPECIFIC blocking reason
+    # identified rather than a generic catch-all.
+    if htf_is_blocking:
+        why.append(f"Counter-trend to HTF regime ({regime}) — higher bar applied "
+                  f"(required {score_req:.0f}, have {mag:.0f})")
+        blocking.append("counter-trend HTF gate")
+        return STATE_WAIT, "WAIT_HTF", why, blocking
     if mag < score_req:
         msg = f"{bias} bias but consensus strength {mag:.0f} < required {score_req:.0f}"
         why.append(msg); blocking.append(msg)
     if directional_confidence < conf_req:
         msg = f"Directional confidence {directional_confidence:.0f}% < required {conf_req:.0f}%"
         why.append(msg); blocking.append(msg)
-    if gate["relation"] == "counter-trend":
-        why.append(f"Counter-trend to HTF regime ({regime}) — higher bar applied")
+        return STATE_WAIT, "WAIT_LOW_CONFIDENCE", why, blocking
     if conflict["severity"] == "moderate":
         why.append(f"Moderate conflict ({', '.join(conflict['opposing_agents'])}) reduced confidence")
-    if location["score"] < 40:
-        why.append(f"Weak location quality ({location['score']:.0f}) — {location.get('detail', '')}")
-    state_label = "VALIDATING_LONG" if bias == LONG else "VALIDATING_SHORT"
-    return STATE_WAIT, state_label, why, blocking
+    return STATE_WAIT, f"VALIDATING_{bias_word}", why, blocking
 
 
 _NAMES = {

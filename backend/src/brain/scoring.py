@@ -23,7 +23,7 @@ def setup_score(agents: List, bias: str) -> Dict:
     three DIFFERENT roles agreeing, since the former is likely the same
     underlying phenomenon described five times (section 30)."""
     if bias not in (LONG, SHORT):
-        return {"score": 0.0, "roles_aligned": [], "roles_opposed": [], "detail": "no directional bias"}
+        return {"score": 0.0, "state": "NO_SETUP", "roles_aligned": [], "roles_opposed": [], "detail": "no directional bias"}
 
     groups = ev.role_grouped_evidence(agents, exclude_agents=EXCLUDE_FROM_EXECUTION)
     aligned, opposed = [], []
@@ -40,8 +40,21 @@ def setup_score(agents: List, bias: str) -> Dict:
     avg_strength = (total_aligned_conf / len(aligned)) if aligned else 0.0
 
     score = min(100.0, breadth * 55.0 + (avg_strength / 100.0) * 45.0)
+
+    # Full setup-state progression (spec section 13) — a setup is not
+    # binary "exists or doesn't"; it develops.
+    if score < 20:
+        setup_state = "NO_SETUP"
+    elif score < 45:
+        setup_state = "SETUP_FORMING"
+    elif score < 65:
+        setup_state = "SETUP_DEVELOPING"
+    else:
+        setup_state = "SETUP_MATURE"
+
     return {
         "score": round(score, 1),
+        "state": setup_state,
         "roles_aligned": aligned,
         "roles_opposed": opposed,
         "breadth": round(breadth, 2),
@@ -56,7 +69,7 @@ def trigger_score(agents: List, bias: str) -> Dict:
     triggers count fully; this deliberately does NOT wait for the
     strongest possible confirmation state (section 15)."""
     if bias not in (LONG, SHORT):
-        return {"score": 0.0, "primary": [], "detail": "no directional bias"}
+        return {"score": 0.0, "state": "TRIGGER_PENDING", "primary": [], "detail": "no directional bias"}
 
     primary = []
     supporting = []
@@ -79,13 +92,19 @@ def trigger_score(agents: List, bias: str) -> Dict:
     # READ, not a trigger, regardless of how many agents merely agree
     # on direction (this is exactly the setup-vs-trigger distinction).
     if not primary:
-        return {"score": 0.0, "primary": [], "supporting": supporting,
+        return {"score": 0.0, "state": "TRIGGER_PENDING", "primary": [], "supporting": supporting,
                 "detail": "no agent reports an actionable trigger state"}
 
     avg_conf = total / len(primary)
     score = min(100.0, len(primary) * 20.0 + avg_conf * 0.5)
+    # CONFIRMING once more than one independent trigger agrees (follow-
+    # through/supporting evidence backing the initial trigger), else
+    # just TRIGGERED on the single-agent case — mirrors "early trigger
+    # != full confirmation" (spec section 15) at the Brain level too.
+    trigger_state = "CONFIRMING" if len(primary) >= 2 else "TRIGGERED"
     return {
         "score": round(score, 1),
+        "state": trigger_state,
         "primary": [f"{a} ({s})" for a, s, c in primary],
         "supporting": supporting,
         "detail": f"{len(primary)} agent(s) report an actionable {bias} trigger",
@@ -100,13 +119,16 @@ def location_score(agents: List, price: float, bias: str, confluence_zones: List
     re-summing key_levels independently (section 17's explicit
     "avoid double counting multiple agents describing the same level")."""
     if bias not in (LONG, SHORT) or not confluence_zones:
-        return {"score": 30.0, "detail": "no nearby confluence zone identified"}  # neutral-ish default, not zero
+        # No confluence zone found is an absence of information, not
+        # evidence of BAD location — should read as neutral, not get
+        # penalized the same way an actively unfavorable zone would.
+        return {"score": 50.0, "detail": "no nearby confluence zone identified"}
 
     relevant = [z for z in confluence_zones
                if (z["side"] == "support" and bias == LONG) or (z["side"] == "resistance" and bias == SHORT)
                or (z["side"] == "resistance" and bias == LONG) or (z["side"] == "support" and bias == SHORT)]
     if not relevant:
-        return {"score": 30.0, "detail": "no confluence zone on the relevant side"}
+        return {"score": 50.0, "detail": "no confluence zone on the relevant side"}
 
     best = max(relevant, key=lambda z: z["count"])
     dist_pct = abs(best["price"] - price) / max(price, 1e-9) * 100

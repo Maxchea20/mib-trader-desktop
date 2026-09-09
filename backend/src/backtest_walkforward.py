@@ -225,9 +225,16 @@ class WalkForwardBacktest:
                 htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override, self.pivot_window_override)
             else:
                 htf = {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
+            # Same ATR the rest of this backtest already uses elsewhere
+            # (see the existing `arrays`/`atr` import) — this is what
+            # lets Brain's extension/timing check actually run in
+            # backtest, rather than always defaulting to "assumed
+            # timely" (which is what happens if atr_value is omitted).
+            _w = arrays(window)
+            bar_atr = atr(_w["high"], _w["low"], _w["close"], 14) if len(window) >= 15 else 0.0
             decision = brain_engine.decide(agents, close_price, tf, htf, self.weights_override,
                                            self.entry_override, self.conflict_override,
-                                           self.htf_gate_override)
+                                           self.htf_gate_override, atr_value=bar_atr)
             state = decision["state"]
 
             # --- 3. Same open/flip/hold logic as autotrader.py's live loop. ---

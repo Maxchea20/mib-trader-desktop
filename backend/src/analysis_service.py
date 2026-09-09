@@ -256,6 +256,7 @@ def full_analysis(timeframe: str) -> Dict:
         price,
         timeframe,
         htf,
+        atr_value=market_state.volatility.atr,
     )
 
     return _native({

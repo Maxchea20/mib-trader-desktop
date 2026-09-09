@@ -13,6 +13,7 @@ from .market_data import data_access as dao
 from . import analysis_service as svc
 from .brain import brain as brain_engine
 from .brain.mtf import regime_from_agents
+from .indicators import arrays, atr
 
 
 def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict) -> Dict:
@@ -67,7 +68,9 @@ def run_backtest(timeframe: str, lookback: int = 150, forward: int = 8, step: in
         price = float(window[-1]["close"])
         agents = svc.run_agents(window, timeframe)
         htf = _htf_regime_at(window[-1]["ts"], htf_candles, cache)
-        decision = brain_engine.decide(agents, price, timeframe, htf)
+        _w = arrays(window)
+        bar_atr = atr(_w["high"], _w["low"], _w["close"], 14) if len(window) >= 15 else 0.0
+        decision = brain_engine.decide(agents, price, timeframe, htf, atr_value=bar_atr)
         state = decision["state"]
         fwd = float(candles[i + forward]["close"])
         ret = (fwd - price) / price * 100.0
