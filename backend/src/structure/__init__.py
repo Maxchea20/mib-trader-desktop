@@ -404,6 +404,43 @@ def analyze(
         )
         evidence.append(f"Reversal state: {rev.state}" + (f" ({rev.reason})" if rev.reason else ""))
 
+    # BOS Recovery / Early Reversal Detection — a SEPARATE, earlier-
+    # firing system from the CHoCH-based candidate above. This is where
+    # "EARLY != FULL CONFIRMATION" gets surfaced.
+    br = structure.bos_recovery
+    if br.state != "NONE":
+        evidence.append(
+            f"Bearish BOS @ {br.broken_bos_level:.1f}" if br.direction == "LONG"
+            else f"Bullish BOS @ {br.broken_bos_level:.1f}"
+        )
+        if br.bos_recovery:
+            evidence.append(
+                f"BOS Recovery: {'ACTIVE' if br.state not in ('FAILED', 'EXPIRED') else br.state} | "
+                f"Recovery price: {br.bos_recovery_price:.1f} | "
+                f"Age: {br.bos_recovery_age_bars} bars"
+            )
+            evidence.append(
+                f"Recovery quality: {br.recovery_quality_score:.0f}/100 | "
+                f"Penetration: {br.recovery_penetration_atr:.2f} ATR | "
+                f"Body: {br.recovery_body_quality:.0%} | "
+                f"Displacement: {br.recovery_displacement_atr:.2f} ATR | "
+                f"Volume Z: {br.recovery_volume_quality:+.2f}"
+            )
+        if br.reversal_triggered:
+            direction_word = "LONG" if br.direction == "LONG" else "SHORT"
+            evidence.append(
+                f"🟢 EARLY {direction_word} REVERSAL TRIGGER | "
+                f"Trigger confidence: {br.reversal_trigger_confidence:.0f}%"
+            )
+            evidence.append(
+                f"Confirmation developing: {br.reversal_confirmation_score:.0f}/100 | "
+                f"Confirmation confidence: {br.reversal_confirmation_confidence:.0f}% | "
+                f"Retest: {'PASS' if br.recovery_retest else 'pending'} | "
+                f"Bars since trigger: {br.bars_since_trigger}"
+            )
+        if br.state in ("FAILED", "EXPIRED") and br.reason:
+            evidence.append(f"{br.state}: {br.reason}")
+
     return AgentResult(
         AGENT_ID,
         direction,

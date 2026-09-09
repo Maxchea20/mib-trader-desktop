@@ -63,6 +63,76 @@ W_RANGE = 10.0
 W_ATR_EXPANSION = 10.0
 W_FOLLOWTHROUGH = 10.0
 
+# --- Breakout Lifecycle V2 constants ---
+# Illustrative starting values, same caveat as every threshold in this
+# codebase — a starting point for later research, not validated.
+BREAKOUT_MAX_LIFETIME_BARS = 12  # stale-protection only, NOT an entry
+# timer — same style as MAX_REVERSAL_CANDIDATE_BARS / BOS_RECOVERY_MAX_BARS
+# in Market Structure.
+PULLBACK_MIN_ATR = 0.20      # minimum retracement from the best point
+# reached so far, before it counts as a genuine pullback rather than noise
+RETEST_ZONE_ATR = 0.30       # how close to the broken level counts as
+# "returned to retest it"
+CONTINUATION_MIN_ATR = 0.50  # how far beyond the breakout candle's own
+# close counts as genuine continuation
+EXHAUSTION_LOOKBACK = 3      # candles examined for the shrinking-
+# displacement/fading-volume exhaustion check
+
+W_LIFECYCLE_INITIAL = 30.0
+W_LIFECYCLE_PULLBACK = 10.0
+W_LIFECYCLE_RETEST = 20.0
+W_LIFECYCLE_HOLD = 20.0
+W_LIFECYCLE_CONTINUATION = 20.0
+
+
+class BreakoutLifecycle:
+    """Post-breakout state machine: does price actually DO anything
+    healthy after breaking the level, or does it fail?
+
+    NONE -> BREAKOUT_DETECTED -> [PULLBACK] -> [RETEST] -> LEVEL_HOLD ->
+    CONTINUATION, or FAILED (a decisive close back through the level, at
+    any point) or EXPIRED (stale — no meaningful development within
+    BREAKOUT_MAX_LIFETIME_BARS).
+
+    PULLBACK and RETEST are optional stepping stones, not requirements —
+    a strong breakout can go straight to CONTINUATION without ever
+    meaningfully pulling back (spec section 25A), matching Test 12's
+    "immediate continuation without retest."
+
+    Plain class, not @dataclass, to avoid adding a dataclasses import
+    dependency to this file for one small addition — same information,
+    just written directly.
+    """
+    def __init__(self):
+        self.state = "NONE"
+        self.direction = "NEUTRAL"
+        self.breakout_level = None
+        self.breakout_timestamp = None
+        self.breakout_price = None
+        self.breakout_quality_score = 0.0
+        self.bars_since_breakout = 0
+
+        self.pullback_detected = False
+        self.pullback_depth_atr = 0.0
+        self.pullback_timestamp = None
+
+        self.retest_detected = False
+        self.retest_distance_atr = 0.0
+        self.retest_timestamp = None
+        self.bars_since_retest = 0
+
+        self.level_hold = False
+        self.continuation_detected = False
+        self.continuation_distance_atr = 0.0
+
+        self.breakout_exhaustion = False
+        self.breakout_failed = False
+        self.breakout_failure_reason = ""
+        self.breakout_expired = False
+
+        self.breakout_lifecycle_score = 0.0
+        self.breakout_lifecycle_confidence = 0.0
+
 
 def _volume_zscore(volume: np.ndarray) -> float:
     """Z-score of the LATEST element in the given array against the
@@ -150,12 +220,227 @@ def _find_active_breakout(high, low, close, n):
     return None
 
 
+def _track_breakout_lifecycle(high, low, close, open_, volume, timestamps) -> "BreakoutLifecycle":
+    """Breakout Agent V2 — post-breakout lifecycle.
+
+    Separate, additive pass over the SAME candle window already used for
+    origin detection above — reuses _range_as_of() for the exact same
+    anti-lookahead re-detection logic, just walked over a much longer
+    horizon (BREAKOUT_MAX_LIFETIME_BARS) than the small
+    MAX_FOLLOWTHROUGH_LOOKBACK window used for the existing origin score.
+
+    A fresh breakout always supersedes whatever lifecycle was being
+    tracked (spec section 22, "newer breakout priority") — exactly the
+    same rule already used in Market Structure's BOS Recovery tracker.
+
+    State only ever progresses forward through the happy path
+    (BREAKOUT_DETECTED -> PULLBACK -> RETEST -> LEVEL_HOLD ->
+    CONTINUATION) or exits via FAILED/EXPIRED — this version does not
+    regress a CONTINUATION back down to PULLBACK if price dips again
+    later. That's a deliberate v1 scope decision: prove the core
+    lifecycle and failure path first, per the spec's own final
+    instruction, rather than also handling every possible re-weakening
+    pattern in the first pass.
+    """
+    n = len(close)
+    ts_to_idx = {int(t): i for i, t in enumerate(timestamps)}
+    tracked = None  # {origin_idx, direction, level, atr, breakout_price, max_favorable}
+    result = BreakoutLifecycle()
+
+    STATE_ORDER = ["BREAKOUT_DETECTED", "PULLBACK", "RETEST", "LEVEL_HOLD", "CONTINUATION"]
+
+    def _advance(new_state):
+        if STATE_ORDER.index(new_state) > STATE_ORDER.index(result.state):
+            result.state = new_state
+
+    for i in range(LOOKBACK, n):
+        as_of_high, as_of_low = _range_as_of(high, low, i)
+        c = float(close[i])
+        is_fresh_break = as_of_high is not None and (c > as_of_high or c < as_of_low)
+
+        if is_fresh_break:
+            direction = LONG if c > as_of_high else SHORT
+            # "Newer breakout priority" (spec section 22) means a
+            # genuinely different structural context — NOT every new
+            # local high a strong continuation naturally makes along the
+            # way. If a lifecycle in the SAME direction is already
+            # actively developing, a fresh same-direction break here is
+            # just that move continuing, which the CONTINUATION state
+            # below already captures — resetting back to
+            # BREAKOUT_DETECTED here would be throwing away real
+            # progress over something that isn't actually a new event.
+            # Only reset when the tracked lifecycle is untracked,
+            # opposite-direction, or already terminal (FAILED/EXPIRED).
+            should_supersede = (
+                tracked is None
+                or tracked["direction"] != direction
+                or result.state in ("FAILED", "EXPIRED")
+            )
+            if should_supersede:
+                level = as_of_high if direction == LONG else as_of_low
+                atr_at_origin = atr(high[:i + 1], low[:i + 1], close[:i + 1], 14) if i >= 15 else 0.0
+                tracked = {"origin_idx": i, "direction": direction, "level": level,
+                          "atr": atr_at_origin, "breakout_price": c, "max_favorable": c}
+                result = BreakoutLifecycle()
+                result.state = "BREAKOUT_DETECTED"
+                result.direction = direction
+                result.breakout_level = level
+                result.breakout_timestamp = int(timestamps[i])
+                result.breakout_price = c
+                continue
+            # else: same-direction continuation of an already-tracked
+            # lifecycle — fall through to the normal per-candle update
+            # below instead of resetting.
+
+        if tracked is None:
+            continue
+
+        atr_ref = tracked["atr"]
+        if atr_ref <= 0:
+            continue
+
+        result.bars_since_breakout = i - tracked["origin_idx"]
+        long_dir = tracked["direction"] == LONG
+
+        if long_dir:
+            tracked["max_favorable"] = max(tracked["max_favorable"], c)
+        else:
+            tracked["max_favorable"] = min(tracked["max_favorable"], c)
+
+        # --- Hard failure: decisive close back through the level ---
+        failed = (c < tracked["level"]) if long_dir else (c > tracked["level"])
+        if failed:
+            result.state = "FAILED"
+            result.breakout_failed = True
+            result.breakout_failure_reason = (
+                "Price closed below broken resistance after retest" if long_dir
+                else "Price closed above broken support after retest"
+            )
+            tracked = None
+            continue
+
+        # --- Pullback: meaningful retracement from the best point reached ---
+        pullback_depth_atr = abs(tracked["max_favorable"] - c) / atr_ref
+        if pullback_depth_atr >= PULLBACK_MIN_ATR:
+            _advance("PULLBACK")
+            if not result.pullback_detected:
+                result.pullback_detected = True
+                result.pullback_timestamp = int(timestamps[i])
+            result.pullback_depth_atr = round(pullback_depth_atr, 3)
+
+        # --- Retest: price has returned close to the broken level itself ---
+        retest_distance_atr = abs(c - tracked["level"]) / atr_ref
+        if retest_distance_atr <= RETEST_ZONE_ATR:
+            _advance("RETEST")
+            if not result.retest_detected:
+                result.retest_detected = True
+                result.retest_timestamp = int(timestamps[i])
+            result.retest_distance_atr = round(retest_distance_atr, 3)
+
+        if result.retest_detected:
+            result.bars_since_retest = i - ts_to_idx.get(result.retest_timestamp, i)
+
+        # --- Level hold: after a retest, price moves away from the level
+        # again without having failed --- (only meaningful once a retest
+        # has actually happened; a breakout that never came back to
+        # retest can't yet be said to have "held" a retest that didn't occur)
+        if result.retest_detected and retest_distance_atr > RETEST_ZONE_ATR:
+            moved_away = (c > tracked["level"]) if long_dir else (c < tracked["level"])
+            if moved_away:
+                _advance("LEVEL_HOLD")
+                result.level_hold = True
+
+        # --- Continuation: meaningful extension beyond the ORIGINAL
+        # breakout candle's own close, in the breakout direction. This is
+        # reachable directly from BREAKOUT_DETECTED too (no forced retest
+        # requirement) — spec section 25A / Test 12. ---
+        continuation_distance_atr = (c - tracked["breakout_price"]) / atr_ref if long_dir \
+            else (tracked["breakout_price"] - c) / atr_ref
+        if continuation_distance_atr >= CONTINUATION_MIN_ATR:
+            _advance("CONTINUATION")
+            result.continuation_detected = True
+            result.continuation_distance_atr = round(continuation_distance_atr, 3)
+
+        # --- Exhaustion: valid but weakening — shrinking recent bodies,
+        # even while technically still in CONTINUATION/LEVEL_HOLD. A
+        # separate flag, not its own state, per spec section 20. ---
+        if i >= EXHAUSTION_LOOKBACK:
+            recent_bodies = [abs(close[k] - open_[k]) for k in range(i - EXHAUSTION_LOOKBACK + 1, i + 1)]
+            if len(recent_bodies) >= 2 and recent_bodies[-1] < recent_bodies[0] * 0.5:
+                result.breakout_exhaustion = True
+
+        # --- Expiry: stale, no meaningful development within the max
+        # lifetime window. Does not override an already-reached
+        # LEVEL_HOLD/CONTINUATION — those are meaningful outcomes even if
+        # they took a while to develop. ---
+        if result.bars_since_breakout >= BREAKOUT_MAX_LIFETIME_BARS and result.state in ("BREAKOUT_DETECTED", "PULLBACK", "RETEST"):
+            result.state = "EXPIRED"
+            result.breakout_expired = True
+            tracked = None
+            continue
+
+        # --- Lifecycle score (0-100), per spec section 16 ---
+        initial_score = W_LIFECYCLE_INITIAL  # the origin candle already passed the existing 7-factor scoring to get here
+        pullback_score = W_LIFECYCLE_PULLBACK if (result.pullback_detected and PULLBACK_MIN_ATR <= result.pullback_depth_atr <= 1.5) else 0.0
+        retest_score = clamp(1.0 - (result.retest_distance_atr / RETEST_ZONE_ATR), 0, 1) * W_LIFECYCLE_RETEST if result.retest_detected else 0.0
+        hold_score = W_LIFECYCLE_HOLD if result.level_hold else 0.0
+        continuation_score = clamp(result.continuation_distance_atr / (CONTINUATION_MIN_ATR * 2), 0, 1) * W_LIFECYCLE_CONTINUATION if result.continuation_detected else 0.0
+
+        result.breakout_lifecycle_score = round(initial_score + pullback_score + retest_score + hold_score + continuation_score, 1)
+        result.breakout_lifecycle_confidence = round(clamp(30.0 + result.breakout_lifecycle_score * 0.6, 0, 94), 1)
+
+    return result
+
+
+def _lifecycle_evidence(lc: "BreakoutLifecycle") -> list:
+    """Builds the lifecycle evidence lines matching the format in spec
+    section 28, from whatever the tracker actually found — never
+    inventing a stage that wasn't reached."""
+    if lc.state == "NONE":
+        return []
+    dir_word = "Bullish" if lc.direction == LONG else "Bearish"
+    lines = [f"{dir_word} breakout lifecycle: {lc.state}",
+             f"Breakout level: {lc.breakout_level:.1f} ({lc.bars_since_breakout} bar(s) ago)"]
+    if lc.pullback_detected:
+        lines.append(f"Pullback detected: {lc.pullback_depth_atr:.2f} ATR depth")
+    if lc.retest_detected:
+        lines.append(f"Retest: {lc.retest_distance_atr:.2f} ATR from level, {lc.bars_since_retest} bar(s) since")
+    if lc.level_hold:
+        lines.append("Level hold: broken level respected on retest")
+    if lc.continuation_detected:
+        lines.append(f"Continuation: {lc.continuation_distance_atr:.2f} ATR beyond breakout price")
+    if lc.breakout_exhaustion:
+        lines.append("Exhaustion warning: recent candles weakening (still valid, not failed)")
+    if lc.breakout_failed:
+        lines.append(f"Breakout FAILED: {lc.breakout_failure_reason}")
+    if lc.breakout_expired:
+        lines.append("Breakout lifecycle EXPIRED: no meaningful development within max lifetime")
+    if lc.state not in ("FAILED", "EXPIRED", "NONE"):
+        lines.append(f"Lifecycle score: {lc.breakout_lifecycle_score:.0f}/100, confidence {lc.breakout_lifecycle_confidence:.0f}%")
+    return lines
+
+
 def analyze(candles, timeframe: str) -> AgentResult:
     if len(candles) < 45:
         return neutral(AGENT_ID, timeframe, "Not enough candles")
 
     a = arrays(candles)
     high, low, close, open_, volume = a["high"], a["low"], a["close"], a["open"], a["volume"]
+    ts = a["ts"]
+
+    # Breakout Lifecycle V2 — runs independently of the origin-scoring
+    # below, over a much longer horizon (BREAKOUT_MAX_LIFETIME_BARS vs
+    # the tight MAX_FOLLOWTHROUGH_LOOKBACK used for origin quality). This
+    # means it can report an in-progress PULLBACK/RETEST from a breakout
+    # that happened several candles ago, even on a candle where the
+    # origin-scoring below sees no fresh/active breakout of its own —
+    # complementary information, not a duplicate. Failure here must
+    # never affect the existing scoring, hence the isolated try/except.
+    lifecycle = BreakoutLifecycle()
+    try:
+        lifecycle = _track_breakout_lifecycle(high, low, close, open_, volume, ts)
+    except Exception:
+        pass
     n = len(close)
 
     found = _find_active_breakout(high, low, close, n)
@@ -220,6 +505,7 @@ def analyze(candles, timeframe: str) -> AgentResult:
             f"ATR expansion: {atr_expansion:.2f}x",
             "Follow-through: N/A",
         ]
+        evidence += _lifecycle_evidence(lifecycle)
 
         return AgentResult(AGENT_ID, NEUTRAL, clamp(30 + abs(pos - 0.5) * 20, 0, 60),
                            20, evidence,
@@ -316,6 +602,7 @@ def analyze(candles, timeframe: str) -> AgentResult:
     ]
     if not valid:
         evidence.append("Marked low-reliability (weak penetration, no volume confirmation)")
+    evidence += _lifecycle_evidence(lifecycle)
 
     key_levels = [{"label": "Breakout Level", "price": round(level, 2), "type": "breakout"}]
 

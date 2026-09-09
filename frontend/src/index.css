@@ -103,3 +103,116 @@ body {
   border-radius: 2px;
   overflow: hidden;
 }
+
+/* ============================================================
+   Agent card visualizations + message ticker
+   Added for the 10-Agent GUI redesign. Pure CSS keyframe
+   animation only — no JS animation loops, GPU-friendly
+   (transform/opacity only), per the performance requirements.
+   ============================================================ */
+
+.agent-viz-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 46px;
+  overflow: hidden;
+}
+.agent-viz-svg {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes agentVizPulse {
+  0%, 100% { opacity: 1; r: 2; }
+  50% { opacity: 0.35; r: 2.6; }
+}
+.agent-viz-pulse {
+  animation: agentVizPulse 2.2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes agentVizBeam {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.55; }
+}
+.agent-viz-beam {
+  animation: agentVizBeam 1.8s ease-in-out infinite;
+}
+
+@keyframes agentVizWaveDash {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+.agent-viz-wave {
+  stroke-dasharray: 4 3;
+  animation: agentVizWaveDash 2.4s linear infinite;
+}
+
+@keyframes agentVizBar {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+.agent-viz-bar {
+  animation: agentVizBar 1.6s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+@keyframes agentVizNeedle {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(4deg); }
+}
+.agent-viz-needle {
+  transform-origin: 32px 24px;
+  animation: agentVizNeedle 2.6s ease-in-out infinite;
+}
+
+/* Message ticker — seamless right-to-left marquee.
+   Two identical text copies back-to-back, track animated exactly
+   -50% of its own width so the loop is invisible. */
+.agent-ticker-mask {
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid;
+  padding: 6px 22px 6px 8px;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 8px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 8px), transparent 100%);
+}
+.agent-ticker-track {
+  display: inline-flex;
+  animation: agentTickerScroll 16s linear infinite;
+  will-change: transform;
+}
+.agent-ticker-mask:hover .agent-ticker-track {
+  animation-play-state: paused;
+}
+.agent-ticker-text {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  padding-right: 48px;
+  flex-shrink: 0;
+}
+@keyframes agentTickerScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.agent-ticker-icon {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+  background: var(--panel-bg);
+  padding-left: 2px;
+}
+
+.agent-card-glow {
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
+}
+.agent-card-glow:hover {
+  transform: translateY(-2px);
+}

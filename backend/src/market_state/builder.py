@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .models import (
+    BosRecoveryState,
     LocationState,
     MarketState,
     ReversalCandidate,
@@ -56,6 +57,28 @@ W_LEVEL_HOLD = 30.0
 W_FOLLOWTHROUGH = 25.0
 W_NEW_SWING = 30.0
 W_BREAK_QUALITY = 15.0
+
+# --- Early Reversal Detection (BOS Recovery) constants ---
+# Illustrative starting values, same caveat as everywhere else — do not
+# treat these as validated, they're a starting point for later research.
+BOS_RECOVERY_MAX_BARS = 12  # stale-protection only, NOT an entry timer —
+# a BOS that hasn't been reclaimed within this many bars stops being a
+# valid reversal reference. Same style constant as MAX_REVERSAL_CANDIDATE_BARS.
+BOS_MAX_ADVERSE_DISTANCE_ATR = 3.0  # if price travels this many ATRs
+# past the BOS before recovering, treat the BOS as having represented a
+# different market event entirely, not a simple pullback-and-reclaim.
+EARLY_REVERSAL_TRIGGER_SCORE = 70.0
+RECOVERY_DEVELOPING_SCORE = 40.0
+RECOVERY_PENETRATION_FULL_ATR = 1.0
+RECOVERY_DISPLACEMENT_FULL_ATR = 1.5
+RECOVERY_FOLLOWTHROUGH_FULL_ATR = 1.0
+W_RECOVERY_BODY = 20.0
+W_RECOVERY_PENETRATION = 20.0
+W_RECOVERY_DISPLACEMENT = 20.0
+W_RECOVERY_VOLUME = 15.0
+W_RECOVERY_FOLLOWTHROUGH = 10.0
+W_RECOVERY_RETEST = 10.0
+W_RECOVERY_STRUCTURAL = 5.0
 
 _TIMEFRAME_MINUTES = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440,
@@ -162,6 +185,219 @@ def _calculate_swing_strength(
     strength = (distance / atr) * 20.0
 
     return float(np.clip(strength, 0.0, 100.0))
+
+
+def _bos_recovery_volume_zscore(volume: np.ndarray) -> float:
+    """Fresh, local helper — deliberately NOT reused from the Breakout
+    agent's identical-looking one. Same reasoning as the Reversal
+    Monitor's own docstring: the general shape of "Z-score against a
+    20-period baseline" is a reasonable idea to reuse conceptually, but
+    the actual code stays separate per-module rather than importing
+    across agent boundaries that should stay independent."""
+    if len(volume) < 21:
+        return 0.0
+    base = volume[-21:-1]
+    mean = float(np.mean(base))
+    std = float(np.std(base))
+    if std <= 1e-9:
+        return 0.0
+    return (float(volume[-1]) - mean) / std
+
+
+def _track_bos_recovery(events, high, low, close, open_, volume, timestamps,
+                        current_regime: str, current_direction: str) -> "BosRecoveryState":
+    """Early Reversal Detection via BOS Recovery.
+
+    Distinct from, and additive to, _track_reversal() above:
+    _track_reversal only starts watching once a CHoCH has already fired
+    (a confirmed structural reversal signal). This tracks every BOS (a
+    continuation break) as a potential EARLY reversal reference — if
+    price later closes back through that level with enough quality, the
+    Brain gets an early heads-up well before a full CHoCH would exist.
+
+    "EARLY != FULL CONFIRMATION": TRIGGERED means the recovery is
+    meaningful enough to evaluate, not that the reversal is proven. The
+    original opposite swing (the LH/HL that a CHoCH would eventually
+    need to break) remains available separately as stronger, later
+    confirmation — see `opposite_structural_level` on the result.
+
+    Only the single MOST RECENT BOS (per continuation direction) is ever
+    tracked — a newer BOS immediately supersedes an older, not-yet-
+    recovered one, so a stale reference can never independently fire a
+    reversal once the market has moved on to a fresher structural break.
+
+    Anti-lookahead: identical discipline to _track_reversal — at loop
+    position i, only candles [0..i] are ever read; ATR is always
+    recomputed sliced to i, never using the whole window's "current" ATR
+    for a historical evaluation.
+    """
+    n = len(close)
+    ts_to_idx = {int(ts): i for i, ts in enumerate(timestamps)}
+
+    bos_by_idx = {}
+    for e in events:
+        if e.event == "BOS" and e.timestamp is not None:
+            idx = ts_to_idx.get(int(e.timestamp))
+            if idx is not None:
+                bos_by_idx[idx] = e
+
+    tracked = None  # {bos_idx, bos_level, bos_ts, direction, extreme}
+    result = BosRecoveryState()
+
+    for i in range(n):
+        if i in bos_by_idx:
+            evt = bos_by_idx[i]
+            recovery_direction = "LONG" if evt.direction == "SHORT" else "SHORT"
+            # A fresh BOS always supersedes whatever was being tracked —
+            # "newer BOS priority" (spec section 3B): an older,
+            # not-yet-recovered BOS becomes stale the moment a newer one
+            # in the same family occurs, since the market has already
+            # established a more current structural context.
+            tracked = {
+                "bos_idx": i, "bos_level": evt.reference_price,
+                "bos_ts": int(timestamps[i]), "direction": recovery_direction,
+                "extreme": float(close[i]),
+            }
+            result = BosRecoveryState()
+            continue
+
+        if tracked is None:
+            continue
+
+        c = float(close[i])
+        if tracked["direction"] == "LONG":
+            tracked["extreme"] = min(tracked["extreme"], c)
+        else:
+            tracked["extreme"] = max(tracked["extreme"], c)
+
+        age = i - tracked["bos_idx"]
+        atr_now = _calculate_atr(high[:i + 1], low[:i + 1], close[:i + 1], 14) if i >= 15 else 0.0
+
+        # ---------------------------------------------------------
+        # POST-TRIGGER: monitor for failure or strengthening
+        # ---------------------------------------------------------
+        if result.reversal_triggered:
+            failed = (c < tracked["bos_level"]) if result.direction == "LONG" else (c > tracked["bos_level"])
+            if failed:
+                result.state = "FAILED"
+                result.reason = "Price closed back through the recovered BOS level"
+                tracked = None
+                continue
+
+            result.bars_since_trigger = i - ts_to_idx[result.reversal_trigger_timestamp]
+
+            if result.direction == "LONG":
+                followthrough = (c - result.reversal_trigger_price) / atr_now if atr_now > 0 else 0.0
+                if not result.recovery_retest and atr_now > 0 and (c - tracked["bos_level"]) / atr_now <= 0.3:
+                    result.recovery_retest = True
+            else:
+                followthrough = (result.reversal_trigger_price - c) / atr_now if atr_now > 0 else 0.0
+                if not result.recovery_retest and atr_now > 0 and (tracked["bos_level"] - c) / atr_now <= 0.3:
+                    result.recovery_retest = True
+            result.recovery_followthrough = max(result.recovery_followthrough, followthrough)
+
+            confirm_score = (
+                clamp(result.recovery_followthrough / RECOVERY_FOLLOWTHROUGH_FULL_ATR, 0, 1) * 50.0
+                + (25.0 if result.recovery_retest else 0.0)
+                + (25.0 if ((result.direction == current_direction) if current_direction != "NEUTRAL" else False) else 0.0)
+            )
+            result.reversal_confirmation_score = confirm_score
+            result.reversal_confirmation_confidence = clamp(30.0 + confirm_score * 0.6, 0, 94)
+            result.state = "CONFIRMED" if confirm_score >= 70 else "CONFIRMING"
+            continue
+
+        # ---------------------------------------------------------
+        # PRE-TRIGGER: has price recovered (BODY CLOSE only) yet?
+        # ---------------------------------------------------------
+        recovered = (c > tracked["bos_level"]) if tracked["direction"] == "LONG" else (c < tracked["bos_level"])
+        if not recovered:
+            if age >= BOS_RECOVERY_MAX_BARS:
+                result.state = "EXPIRED"
+                result.reason = "No recovery within max age"
+                tracked = None
+            continue
+
+        # BOS relevance validation — BEFORE scoring quality, per spec
+        # ordering. A recovery from a BOS that's too old or that price
+        # traveled too far away from isn't treated as the same event.
+        distance_atr = abs(tracked["extreme"] - tracked["bos_level"]) / atr_now if atr_now > 0 else 0.0
+        result.bos_distance_from_extreme_atr = round(distance_atr, 3)
+        relevant = age <= BOS_RECOVERY_MAX_BARS and distance_atr <= BOS_MAX_ADVERSE_DISTANCE_ATR
+        if not relevant:
+            result.state = "EXPIRED"
+            result.bos_relevance_ok = False
+            result.reason = (
+                "BOS aged out beyond max bars" if age > BOS_RECOVERY_MAX_BARS
+                else f"Price moved too far away ({distance_atr:.2f} ATR, max {BOS_MAX_ADVERSE_DISTANCE_ATR})"
+            )
+            tracked = None
+            continue
+
+        if not result.bos_recovery:
+            result.direction = tracked["direction"]
+            result.broken_bos_level = tracked["bos_level"]
+            result.bos_timestamp = tracked["bos_ts"]
+            result.bos_recovery = True
+            result.bos_recovery_timestamp = int(timestamps[i])
+            result.bos_recovery_price = c
+
+        result.bos_recovery_age_bars = age
+        result.bars_since_recovery = i - ts_to_idx[result.bos_recovery_timestamp]
+
+        # --- Dynamic recovery quality (0-100), close-based only ---
+        o = float(open_[i])
+        h, l = float(high[i]), float(low[i])
+        rng = max(h - l, 1e-9)
+        body = abs(c - o)
+        directional_body = (c > o) if result.direction == "LONG" else (c < o)
+        body_ratio = body / rng
+        body_score = body_ratio * W_RECOVERY_BODY if directional_body else body_ratio * W_RECOVERY_BODY * 0.3
+
+        penetration_atr = abs(c - tracked["bos_level"]) / atr_now if atr_now > 0 else 0.0
+        penetration_score = clamp(penetration_atr / RECOVERY_PENETRATION_FULL_ATR, 0, 1) * W_RECOVERY_PENETRATION
+
+        displacement_atr = rng / atr_now if atr_now > 0 else 0.0
+        displacement_score = clamp(displacement_atr / RECOVERY_DISPLACEMENT_FULL_ATR, 0, 1) * W_RECOVERY_DISPLACEMENT
+
+        vol_z = _bos_recovery_volume_zscore(volume[:i + 1])
+        # "If volume is unavailable or unreliable, do not heavily
+        # penalize" — a non-positive/neutral Z-score contributes 0
+        # rather than a negative score, it just doesn't help either.
+        volume_score = clamp(vol_z / 2.0, 0, 1) * W_RECOVERY_VOLUME
+
+        # Follow-through/retest are correctly ~0 on the trigger candle
+        # itself — nothing has happened YET after it — but a strong
+        # enough candle on factors A-D (+structure) can still reach the
+        # trigger threshold without them, per the explicit "do not wait
+        # for another candle" requirement.
+        followthrough_score = clamp(result.recovery_followthrough / RECOVERY_FOLLOWTHROUGH_FULL_ATR, 0, 1) * W_RECOVERY_FOLLOWTHROUGH
+        retest_score = W_RECOVERY_RETEST if result.recovery_retest else 0.0
+
+        structural_agrees = (current_regime in ("BULLISH", "EXPANSION") if result.direction == "LONG"
+                             else current_regime in ("BEARISH", "EXPANSION"))
+        structural_score = W_RECOVERY_STRUCTURAL if structural_agrees else 0.0
+
+        score = (body_score + penetration_score + displacement_score + volume_score
+                + followthrough_score + retest_score + structural_score)
+
+        result.recovery_quality_score = round(score, 1)
+        result.recovery_penetration_atr = round(penetration_atr, 3)
+        result.recovery_body_quality = round(body_ratio, 3)
+        result.recovery_displacement_atr = round(displacement_atr, 3)
+        result.recovery_volume_quality = round(vol_z, 3)
+
+        if score >= EARLY_REVERSAL_TRIGGER_SCORE:
+            result.state = "TRIGGERED"
+            result.reversal_triggered = True
+            result.reversal_trigger_price = c
+            result.reversal_trigger_timestamp = int(timestamps[i])
+            result.reversal_trigger_confidence = round(clamp(50.0 + score * 0.44, 0, 94), 1)
+        elif score >= RECOVERY_DEVELOPING_SCORE:
+            result.state = "DEVELOPING"
+        else:
+            result.state = "BOS_RECOVERY_WATCH"
+
+    return result
 
 
 def _track_reversal(events, swing_highs, swing_lows, high, low, close,
@@ -841,6 +1077,16 @@ def build_market_state(
             )
         except Exception:
             pass  # reversal monitor failure must never break structure itself
+
+        try:
+            structure.bos_recovery = _track_bos_recovery(
+                events=structure.events,
+                high=a["high"], low=a["low"], close=a["close"], open_=a["open"],
+                volume=a["volume"], timestamps=_ts,
+                current_regime=structure.regime, current_direction=structure.direction,
+            )
+        except Exception:
+            pass  # same isolation guarantee — a bug here can never affect structure itself
 
     if swing_highs:
         structure.swing_high_strength = swing_highs[-1].strength
