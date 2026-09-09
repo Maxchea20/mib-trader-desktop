@@ -25,58 +25,52 @@ def _conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    # Single source of truth for the desired schema — column name and
+    # type pairs, in the same order as the CREATE TABLE below. Migration
+    # is now driven directly from this list instead of a hand-maintained
+    # second list, which had already silently drifted out of sync twice
+    # (both htf_timeframes_json and use_htf_gate were added to CREATE
+    # TABLE at some point but never added to the old migration list —
+    # meaning every insert into any pre-existing database had been
+    # silently failing ever since, permanently losing that run's log
+    # entry with zero visible error). A hand-maintained second list is
+    # exactly the kind of thing that's easy to forget to update again in
+    # the future; deriving migration from the one real schema definition
+    # instead makes that mistake structurally impossible to repeat.
+    COLUMNS = [
+        ("id", "TEXT PRIMARY KEY"), ("created_at", "INTEGER NOT NULL"),
+        ("timeframe", "TEXT NOT NULL"), ("days", "REAL"),
+        ("start_balance", "REAL"), ("capital_pct", "REAL"), ("leverage", "REAL"),
+        ("sl_atr_mult", "REAL"), ("tp_atr_mult", "REAL"),
+        ("used_custom_weights", "INTEGER"), ("weights_json", "TEXT"),
+        ("used_custom_entry", "INTEGER"), ("entry_json", "TEXT"),
+        ("used_custom_conflict", "INTEGER"), ("conflict_json", "TEXT"),
+        ("used_custom_htf_gate_values", "INTEGER"), ("htf_gate_json", "TEXT"),
+        ("htf_timeframes_json", "TEXT"), ("use_htf_gate", "INTEGER"),
+        ("pivot_window_forced", "INTEGER"),
+        ("actual_days_tested", "REAL"), ("data_shortfall", "INTEGER"),
+        ("trades", "INTEGER"), ("win_rate", "REAL"), ("profit_factor", "REAL"),
+        ("avg_r", "REAL"), ("net_pnl", "REAL"), ("return_pct", "REAL"),
+        ("final_balance", "REAL"), ("note", "TEXT"),
+    ]
     with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS walkforward_runs (
-                id                  TEXT PRIMARY KEY,
-                created_at          INTEGER NOT NULL,
-                timeframe           TEXT NOT NULL,
-                days                REAL,
-                start_balance       REAL,
-                capital_pct         REAL,
-                leverage            REAL,
-                sl_atr_mult         REAL,
-                tp_atr_mult         REAL,
-                used_custom_weights INTEGER,
-                weights_json        TEXT,
-                used_custom_entry   INTEGER,
-                entry_json          TEXT,
-                used_custom_conflict INTEGER,
-                conflict_json       TEXT,
-                used_custom_htf_gate_values INTEGER,
-                htf_gate_json       TEXT,
-                htf_timeframes_json TEXT,
-                use_htf_gate        INTEGER,
-                pivot_window_forced INTEGER,
-                actual_days_tested  REAL,
-                data_shortfall      INTEGER,
-                trades              INTEGER,
-                win_rate            REAL,
-                profit_factor       REAL,
-                avg_r               REAL,
-                net_pnl             REAL,
-                return_pct          REAL,
-                final_balance       REAL,
-                note                TEXT
-            );"""
-        )
-        # Migration for databases created before entry/conflict/htf_gate
-        # override testing existed — CREATE TABLE IF NOT EXISTS only
-        # applies the full schema to a brand-new table, so any run logged
-        # before this update needs these columns added after the fact.
-        # Existing rows simply get NULL/empty for these (correctly — they
-        # genuinely didn't test any of these, so there's nothing to
-        # backfill).
-        for col, coltype in [
-            ("used_custom_entry", "INTEGER"), ("entry_json", "TEXT"),
-            ("used_custom_conflict", "INTEGER"), ("conflict_json", "TEXT"),
-            ("used_custom_htf_gate_values", "INTEGER"), ("htf_gate_json", "TEXT"),
-            ("pivot_window_forced", "INTEGER"),
-        ]:
+        cols_sql = ",\n                ".join(f"{name} {coltype}" for name, coltype in COLUMNS)
+        conn.execute(f"CREATE TABLE IF NOT EXISTS walkforward_runs (\n                {cols_sql}\n            );")
+
+        # Migration for any database created before some of these
+        # columns existed. Checks the table's ACTUAL current columns via
+        # PRAGMA (not a hand-maintained guess) and adds whatever's
+        # genuinely missing — self-correcting by construction, so a
+        # future new column added to COLUMNS above can never again be
+        # silently forgotten from migration.
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(walkforward_runs)").fetchall()}
+        for name, coltype in COLUMNS:
+            if name in existing or "PRIMARY KEY" in coltype or "NOT NULL" in coltype:
+                continue  # PK/NOT NULL columns can't be added via ALTER TABLE on an existing table anyway — only relevant for a brand-new table, already covered by CREATE TABLE above
             try:
-                conn.execute(f"ALTER TABLE walkforward_runs ADD COLUMN {col} {coltype}")
+                conn.execute(f"ALTER TABLE walkforward_runs ADD COLUMN {name} {coltype}")
             except sqlite3.OperationalError:
-                pass  # column already exists
+                pass  # column already exists (race with another process/thread)
         conn.commit()
 
 

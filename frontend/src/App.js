@@ -95,33 +95,44 @@ function App() {
     refreshAll(timeframe);
   }, [timeframe, refreshAll]);
 
+  // Self-scheduling poll: waits for the previous call to fully resolve
+  // before scheduling the next one. A naive setInterval fires on a fixed
+  // clock regardless of whether the last call finished — if the backend
+  // is briefly slow (e.g. during a heavy background backtest), that lets
+  // overlapping requests pile up and exhaust the browser's per-origin
+  // connection limit, starving OTHER requests (including the backtest's
+  // own status polls) out entirely. Same fix already proven correct in
+  // BacktestModal's own polling, applied here to the main dashboard.
+  const startPoll = useCallback((fn, intervalMs, immediate, activeRef) => {
+    let timeoutId = null;
+    const tick = async () => {
+      if (!activeRef.current) return;
+      try { await fn(); } catch (e) {}
+      if (activeRef.current) timeoutId = setTimeout(tick, intervalMs);
+    };
+    if (immediate) tick();
+    else timeoutId = setTimeout(tick, intervalMs);
+    return () => { if (timeoutId) clearTimeout(timeoutId); };
+  }, []);
+
   // pollers
   useEffect(() => {
-    loadTicker();
-    loadSync();
-
-    const t1 = setInterval(loadTicker, 20000);
-
-    const t2 = setInterval(
-      () => loadCandles(tfRef.current),
-      8000
-    );
-
-    const t3 = setInterval(
-      () => loadAnalysis(tfRef.current),
-      12000
-    );
-
-    const t4 = setInterval(loadSync, 15000);
+    const activeRef = { current: true };
+    const stopTicker = startPoll(loadTicker, 20000, true, activeRef);
+    const stopCandles = startPoll(() => loadCandles(tfRef.current), 8000, false, activeRef);
+    const stopAnalysis = startPoll(() => loadAnalysis(tfRef.current), 12000, false, activeRef);
+    const stopSync = startPoll(loadSync, 15000, true, activeRef);
 
     return () => {
-      [t1, t2, t3, t4].forEach(clearInterval);
+      activeRef.current = false;
+      [stopTicker, stopCandles, stopAnalysis, stopSync].forEach((stop) => stop());
     };
   }, [
     loadTicker,
     loadCandles,
     loadAnalysis,
     loadSync,
+    startPoll,
   ]);
 
   // live WebSocket price feed

@@ -234,9 +234,26 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const iv = setInterval(refresh, 3000);
-    return () => clearInterval(iv);
+    // Self-scheduling poll — same fix as App.js's dashboard pollers and
+    // BacktestModal's own status polling. A naive setInterval(refresh,
+    // 3000) fires every 3s regardless of whether the previous refresh()
+    // (which itself fires 3 requests via Promise.all) has finished —
+    // if the backend is briefly slow, that overlaps triplets of requests
+    // on top of each other, exhausting the browser's connection pool and
+    // starving unrelated requests (like a running backtest's status
+    // polls) out entirely.
+    let active = true;
+    let timeoutId = null;
+    const tick = async () => {
+      if (!active) return;
+      try { await refresh(); } catch (e) {}
+      if (active) timeoutId = setTimeout(tick, 3000);
+    };
+    tick();
+    return () => {
+      active = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [refresh]);
 
   const toggleAuto = async () => {

@@ -40,9 +40,22 @@ export const PaperTradingModal = ({ open, onClose, brain, livePrice, timeframe }
 
   useEffect(() => {
     if (!open) return;
-    refresh();
-    const iv = setInterval(refresh, 2500);
-    return () => clearInterval(iv);
+    // Self-scheduling poll — same fix as PaperTradingPanel and App.js's
+    // dashboard pollers, see those for full rationale. Prevents this
+    // modal's own refresh from overlapping itself if the backend is
+    // briefly slow.
+    let active = true;
+    let timeoutId = null;
+    const tick = async () => {
+      if (!active) return;
+      try { await refresh(); } catch (e) {}
+      if (active) timeoutId = setTimeout(tick, 2500);
+    };
+    tick();
+    return () => {
+      active = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [open, refresh]);
 
   useEffect(() => { if (open) setSide(bias); }, [open, bias]);

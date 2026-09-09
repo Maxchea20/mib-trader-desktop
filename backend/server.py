@@ -279,12 +279,18 @@ async def walkforward_result(run_id: str):
         return {"error": bt.error}
     # Log on first successful fetch only — repeated polling/re-fetching of
     # the same finished run should never create duplicate log rows.
+    # IMPORTANT: _logged is only set on an actual successful write. A
+    # transient failure (e.g. a momentary SQLite lock from concurrent
+    # writes elsewhere in the app) must not permanently mark this run as
+    # "already logged" — that would silently and irrecoverably lose the
+    # log entry with no visible error, which is exactly what happened
+    # here. Failures are now printed so they're never silent again.
     if not getattr(bt, "_logged", False):
         try:
             walkforward_log.record(bt.result)
-        except Exception:
-            pass
-        bt._logged = True
+            bt._logged = True
+        except Exception as e:
+            print(f"[walkforward_log] FAILED to record run {run_id}: {type(e).__name__}: {e}")
     return bt.result
 
 
