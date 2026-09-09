@@ -27,6 +27,13 @@ class AgentResult:
     key_levels: List[Dict[str, Any]] = field(default_factory=list)  # {label, price, type}
     timeframe: str = ""
     valid: bool = True
+    state: str = ""                 # optional structured state (e.g. "TRIGGERED",
+    # "LONG_ACCELERATING", "CONFIRMED") for agents that have one. Empty by
+    # default — fully backward compatible, no existing agent needs to set
+    # this. Brain V2 currently reads state via evidence-text parsing
+    # instead (see brain/evidence.py) so behavior is identical whether or
+    # not an agent ever populates this field directly; it's reserved here
+    # for a future migration path, not required by anything today.
 
     def sign(self) -> int:
         if self.direction == LONG:

@@ -1,0 +1,114 @@
+"""BRAIN V2 — Evidence/state extraction.
+
+Every upgraded agent (Market Structure, Breakout, Momentum, Volume,
+Pattern) already computes a rich internal state (TRIGGERED, CONFIRMED,
+LONG_ACCELERATING, BULLISH_ABSORPTION, etc.) — but AgentResult has no
+structured field for it (see contract.py's new optional `state` field,
+added for future agents but not required by anything today). Today,
+that state only exists as a "State: X" line inside each agent's
+evidence list.
+
+This module reads it from there. That's a deliberate architecture
+decision, not a workaround: the live path threads a shared MarketState
+object into Market Structure specifically, but the backtest path does
+NOT (confirmed by direct inspection of backtest_walkforward.py) — so
+anything Brain reads must come from the ONE thing that's identical in
+both: the AgentResult list itself. Evidence text is exactly that.
+
+Also handles role grouping (spec section 30 — avoid double counting
+correlated agents) and classifying whether a state represents an
+actionable TRIGGER versus merely descriptive CONTEXT.
+"""
+import re
+from typing import Dict, List, Optional
+
+STATE_LINE_RE = re.compile(r"^State:\s*([A-Za-z_]+)")
+
+# Role groups — agents in the same group often describe the same
+# underlying phenomenon (spec section 30). Used to avoid pretending
+# correlated signals are fully independent votes.
+ROLE_GROUPS = {
+    "STRUCTURE": ("market_structure",),
+    "TREND": ("trend",),
+    "MOMENTUM": ("momentum",),
+    "PARTICIPATION": ("volume",),
+    "LOCATION": ("support_resistance", "fair_value_gap", "fibonacci"),
+    "PATTERN": ("pattern",),
+    "BREAKOUT": ("breakout",),
+    "CONTEXT": ("elliott_wave",),
+}
+AGENT_ROLE = {a: role for role, agents in ROLE_GROUPS.items() for a in agents}
+
+# Keyword-based classification — deliberately generic rather than a
+# hardcoded per-agent state list, since new states can appear as agents
+# evolve without this needing to be updated in lockstep. A state can
+# score on multiple axes at once (e.g. "CONFIRMED" is both a trigger
+# and positive).
+TRIGGER_KEYWORDS = (
+    "TRIGGERED", "CONFIRMED", "REJECTION", "RECOVERY", "REVERSAL",
+    "LEVEL_HOLD", "CONTINUATION", "BREAKOUT_DETECTED", "ACCELERATING",
+    "ABSORPTION", "DIVERGENCE", "BREAKOUT_VOLUME_STRONG",
+)
+NEGATIVE_KEYWORDS = ("FAILED", "EXPIRED", "INVALID", "EXHAUSTING", "WEAK")
+CONTEXT_ONLY_KEYWORDS = (
+    "FORMING", "DEVELOPING", "WATCH", "CANDIDATE", "NONE", "STABLE",
+    "MATURE", "BUILDING", "NEUTRAL", "RETRACING",
+)
+
+
+def extract_state(evidence: List[str]) -> Optional[str]:
+    """Pulls the state token from a "State: X" evidence line, if any.
+    Scans from the end since every upgraded agent puts this line last."""
+    for line in reversed(evidence or []):
+        m = STATE_LINE_RE.match(line.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def classify_state(state: Optional[str]) -> Dict[str, float]:
+    """Returns {"trigger": 0-1, "negative": 0-1, "context_only": 0-1} —
+    how strongly a state token reads as an actionable trigger, a
+    failure/negative signal, or merely descriptive context. Not
+    mutually exclusive; a state can score on more than one axis."""
+    if not state:
+        return {"trigger": 0.0, "negative": 0.0, "context_only": 0.0}
+    s = state.upper()
+    trigger = 1.0 if any(k in s for k in TRIGGER_KEYWORDS) else 0.0
+    negative = 1.0 if any(k in s for k in NEGATIVE_KEYWORDS) else 0.0
+    context_only = 1.0 if (not trigger and any(k in s for k in CONTEXT_ONLY_KEYWORDS)) else 0.0
+    return {"trigger": trigger, "negative": negative, "context_only": context_only}
+
+
+def agent_role(agent_id: str) -> str:
+    return AGENT_ROLE.get(agent_id, "OTHER")
+
+
+def role_grouped_evidence(agents: List, exclude_agents: tuple = ()) -> Dict[str, Dict]:
+    """Groups valid agents by role and returns, per role, the NET
+    directional lean and the single strongest agent in that role — this
+    is what setup-quality scoring uses instead of counting all 10
+    agents as independent votes. exclude_agents lets the caller drop
+    Elliott Wave (or anything else) from execution-relevant grouping
+    while it can still appear elsewhere in evidence/UI."""
+    groups: Dict[str, List] = {}
+    for res in agents:
+        if not res.valid or res.agent in exclude_agents:
+            continue
+        role = agent_role(res.agent)
+        groups.setdefault(role, []).append(res)
+
+    out = {}
+    for role, members in groups.items():
+        long_w = sum(r.confidence for r in members if r.direction == "LONG")
+        short_w = sum(r.confidence for r in members if r.direction == "SHORT")
+        strongest = max(members, key=lambda r: r.confidence) if members else None
+        out[role] = {
+            "members": [r.agent for r in members],
+            "long_weight": round(long_w, 1),
+            "short_weight": round(short_w, 1),
+            "lean": "LONG" if long_w > short_w else ("SHORT" if short_w > long_w else "NEUTRAL"),
+            "strongest_agent": strongest.agent if strongest else None,
+            "strongest_confidence": round(strongest.confidence, 1) if strongest else 0.0,
+        }
+    return out
