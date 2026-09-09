@@ -210,10 +210,25 @@ def analyze(candles, timeframe: str) -> AgentResult:
         exhaustion_evidence += 1
     if (streak_dir and _rsi > 65) or (streak_dir is False and _rsi < 35):
         exhaustion_evidence += 1  # RSI is ONE of four pieces of evidence, never used alone
-    exhausting = exhaustion_evidence >= 3
+    # 3-tier classification: LOW (0-1 factors), DEVELOPING (2 factors),
+    # HIGH (3-4 factors). `exhausting` (used for state-machine/strength
+    # penalty purposes below) stays True only for the HIGH tier — a
+    # DEVELOPING read is worth surfacing as evidence but shouldn't yet
+    # carry the same strength penalty or force the *_EXHAUSTING state.
+    if exhaustion_evidence >= 3:
+        exhaustion_state = "HIGH"
+    elif exhaustion_evidence == 2:
+        exhaustion_state = "DEVELOPING"
+    else:
+        exhaustion_state = "LOW"
+    exhausting = exhaustion_state == "HIGH"
     exhaustion_score = (exhaustion_evidence / 4.0) * W_EXHAUSTION
 
-    # --- F. DIVERGENCE (10 pts) — local price vs RSI extremes only, no lookahead ---
+    # --- F. DIVERGENCE (10 pts) — local price vs RSI extremes only, no
+    # lookahead. Both REGULAR divergence (price vs momentum disagree —
+    # a reversal warning) and HIDDEN divergence (price makes a smaller
+    # extreme but momentum makes a BIGGER one in the trend direction —
+    # a continuation signal, the opposite meaning) are checked. ---
     rsi_series = []
     for end in range(max(15, n - DIVERGENCE_LOOKBACK), n + 1):
         rsi_series.append(_safe(rsi(close[:end], 14), 50.0))
@@ -226,12 +241,31 @@ def analyze(candles, timeframe: str) -> AgentResult:
         if mid > 0:
             recent_high_idx = int(np.argmax(price_window[mid:])) + mid
             early_high_idx = int(np.argmax(price_window[:mid]))
-            if price_window[recent_high_idx] > price_window[early_high_idx] and rsi_series[recent_high_idx] < rsi_series[early_high_idx] - 3:
-                divergence = "bearish"
             recent_low_idx = int(np.argmin(price_window[mid:])) + mid
             early_low_idx = int(np.argmin(price_window[:mid]))
-            if price_window[recent_low_idx] < price_window[early_low_idx] and rsi_series[recent_low_idx] > rsi_series[early_low_idx] + 3:
-                divergence = "bullish" if divergence is None else divergence
+
+            price_higher_high = price_window[recent_high_idx] > price_window[early_high_idx]
+            price_lower_high = price_window[recent_high_idx] < price_window[early_high_idx]
+            price_lower_low = price_window[recent_low_idx] < price_window[early_low_idx]
+            price_higher_low = price_window[recent_low_idx] > price_window[early_low_idx]
+
+            rsi_lower_high = rsi_series[recent_high_idx] < rsi_series[early_high_idx] - 3
+            rsi_higher_high = rsi_series[recent_high_idx] > rsi_series[early_high_idx] + 3
+            rsi_higher_low = rsi_series[recent_low_idx] > rsi_series[early_low_idx] + 3
+            rsi_lower_low = rsi_series[recent_low_idx] < rsi_series[early_low_idx] - 3
+
+            # Regular divergence — price and momentum disagree (reversal warning).
+            if price_higher_high and rsi_lower_high:
+                divergence = "bearish"
+            if divergence is None and price_lower_low and rsi_higher_low:
+                divergence = "bullish"
+
+            # Hidden divergence — checked only if no regular divergence
+            # already found; opposite meaning (continuation, not reversal).
+            if divergence is None and price_higher_low and rsi_lower_low:
+                divergence = "hidden_bullish"
+            if divergence is None and price_lower_high and rsi_higher_high:
+                divergence = "hidden_bearish"
     divergence_score = W_DIVERGENCE if divergence else 0.0
 
     # --- G. RETRACEMENT vs REVERSAL (10 pts) ---
@@ -298,8 +332,8 @@ def analyze(candles, timeframe: str) -> AgentResult:
         f"Impulse: body {body_atr:.2f} ATR, range {range_atr:.2f} ATR ({impulse_score:.1f}/{W_IMPULSE:.0f})",
         f"Momentum {'expansion' if expanding else 'contraction'} detected ({expansion_score:.1f}/{W_EXPANSION:.0f})",
         f"{streak} consecutive {'bullish' if streak_dir else 'bearish'} candle(s)",
-        f"Exhaustion: {'HIGH' if exhausting else 'low'} ({exhaustion_evidence}/4 factors)",
-        f"Divergence: {divergence or 'none'}",
+        f"Exhaustion: {exhaustion_state} ({exhaustion_evidence}/4 factors)",
+        f"Divergence: {(divergence.replace('_', ' ') if divergence else 'none')}",
         f"Retracement/reversal: {retrace_or_reversal or 'none'}",
         f"State: {state}",
     ]

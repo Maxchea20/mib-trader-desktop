@@ -129,6 +129,10 @@ export const BacktestModal = ({ open, onClose, timeframe }) => {
   const wfPollRef = useRef(null);
   const wfPollingActiveRef = useRef(false);
   const wfPollRetriesRef = useRef(0);
+  const [wfReconnecting, setWfReconnecting] = useState(false); // true only
+  // during a temporary polling hiccup — distinct from wfStatus, which
+  // reflects the BACKTEST's own state, not the connection to it. The
+  // backtest keeps running server-side the whole time this is true.
 
   // Generalized across all four Settings panels (Agent Weights, Entry
   // Thresholds, Conflict/Contradiction, HTF Gate values) so every one of
@@ -231,6 +235,7 @@ export const BacktestModal = ({ open, onClose, timeframe }) => {
   const stopPolling = () => {
     wfPollingActiveRef.current = false;
     if (wfPollRef.current) { clearTimeout(wfPollRef.current); wfPollRef.current = null; }
+    setWfReconnecting(false);
   };
   useEffect(() => () => stopPolling(), []); // cleanup on unmount
 
@@ -270,6 +275,17 @@ export const BacktestModal = ({ open, onClose, timeframe }) => {
         try {
           const s = await getWalkForwardStatus(r.id);
           if (!wfPollingActiveRef.current) return; // cancelled while awaiting
+          // A successful response means the connection is fine RIGHT NOW —
+          // this is the actual bug fix: the retry counter previously only
+          // ever incremented and was never reset, so failures accumulated
+          // across the ENTIRE polling session (which can run for many
+          // minutes on a heavy backtest) rather than resetting after each
+          // successful check. A handful of sporadic blips spread out over
+          // a long-running, otherwise-healthy poll would eventually cross
+          // the failure threshold even though the backtest was fine the
+          // whole time.
+          wfPollRetriesRef.current = 0;
+          if (wfReconnecting) setWfReconnecting(false);
           setWfProgress(s.progress || 0);
           if (s.status === "done" || s.status === "error" || s.status === "stopped") {
             stopPolling();
@@ -283,17 +299,24 @@ export const BacktestModal = ({ open, onClose, timeframe }) => {
         } catch (e) {
           // A single missed poll shouldn't kill the whole run — the
           // simulation keeps running server-side regardless. Retry a few
-          // times before actually giving up.
+          // times, with a light backoff so a genuinely struggling backend
+          // isn't hammered every 400ms, before actually giving up.
           wfPollRetriesRef.current += 1;
+          setWfReconnecting(true);
           if (wfPollRetriesRef.current > 5) {
             stopPolling();
+            setWfReconnecting(false);
             setWfError("Lost connection while checking progress — the simulation may still be running server-side.");
             return;
           }
+          const backoffMs = 400 * Math.min(wfPollRetriesRef.current + 1, 4); // 800, 1200, 1600, 2000, 2000ms
+          wfPollRef.current = setTimeout(poll, backoffMs);
+          return;
         }
         wfPollRef.current = setTimeout(poll, 400);
       };
       wfPollRetriesRef.current = 0;
+      setWfReconnecting(false);
       poll();
     } catch (e) { setWfError("request failed"); }
   };
@@ -616,7 +639,13 @@ export const BacktestModal = ({ open, onClose, timeframe }) => {
                 <div className="h-1.5 bg-[#0d121b] rounded-full overflow-hidden border border-[#1d2635]">
                   <div className="h-full bg-cyan-500 transition-all" style={{ width: `${Math.round(wfProgress * 100)}%` }} />
                 </div>
-                <div className="font-mono-t text-[10px] text-slate-500 mt-1">Simulating bar-by-bar… {Math.round(wfProgress * 100)}%</div>
+                {wfReconnecting ? (
+                  <div className="font-mono-t text-[10px] text-amber-400 mt-1" data-testid="wf-reconnecting">
+                    Reconnecting… the simulation is still running server-side.
+                  </div>
+                ) : (
+                  <div className="font-mono-t text-[10px] text-slate-500 mt-1">Simulating bar-by-bar… {Math.round(wfProgress * 100)}%</div>
+                )}
               </div>
             )}
 
