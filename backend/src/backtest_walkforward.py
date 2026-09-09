@@ -49,25 +49,6 @@ from .backtest_attribution import attribution, summary_stats
 LONG = "LONG"
 SHORT = "SHORT"
 
-# Backtest runs bar-by-bar in a background thread, sharing the GIL with
-# the async event loop that serves /status polls. Under load (long
-# backtests, esp. on Windows where OS thread-scheduling granularity is
-# coarser than Linux) that can measurably delay how quickly a pending
-# status request actually gets serviced — see the diagnostic report for
-# direct, measured evidence (worst-case poll latency scaling with
-# backtest length: 160ms on a 10-day run, 484ms on 40-day).
-#
-# GIL_YIELD_INTERVAL_BARS controls how often this loop explicitly yields
-# (time.sleep(0), a genuine no-op in wall-clock terms — it does not
-# actually pause execution, it just gives the OS scheduler a deterministic
-# opportunity to switch threads right here) rather than relying solely on
-# CPython's automatic time-based GIL switching. Every bar was measured to
-# add negligible overhead (~3%), but yielding this often is unnecessary —
-# a periodic yield every few bars gives the event loop frequent enough
-# opportunities to respond promptly without adding avoidable scheduling
-# overhead on every single iteration.
-GIL_YIELD_INTERVAL_BARS = 5
-
 
 def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict,
                     weights_override: Optional[Dict] = None,
@@ -107,7 +88,8 @@ class WalkForwardBacktest:
                  entry_override: Optional[Dict[str, float]] = None,
                  conflict_override: Optional[Dict[str, float]] = None,
                  htf_gate_override: Optional[Dict[str, float]] = None,
-                 pivot_window_override: Optional[int] = None):
+                 pivot_window_override: Optional[int] = None,
+                 progress_callback: Optional[callable] = None):
         self.timeframe = timeframe
         self.days = days
         self.start_balance = start_balance
@@ -154,6 +136,13 @@ class WalkForwardBacktest:
         self.error: Optional[str] = None
         self.result: Optional[Dict] = None
         self._stop = False
+        # Pure infrastructure hook — never touches trading/agent/Brain
+        # logic. Optional: when running via the process-based runner,
+        # this is how the worker process reports progress (and checks
+        # for a stop signal) back to the parent, since separate OS
+        # processes don't share memory — self.progress updates inside
+        # this object are otherwise invisible outside this process.
+        self.progress_callback = progress_callback
 
     def stop(self):
         self._stop = True
@@ -232,13 +221,6 @@ class WalkForwardBacktest:
                 equity_curve.append({"ts": ts, "equity": round(balance, 2)})
                 continue
             agents = svc.run_agents(window, tf, pivot_window_override=self.pivot_window_override)
-            # Periodic GIL-yield — see GIL_YIELD_INTERVAL_BARS above for
-            # the full rationale. This is the actual root-cause mitigation
-            # traced to measured evidence (see diagnostic report) — not a
-            # frontend polling change, which was already fixed separately
-            # and was never the underlying problem.
-            if (i - start) % GIL_YIELD_INTERVAL_BARS == 0:
-                time.sleep(0)
             if self.use_htf_gate:
                 htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override, self.pivot_window_override)
             else:
@@ -259,6 +241,8 @@ class WalkForwardBacktest:
 
             equity_curve.append({"ts": ts, "equity": round(balance, 2)})
             self.progress = (i - start + 1) / max(1, n - start)
+            if self.progress_callback:
+                self.progress_callback(self)
 
         # Flatten anything still open at the end of available data.
         if open_pos is not None:

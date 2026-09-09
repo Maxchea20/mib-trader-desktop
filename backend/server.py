@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
+import uuid
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent
@@ -18,6 +19,7 @@ from src import settings as runtime_settings
 from src import backtest as backtest_engine
 from src import backtest_log
 from src import backtest_walkforward
+from src import backtest_process_runner
 from src import decision_log
 from src import walkforward_log
 from src import paper_trading
@@ -247,7 +249,8 @@ async def walkforward_run(req: WalkForwardRunReq):
     conflict_override = _merged_override(req.conflict, runtime_settings.conflict)
     htf_gate_override = _merged_override(req.htf_gate_values, runtime_settings.htf_gate)
 
-    bt = backtest_walkforward.WalkForwardBacktest(
+    run_id = f"BT-{uuid.uuid4().hex[:10]}"
+    params = dict(
         timeframe=req.timeframe, days=req.days, start_balance=req.start_balance,
         capital_pct=req.capital_pct, leverage=req.leverage,
         sl_atr_mult=req.sl_atr_mult, tp_atr_mult=req.tp_atr_mult,
@@ -256,42 +259,51 @@ async def walkforward_run(req: WalkForwardRunReq):
         conflict_override=conflict_override, htf_gate_override=htf_gate_override,
         pivot_window_override=req.pivot_window_override,
     )
-    run_id = backtest_walkforward.runner.start(bt)
+    # Runs in a genuinely separate OS process now (see
+    # backtest_process_runner.py) — the exact same WalkForwardBacktest
+    # class and _run() computation, just executed with its own
+    # independent GIL so heavy agent computation can never make this
+    # server's own API responses stall.
+    backtest_process_runner.runner.start(run_id, params)
     return {"id": run_id, "status": "started"}
 
 
 @api_router.get("/backtest/walkforward/status/{run_id}")
 async def walkforward_status(run_id: str):
-    bt = backtest_walkforward.runner.get(run_id)
-    if not bt:
+    status = backtest_process_runner.runner.get_status(run_id)
+    if status is None:
         return {"error": "run_not_found"}
-    return {"id": bt.id, "status": bt.status, "progress": round(bt.progress, 3), "error": bt.error}
+    return status
 
 
 @api_router.get("/backtest/walkforward/result/{run_id}")
 async def walkforward_result(run_id: str):
-    bt = backtest_walkforward.runner.get(run_id)
-    if not bt:
+    result = backtest_process_runner.runner.get_result(run_id)
+    if result is None:
         return {"error": "run_not_found"}
-    if bt.status not in ("done", "error", "stopped"):
-        return {"error": "not_finished", "status": bt.status, "progress": round(bt.progress, 3)}
-    if bt.error:
-        return {"error": bt.error}
+    # Not finished yet ({"error": "not_finished", "status": "running", ...}),
+    # a genuine worker-level error ({"error": msg}, no status key at all),
+    # or the "insufficient_data" shape _run() itself can return (also no
+    # status key) — none of these are an actual completed result. Only a
+    # real success dict has status == "done" specifically. Same
+    # distinction the old bt.error / bt.result checks made, just as one
+    # clean check now that get_result() folds all three non-result cases
+    # together.
+    if result.get("status") != "done":
+        return result
     # Log on first successful fetch only — repeated polling/re-fetching of
     # the same finished run should never create duplicate log rows.
-    # IMPORTANT: _logged is only set on an actual successful write. A
-    # transient failure (e.g. a momentary SQLite lock from concurrent
-    # writes elsewhere in the app) must not permanently mark this run as
-    # "already logged" — that would silently and irrecoverably lose the
-    # log entry with no visible error, which is exactly what happened
-    # here. Failures are now printed so they're never silent again.
-    if not getattr(bt, "_logged", False):
+    # IMPORTANT: only marked logged on an actual successful write — a
+    # transient failure (e.g. a momentary SQLite lock) must not
+    # permanently mark this run as "already logged" with no visible
+    # error, which is exactly what happened before this fix existed.
+    if not backtest_process_runner.runner.is_logged(run_id):
         try:
-            walkforward_log.record(bt.result)
-            bt._logged = True
+            walkforward_log.record(result)
+            backtest_process_runner.runner.mark_logged(run_id)
         except Exception as e:
             print(f"[walkforward_log] FAILED to record run {run_id}: {type(e).__name__}: {e}")
-    return bt.result
+    return result
 
 
 @api_router.get("/backtest/walkforward/log")
@@ -311,10 +323,9 @@ async def clear_walkforward_log():
 
 @api_router.post("/backtest/walkforward/stop/{run_id}")
 async def walkforward_stop(run_id: str):
-    bt = backtest_walkforward.runner.get(run_id)
-    if not bt:
+    ok = backtest_process_runner.runner.stop(run_id)
+    if not ok:
         return {"error": "run_not_found"}
-    bt.stop()
     return {"ok": True}
 
 
