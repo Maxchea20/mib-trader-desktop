@@ -80,5 +80,6 @@ export function useStructureMarkers({ candleSeriesRef, marketState }) {
     } catch (e) {
       console.error("Failed to set structure markers:", e);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marketState]);
 }
