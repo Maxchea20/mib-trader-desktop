@@ -38,6 +38,9 @@ from typing import Dict, List, Optional
 
 from .config import SYMBOL, HTF_TIMEFRAMES, ANALYSIS_LOOKBACK, TIMEFRAMES, TF_SECONDS
 from .market_data import data_access as dao
+from .market_state.builder import build_market_state
+from .market_state.actionable import apply_actionable_structure
+from .market_data.closed_candles import filter_closed
 from . import analysis_service as svc
 from .analysis_service import _native
 from .brain import brain as brain_engine
@@ -163,7 +166,9 @@ class WalkForwardBacktest:
         bars_wanted = int(self.days * 24 * 60 / bar_minutes)
         need = ANALYSIS_LOOKBACK + bars_wanted + 5
 
-        candles = dao.read_candles(tf, limit=need)
+        raw = dao.read_candles(tf, limit=need)
+        candles = filter_closed(raw, tf)
+        m5_all = filter_closed(dao.read_candles("5m", limit=need * 4), "5m") if tf == "15m" else []
         if len(candles) < ANALYSIS_LOOKBACK + 30:
             self.result = {"error": "insufficient_data", "timeframe": tf,
                             "have": len(candles), "need": need}
@@ -220,7 +225,32 @@ class WalkForwardBacktest:
             if len(window) < 30:
                 equity_curve.append({"ts": ts, "equity": round(balance, 2)})
                 continue
-            agents = svc.run_agents(window, tf, pivot_window_override=self.pivot_window_override)
+            m5_window = None
+            if tf == "15m" and m5_all:
+                horizon = int(ts) + TF_SECONDS[tf]
+                m5_window = [
+                    c for c in m5_all
+                    if int(c["ts"]) + 300 <= horizon and int(c["ts"]) >= int(window[0]["ts"])
+                ]
+            market_state = build_market_state(
+                window,
+                symbol=SYMBOL,
+                timeframe=tf,
+                pivot_window_override=self.pivot_window_override,
+            )
+            apply_actionable_structure(
+                market_state.structure,
+                window,
+                market_state.volatility.atr,
+                m5_candles=m5_window,
+                timeframe=tf,
+            )
+            agents = svc.run_agents(
+                window,
+                tf,
+                market_state=market_state,
+                pivot_window_override=self.pivot_window_override,
+            )
             if self.use_htf_gate:
                 htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override, self.pivot_window_override)
             else:
