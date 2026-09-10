@@ -24,6 +24,19 @@ from typing import Dict, List, Optional
 
 STATE_LINE_RE = re.compile(r"^State:\s*([A-Za-z_]+)")
 
+
+def _get(res, key, default=None):
+    """Uniform accessor — works whether `res` is a live AgentResult
+    object (attribute access) or its _native()-serialized dict form
+    (e.g. what analysis_service.full_analysis()/autotrader.py actually
+    hand around once results have passed through JSON conversion).
+    Avoids re-running run_agents() a second time just to get objects
+    with attributes, which would duplicate real computation."""
+    if isinstance(res, dict):
+        return res.get(key, default)
+    return getattr(res, key, default)
+
+
 # Role groups — agents in the same group often describe the same
 # underlying phenomenon (spec section 30). Used to avoid pretending
 # correlated signals are fully independent votes.

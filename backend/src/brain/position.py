@@ -11,6 +11,7 @@ calls into paper_trading, autotrader, or any execution path.
 from typing import Dict, List
 from ..contract import LONG, SHORT
 from . import evidence as ev
+from .evidence import _get
 
 
 def build_thesis(decision: Dict) -> Dict:
@@ -47,8 +48,8 @@ def evaluate_open_position(thesis: Dict, current_agents: List, current_decision:
     thesis's own primary agents specifically.
     """
     direction = thesis["direction"]
-    entry_consensus = thesis["consensus_at_entry"]
-    current_consensus = current_decision["consensus_score"]
+    entry_consensus = thesis.get("consensus_at_entry", 0.0)
+    current_consensus = current_decision.get("consensus_score", 0.0)
 
     # Thesis strength comparison (spec section 34) — "improving" means
     # the SAME-direction evidence got stronger, regardless of sign.
@@ -74,23 +75,26 @@ def evaluate_open_position(thesis: Dict, current_agents: List, current_decision:
     primary_agent_ids = [_NAME_TO_AGENT.get(n, n) for n in thesis.get("primary_agents", [])]
     structural_failures = []
     for res in current_agents:
-        if res.agent not in primary_agent_ids:
+        agent_id = _get(res, "agent")
+        if agent_id not in primary_agent_ids:
             continue
-        state = ev.extract_state(res.evidence)
+        evidence_list = _get(res, "evidence", [])
+        state = ev.extract_state(evidence_list)
         cls = ev.classify_state(state)
+        agent_direction = _get(res, "direction")
         opposite = (LONG if direction == SHORT else SHORT)
-        if res.direction == opposite or cls["negative"] > 0:
-            structural_failures.append((res.agent, res.direction, state))
+        if agent_direction == opposite or cls["negative"] > 0:
+            structural_failures.append((agent_id, agent_direction, state))
 
     structural_exit = len(structural_failures) >= 1 and thesis_state in ("WEAKENING", "INVALIDATED")
 
     # Profit protection (spec section 36) — favorable move + momentum
     # specifically weakening + some structural warning, even without a
     # full structural exit yet.
-    momentum_res = next((r for r in current_agents if r.agent == "momentum"), None)
+    momentum_res = next((r for r in current_agents if _get(r, "agent") == "momentum"), None)
     momentum_weakening = False
     if momentum_res is not None:
-        m_state = ev.extract_state(momentum_res.evidence) or ""
+        m_state = ev.extract_state(_get(momentum_res, "evidence", [])) or ""
         momentum_weakening = "EXHAUSTING" in m_state.upper() or "DECELERATING" in m_state.upper()
     favorable_move = delta > 0
 

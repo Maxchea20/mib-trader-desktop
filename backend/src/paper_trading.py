@@ -9,6 +9,7 @@ import time
 import uuid
 import sqlite3
 import threading
+import json
 from typing import Dict, List, Optional
 
 from .market_data import database as mdb
@@ -68,6 +69,14 @@ def init_db() -> None:
             conn.execute("ALTER TABLE paper_trades ADD COLUMN decision_id TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE paper_trades ADD COLUMN thesis_json TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE paper_trades ADD COLUMN thesis_result TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -88,7 +97,8 @@ def _pnl(side: str, entry: float, exit_price: float, qty: float):
 def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[float],
                tp_price: Optional[float], notional_usd: float, timeframe: str = "",
                brain_state: str = "", consensus: float = 0.0, confidence: float = 0.0,
-               note: str = "", source: str = "MANUAL", decision_id: Optional[str] = None) -> Dict:
+               note: str = "", source: str = "MANUAL", decision_id: Optional[str] = None,
+               thesis: Optional[Dict] = None) -> Dict:
     side = LONG if str(side).upper() == LONG else SHORT
     entry_price = float(entry_price)
     notional_usd = max(1.0, float(notional_usd))
@@ -99,16 +109,21 @@ def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[fl
     qty = notional_usd / entry_price
     tid = str(uuid.uuid4())
     now = int(time.time())
+    # thesis is the IMMUTABLE original Brain thesis at entry (spec
+    # section 2) — stored once here, never overwritten by later
+    # analysis. Optional and backward compatible: existing callers that
+    # don't pass one get thesis_json=NULL, exactly as before this change.
+    thesis_json = json.dumps(thesis) if thesis else None
     with _lock:
         conn = _connect()
         conn.execute(
             """INSERT INTO paper_trades
                (id, symbol, timeframe, side, status, entry_price, sl_price, tp_price,
-                qty, notional_usd, opened_at, brain_state, consensus, confidence, note, source, decision_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                qty, notional_usd, opened_at, brain_state, consensus, confidence, note, source, decision_id, thesis_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tid, symbol, timeframe, side, "OPEN", entry_price, float(sl_price),
              float(tp_price), qty, notional_usd, now, brain_state, float(consensus),
-             float(confidence), note, source, decision_id),
+             float(confidence), note, source, decision_id, thesis_json),
         )
         conn.commit()
 
@@ -134,18 +149,53 @@ def get_trade(tid: str) -> Optional[Dict]:
     return _row_to_dict(r) if r else None
 
 
+def get_thesis(tid: str) -> Optional[Dict]:
+    """Deserializes the immutable original thesis stored at open_trade()
+    time, if one was provided. Returns None for trades opened without a
+    thesis (e.g. MANUAL trades, or trades opened before this feature
+    existed) — never fabricates one."""
+    t = get_trade(tid)
+    if not t or not t.get("thesis_json"):
+        return None
+    try:
+        return json.loads(t["thesis_json"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _classify_thesis_result(exit_reason: str, pnl: float, had_thesis: bool) -> str:
+    """Trade autopsy foundation (spec section 10) — NOT the Learning
+    Brain, just a durable classification of what actually happened
+    versus what Brain believed at entry, for a FUTURE experience
+    database to consume. This does not feed back into any live
+    decision — Brain never self-modifies from this (spec section 11)."""
+    if not had_thesis:
+        return "OTHER"  # no thesis was stored (e.g. a MANUAL trade) — nothing to compare against
+    win = pnl > 0
+    if exit_reason == "TP":
+        return "CONFIRMED"
+    if exit_reason == "BRAIN_EXIT":
+        return "INVALIDATED"  # Brain itself recognized the thesis had broken down
+    if exit_reason == "SL":
+        return "INVALIDATED" if not win else "PARTIALLY_CONFIRMED"
+    if exit_reason == "FLIP":
+        return "PARTIALLY_CONFIRMED" if win else "INVALIDATED"
+    return "OTHER"
+
+
 def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional[Dict]:
     t = get_trade(tid)
     if not t or t["status"] != "OPEN":
         return t
     exit_price = float(exit_price)
     pnl, pct = _pnl(t["side"], t["entry_price"], exit_price, t["qty"])
+    thesis_result = _classify_thesis_result(reason, pnl, bool(t.get("thesis_json")))
     with _lock:
         conn = _connect()
         conn.execute(
             """UPDATE paper_trades SET status='CLOSED', closed_at=?, exit_price=?,
-               exit_reason=?, pnl=?, pnl_pct=? WHERE id=?""",
-            (int(time.time()), exit_price, reason, pnl, pct, tid),
+               exit_reason=?, pnl=?, pnl_pct=?, thesis_result=? WHERE id=?""",
+            (int(time.time()), exit_price, reason, pnl, pct, thesis_result, tid),
         )
         conn.commit()
 
