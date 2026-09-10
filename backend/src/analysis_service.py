@@ -50,6 +50,20 @@ def _native(obj):
     return obj
 
 
+def _attach_ms_state(res, market_state):
+    if market_state is None:
+        return res
+    act = getattr(market_state.structure, "actionable_state", None)
+    if not act:
+        return res
+    ev = list(res.evidence or [])
+    ev.append(f"Actionable: {act} | M5: {getattr(market_state.structure, 'm5_confirm', 'NONE')}")
+    ev.append(f"State: {act}")
+    res.evidence = ev
+    res.state = act
+    return res
+
+
 def _market_state_to_dict(state) -> Dict:
     return {
         "symbol": state.symbol,
@@ -131,6 +145,7 @@ def run_agents(candles: List[Dict], timeframe: str, market_state=None, pivot_win
             analyzer = AGENT_REGISTRY[aid]
             if aid == "market_structure":
                 res = analyzer(candles, timeframe, market_state=market_state, pivot_window_override=pivot_window_override)
+                res = _attach_ms_state(res, market_state)
             else:
                 res = analyzer(candles, timeframe)
         except Exception as e:
@@ -191,6 +206,7 @@ def single_agent(agent_id: str, timeframe: str) -> Dict:
         m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m") if timeframe == "15m" else None
         apply_actionable_structure(market_state.structure, candles, market_state.volatility.atr, m5_candles=m5_closed, timeframe=timeframe)
         result = AGENT_REGISTRY[agent_id](candles, timeframe, market_state=market_state)
+        result = _attach_ms_state(result, market_state)
     else:
         result = AGENT_REGISTRY[agent_id](candles, timeframe)
     return _native(result.to_dict())
