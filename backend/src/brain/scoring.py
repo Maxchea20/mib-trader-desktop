@@ -15,6 +15,27 @@ from ..contract import LONG, SHORT
 EXCLUDE_FROM_EXECUTION = ("elliott_wave",)  # spec section 2 — research/
 # diagnostic only, zero execution influence. Still visible in evidence/UI.
 
+# Agents whose key_levels are treated as event origins when they also
+# report an actionable trigger state. Lower rank wins. Location agents
+# (S/R, FVG, Fib) are last so an incidental nearby level cannot steal
+# the reference from a Structure BOS / Breakout origin.
+_ORIGIN_AGENT_RANK = {
+    "market_structure": 0,
+    "breakout": 1,
+    "pattern": 2,
+    "momentum": 3,
+    "volume": 4,
+    "trend": 5,
+    "support_resistance": 8,
+    "fair_value_gap": 8,
+    "fibonacci": 8,
+}
+_ORIGIN_LABEL_HINTS = (
+    "BOS", "CHOCH", "BREAK", "BREAKOUT", "ORIGIN", "TRIGGER",
+    "SWING", "IMPULSE", "LEVEL", "REF",
+)
+
+
 
 def setup_score(agents: List, bias: str) -> Dict:
     """A setup is directional AGREEMENT across independent ROLES, not a
@@ -63,17 +84,39 @@ def setup_score(agents: List, bias: str) -> Dict:
     }
 
 
-def trigger_score(agents: List, bias: str) -> Dict:
-    """A trigger is an ACTIONABLE event, not just a directional read —
-    extracted from each agent's own reported state (section 14). Early
-    triggers count fully; this deliberately does NOT wait for the
-    strongest possible confirmation state (section 15)."""
-    if bias not in (LONG, SHORT):
-        return {"score": 0.0, "state": "TRIGGER_PENDING", "primary": [], "detail": "no directional bias"}
+# Same-event clustering radius in ATR units.
+_CLUSTER_ATR_MULT = 0.5
 
-    primary = []
+
+def _published_origin_price(res):
+    """Read an origin from this agent's own key_levels only. Does not invent a price."""
+    best = None
+    for lv in (res.key_levels or []):
+        raw = lv.get("price")
+        if raw is None:
+            continue
+        try:
+            level_price = float(raw)
+        except (TypeError, ValueError):
+            continue
+        label = str(lv.get("label") or "")
+        label_rank = 0 if any(h in label.upper() for h in _ORIGIN_LABEL_HINTS) else 1
+        if best is None or label_rank < best[0]:
+            best = (label_rank, level_price)
+    return None if best is None else best[1]
+
+
+def _same_event_origin(p1, p2, atr_value) -> bool:
+    if p1 is None or p2 is None:
+        return False
+    if atr_value and atr_value > 0:
+        return abs(p1 - p2) <= _CLUSTER_ATR_MULT * atr_value
+    return abs(p1 - p2) <= 1e-9 * max(abs(p1), 1.0)
+
+
+def _collect_trigger_members(agents: List, bias: str):
+    members = []
     supporting = []
-    total = 0.0
     for res in agents:
         if not res.valid or res.agent in EXCLUDE_FROM_EXECUTION:
             continue
@@ -82,32 +125,117 @@ def trigger_score(agents: List, bias: str) -> Dict:
         if res.direction != bias:
             continue
         if cls["trigger"] > 0:
-            primary.append((res.agent, state, res.confidence))
-            total += res.confidence
+            members.append({
+                "agent": res.agent,
+                "role": ev.agent_role(res.agent),
+                "state": state,
+                "confidence": float(res.confidence),
+                "origin_price": _published_origin_price(res),
+                "origin_ts": None,
+                "direction": bias,
+            })
         elif not cls["context_only"]:
             supporting.append(res.agent)
+    return members, supporting
 
-    # A genuine trigger needs at least one agent reporting an actionable
-    # state in the bias direction — without that, this is a directional
-    # READ, not a trigger, regardless of how many agents merely agree
-    # on direction (this is exactly the setup-vs-trigger distinction).
-    if not primary:
-        return {"score": 0.0, "state": "TRIGGER_PENDING", "primary": [], "supporting": supporting,
-                "detail": "no agent reports an actionable trigger state"}
 
-    avg_conf = total / len(primary)
-    score = min(100.0, len(primary) * 20.0 + avg_conf * 0.5)
-    # CONFIRMING once more than one independent trigger agrees (follow-
-    # through/supporting evidence backing the initial trigger), else
-    # just TRIGGERED on the single-agent case — mirrors "early trigger
-    # != full confirmation" (spec section 15) at the Brain level too.
-    trigger_state = "CONFIRMING" if len(primary) >= 2 else "TRIGGERED"
+def _cluster_trigger_members(members: List, atr_value) -> List[List]:
+    clusters: List[List] = []
+    unlocated = [m for m in members if m["origin_price"] is None]
+    located = [m for m in members if m["origin_price"] is not None]
+    located.sort(key=lambda m: m["origin_price"])
+    for m in located:
+        placed = False
+        for cluster in clusters:
+            if any(_same_event_origin(m["origin_price"], x["origin_price"], atr_value) for x in cluster):
+                cluster.append(m)
+                placed = True
+                break
+        if not placed:
+            clusters.append([m])
+    for m in unlocated:
+        clusters.append([m])
+    return clusters
+
+
+def _summarize_cluster(cluster: List) -> Dict:
+    ranked = sorted(cluster, key=lambda m: _ORIGIN_AGENT_RANK.get(m["agent"], 9))
+    origin = None
+    for m in ranked:
+        if m["origin_price"] is not None:
+            origin = m["origin_price"]
+            break
+    max_conf = max(m["confidence"] for m in cluster)
+    avg_conf = sum(m["confidence"] for m in cluster) / len(cluster)
+    return {
+        "direction": cluster[0]["direction"],
+        "origin_price": None if origin is None else round(origin, 2),
+        "sources": [m["agent"] for m in cluster],
+        "roles": [m["role"] for m in cluster],
+        "states": [m["state"] for m in cluster],
+        "corroboration": len(cluster),
+        "max_confidence": round(max_conf, 1),
+        "avg_confidence": round(avg_conf, 1),
+        "members": cluster,
+    }
+
+
+def trigger_score(agents: List, bias: str, atr_value: float = None, price: float = None) -> Dict:
+    """A trigger is an ACTIONABLE event clustered by published origin.
+
+    Multiple agents on the SAME origin are one event with corroboration.
+    Early single-agent triggers still count. `price` is unused for clustering.
+    """
+    if bias not in (LONG, SHORT):
+        return {
+            "score": 0.0, "state": "TRIGGER_PENDING", "primary": [],
+            "event_count": 0, "cluster_count": 0, "events": [],
+            "trigger_sources": [], "trigger_origin": None,
+            "trigger_direction": None, "detail": "no directional bias",
+        }
+
+    members, supporting = _collect_trigger_members(agents, bias)
+    if not members:
+        return {
+            "score": 0.0, "state": "TRIGGER_PENDING", "primary": [],
+            "supporting": supporting, "event_count": 0, "cluster_count": 0,
+            "events": [], "trigger_sources": [], "trigger_origin": None,
+            "trigger_direction": None,
+            "detail": "no agent reports an actionable trigger state",
+        }
+
+    raw_clusters = _cluster_trigger_members(members, atr_value)
+    events = [_summarize_cluster(c) for c in raw_clusters]
+    n_events = len(events)
+    best = max(events, key=lambda e: (e["corroboration"], e["max_confidence"]))
+
+    event_term = n_events * 20.0
+    conf_term = (sum(e["max_confidence"] for e in events) / n_events) * 0.5
+    corr_term = sum(8.0 * min(e["corroboration"] - 1, 3) for e in events)
+    score = min(100.0, event_term + conf_term + corr_term)
+    trigger_state = "CONFIRMING" if any(e["corroboration"] >= 2 for e in events) else "TRIGGERED"
+
+    primary = [f"{m['agent']} ({m['state']})" for m in members]
+    parts = []
+    for i, e in enumerate(events, 1):
+        origin_txt = "no origin" if e["origin_price"] is None else f"@ {e['origin_price']}"
+        parts.append(
+            f"{i}. {e['direction']} {origin_txt} sources={','.join(e['sources'])} "
+            f"corr={e['corroboration']} conf={e['max_confidence']}"
+        )
+    detail = f"{n_events} distinct {bias} trigger event(s); " + "; ".join(parts)
     return {
         "score": round(score, 1),
         "state": trigger_state,
-        "primary": [f"{a} ({s})" for a, s, c in primary],
+        "primary": primary,
         "supporting": supporting,
-        "detail": f"{len(primary)} agent(s) report an actionable {bias} trigger",
+        "event_count": n_events,
+        "cluster_count": n_events,
+        "events": [{k: v for k, v in e.items() if k != "members"} for e in events],
+        "trigger_sources": best["sources"],
+        "trigger_origin": best["origin_price"],
+        "trigger_direction": bias,
+        "detail": detail,
     }
 
 
@@ -144,27 +272,6 @@ def location_score(agents: List, price: float, bias: str, confluence_zones: List
         "favorable_side": favorable,
         "detail": f"nearest relevant zone @ {best['price']:.1f} ({', '.join(best['agents'])}), {dist_pct:.2f}% away",
     }
-
-
-# Agents whose key_levels are treated as event origins when they also
-# report an actionable trigger state. Lower rank wins. Location agents
-# (S/R, FVG, Fib) are last so an incidental nearby level cannot steal
-# the reference from a Structure BOS / Breakout origin.
-_ORIGIN_AGENT_RANK = {
-    "market_structure": 0,
-    "breakout": 1,
-    "pattern": 2,
-    "momentum": 3,
-    "volume": 4,
-    "trend": 5,
-    "support_resistance": 8,
-    "fair_value_gap": 8,
-    "fibonacci": 8,
-}
-_ORIGIN_LABEL_HINTS = (
-    "BOS", "CHOCH", "BREAK", "BREAKOUT", "ORIGIN", "TRIGGER",
-    "SWING", "IMPULSE", "LEVEL", "REF",
-)
 
 
 def _is_trigger_agent(res, bias: str) -> bool:

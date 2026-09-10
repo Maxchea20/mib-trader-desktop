@@ -204,7 +204,7 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
 
     # --- NEW: setup / trigger / location / extension (spec sections 13-19) ---
     setup = scoring.setup_score(agents, bias)
-    trigger = scoring.trigger_score(agents, bias)
+    trigger = scoring.trigger_score(agents, bias, atr_value=atr_value, price=price)
     location = scoring.location_score(agents, price, bias, zones)
     max_ext = ENTRY.get("max_extension_pct", 1.2)
     if atr_value:
