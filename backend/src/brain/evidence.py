@@ -165,17 +165,21 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
     """Role-net directional evidence for BOTH sides.
 
     Per role:
-        mass_i = confidence_i × existing agent_weight_i
+        mass_i    = confidence_i × existing agent_weight_i
         long_eff  = diminished(long masses)
         short_eff = diminished(short masses)
-        score     = clamp(|(L-S)| / w_peak, 0, 100) × purity
-        purity    = |L-S| / (L+S)   (internal role disagreement)
+        cap       = diminished(100 × lean-side weights)
+        quality   = 100 × max(L,S) / cap     (0..100, confidence-scaled)
+        purity    = |L-S| / (L+S)            (internal role disagreement)
+        score     = quality × purity
 
     Neutral / invalid / excluded / OTHER agents never enter the
     denominator. Roles with no directional members are omitted.
 
-    Cross-role consensus is the mean of signed role scores among
-    roles that actually produced directional evidence.
+    Cross-role consensus is the unweighted mean of signed role scores
+    among roles that actually produced directional evidence. Role
+    weights across STRUCTURE/DRIVE/LOCATION/PATTERN are intentionally
+    not applied here.
     """
     buckets: Dict[str, List] = {role: [] for role in CONSENSUS_ROLE_GROUPS}
     for res in agents:
@@ -222,8 +226,8 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
         else:
             direction = "SHORT"
             lean_items = short_items
-        w_peak = max(w for _, w, _ in lean_items) if lean_items else 1.0
-        quality = min(100.0, (max(long_eff, short_eff)) / max(w_peak, 1e-9))
+        cap = _diminished_mass([100.0 * w for _, w, _ in lean_items])
+        quality = min(100.0, 100.0 * max(long_eff, short_eff) / max(cap, 1e-9))
         denom = long_eff + short_eff
         purity = abs(long_eff - short_eff) / denom if denom else 0.0
         score = quality * purity
@@ -233,6 +237,7 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
             "direction": direction,
             "score": round(score, 1),
             "signed": round(signed, 1),
+            "quality": round(quality, 1),
             "agents": [e["agent"] for e in agents_out],
             "agent_detail": agents_out,
             "long_eff": round(long_eff, 2),
