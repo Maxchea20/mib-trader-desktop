@@ -77,13 +77,13 @@ def _consensus_band(consensus: float) -> str:
 
 
 def _base_consensus(agents: List, weights_override: Dict = None) -> Dict:
-    """Base Consensus Score = Σ(direction × confidence × weight) / Σ weights.
-    Elliott Wave excluded — spec section 2, zero execution influence."""
-    num = 0.0
-    den = 0.0
+    """Role-net consensus: correlated agents inside a role are one
+    directional unit. Agent-level contributions stay on the record for
+    diagnostics. Elliott Wave excluded — spec section 2."""
+    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
     contributions = []
     active = 0
-    AGENT_WEIGHTS = weights_override if weights_override is not None else settings.weights()
+    den = 0.0
     long_evidence = 0.0
     short_evidence = 0.0
     neutral_agents = []
@@ -96,8 +96,6 @@ def _base_consensus(agents: List, weights_override: Dict = None) -> Dict:
             neutral_agents.append(res.agent)
         if not excluded:
             active += 1
-            score = res.sign() * res.confidence * w
-            num += score
             den += w
             if res.direction == LONG:
                 long_evidence += res.confidence * w
@@ -108,12 +106,14 @@ def _base_consensus(agents: List, weights_override: Dict = None) -> Dict:
             "confidence": round(res.confidence, 1), "weight": w,
             "contribution": round(res.sign() * res.confidence * w, 1) if not excluded else 0.0,
             "execution_influence": not excluded,
+            "consensus_role": ev.consensus_role(res.agent) if not excluded else "EXCLUDED",
         })
-    base = num / den if den else 0.0
-    return {"base_consensus": round(base, 1), "active_agents": active,
+    net = ev.role_net_evidence(agents, AGENT_WEIGHTS, exclude_agents=EXCLUDE_FROM_EXECUTION)
+    return {"base_consensus": net["consensus"], "active_agents": active,
             "sum_weights": round(den, 2), "contributions": contributions,
             "long_evidence": round(long_evidence, 1), "short_evidence": round(short_evidence, 1),
-            "neutral_agents": neutral_agents}
+            "neutral_agents": neutral_agents,
+            "role_net": net}
 
 
 def _brain_confidence(bias: str, consensus: float, base: Dict, conflict: Dict,
@@ -131,13 +131,7 @@ def _brain_confidence(bias: str, consensus: float, base: Dict, conflict: Dict,
         total_evidence = long_e + short_e
         n_directional = max(base["active_agents"] - len(base["neutral_agents"]), 1)
         avg_evidence = total_evidence / n_directional
-        # How genuinely two-sided is this, independent of conflict.py's
-        # own veto/severe thresholds (which exist for a different
-        # purpose — deciding AVOID). A market with strong evidence on
-        # BOTH sides is confidently contested even if it doesn't cross
-        # those specific bureaucratic bars — that raw balance is the
-        # actual signal spec section 45 cares about.
-        balance = 1.0 - abs(long_e - short_e) / max(total_evidence, 1e-9)  # 1.0 = perfectly balanced
+        balance = 1.0 - abs(long_e - short_e) / max(total_evidence, 1e-9)
         conflict_component = 100.0 if conflict.get("veto") else (
             75.0 if conflict.get("severity") == "severe" else
             45.0 if conflict.get("severity") == "moderate" else 0.0)
@@ -171,7 +165,6 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
     consensus = base["base_consensus"]
     consensus_band = _consensus_band(consensus)
 
-    # PHASE F — directional bias (unchanged mechanism/thresholds)
     if consensus >= ENTRY["direction_min_score"]:
         bias = LONG
     elif consensus <= -ENTRY["direction_min_score"]:
@@ -179,30 +172,19 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
     else:
         bias = NEUTRAL
 
-    # PHASE D — confluence (unchanged)
     zones = find_confluence_zones(agents, price)
     confluence_bonus = sum(z["bonus"] for z in zones[:3])
 
-    # PHASE E — conflict. detect_conflict() itself has no Elliott-Wave
-    # awareness, so the exclusion has to happen here, on the agent list
-    # passed in — filtering before the call, not inside conflict.py,
-    # keeps that file completely untouched per the "small controlled
-    # changes" mandate.
     execution_agents = [a for a in agents if a.agent not in EXCLUDE_FROM_EXECUTION]
     conflict = detect_conflict(execution_agents, bias, weights_override, conflict_override)
 
-    # Directional confidence — this IS what the old "confidence" field
-    # measured. Kept, but no longer overloaded as Brain's overall
-    # decision confidence (see brain_confidence below).
     directional_confidence = clamp(abs(consensus) + confluence_bonus - conflict["penalty"], 0, 100)
 
-    # PHASE C — HTF gate (unchanged)
     regime = htf.get("regime", NEUTRAL)
     gate = apply_gate(bias, regime, htf_gate_override)
     entry_score_req = ENTRY["entry_min_score"] + gate["extra_score_required"]
     entry_conf_req = ENTRY["entry_min_confidence"] + gate["extra_confidence_required"]
 
-    # --- NEW: setup / trigger / location / extension (spec sections 13-19) ---
     setup = scoring.setup_score(agents, bias)
     trigger = scoring.trigger_score(agents, bias, atr_value=atr_value, price=price)
     location = scoring.location_score(agents, price, bias, zones)
@@ -226,9 +208,6 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
         reasons.append(f"Confluence zone @ {z['price']:.1f} ({', '.join(_name(a) for a in z['agents'])}) +{z['bonus']}")
     reasons.append(f"HTF regime: {regime} ({htf.get('regime_score', 0):+.0f}) → {gate['relation']}")
 
-    # Primary vs supporting evidence (spec section 29) — primary is
-    # whichever agents report an actual TRIGGER; everything else aligned
-    # is supporting context.
     primary_agents = {p.split(" (")[0] for p in trigger.get("primary", [])}
     primary_evidence = [f"{_name(a)}: {r.evidence[0] if r.evidence else r.direction}"
                         for a in primary_agents for r in agents if r.agent == a]
@@ -242,13 +221,10 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
     )
 
     return {
-        "state": state,                    # LONG | SHORT | WAIT | AVOID — UNCHANGED CONTRACT,
-        # autotrader.py's execution gate depends on this exact value/shape.
+        "state": state,
         "direction": bias,
         "consensus_score": consensus,
-        "confidence": round(directional_confidence, 1),   # kept for backward compat — this is
-        # DIRECTIONAL confidence specifically, see brain_confidence for the Brain's overall
-        # decision confidence (spec sections 4, 21-22, 44).
+        "confidence": round(directional_confidence, 1),
         "base_consensus": consensus,
         "confluence_bonus": round(confluence_bonus, 1),
         "confluence_zones": zones,
@@ -265,12 +241,14 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
         "timeframe": timeframe,
         "config_version": CONFIG_VERSION,
         "assumptions": ASSUMPTIONS,
-
-        # --- New Brain V2 fields (additive, backward compatible) ---
         "directional_consensus_band": consensus_band,
         "long_evidence": base["long_evidence"],
         "short_evidence": base["short_evidence"],
         "neutral_agents": base["neutral_agents"],
+        "role_consensus": base["role_net"]["roles"],
+        "role_net_contributions": base["role_net"]["contributions"],
+        "long_role_evidence": base["role_net"]["long_role_evidence"],
+        "short_role_evidence": base["role_net"]["short_role_evidence"],
         "setup_state": setup["state"],
         "setup_score": setup["score"],
         "setup_detail": setup,
@@ -284,8 +262,7 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
         "extension_detail": extension,
         "brain_confidence": brain_confidence,
         "entry_readiness": state in (STATE_LONG, STATE_SHORT),
-        "decision_state": decision_state,   # rich internal state (25-value machine) —
-        # ADDITIVE ONLY, `state` above remains the legacy 4-value contract.
+        "decision_state": decision_state,
         "primary_evidence": primary_evidence,
         "supporting_evidence": supporting_evidence,
         "blocking_reasons": blocking,
@@ -304,14 +281,11 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
     why = []
     blocking = []
 
-    # STEP 1-2: data validity / valid agent count
     if active < ENTRY["min_valid_agents"]:
         msg = f"Only {active} valid agents (min {ENTRY['min_valid_agents']}) — poor conditions"
         why.append(msg); blocking.append(msg)
         return STATE_AVOID, "WAIT_INSUFFICIENT_DATA", why, blocking
 
-    # STEP 4: conflict — hard vetoes only; moderate conflict never
-    # auto-vetoes (spec section 11)
     if conflict["veto"]:
         msg = f"Hard veto: opposing evidence ratio {conflict['opposing_ratio']:.0%}"
         why.append(msg); blocking.append(msg)
@@ -321,7 +295,6 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
         why.append(msg); blocking.append(msg)
         return STATE_AVOID, "WAIT_CONFLICT", why, blocking
 
-    # STEP 3: directional consensus
     if bias == NEUTRAL:
         contested = conflict.get("conflict") or conflict.get("opposing_ratio", 0.0) >= 0.35
         if contested:
@@ -335,49 +308,35 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
     mag = abs(consensus)
     bias_word = "LONG" if bias == LONG else "SHORT"
 
-    # STEP 6: setup formation — a directional lean exists, but has it
-    # actually developed into a real, role-diverse setup yet?
     if setup["state"] in ("NO_SETUP", "SETUP_FORMING"):
         why.append(f"{bias} directional lean present (consensus {consensus:+.0f}) but setup "
                   f"only {setup['state']} ({setup['score']:.0f}/100) — {setup['detail']}")
         blocking.append("setup not yet developed")
         return STATE_WAIT, f"BIAS_{bias_word}", why, blocking
 
-    # STEP 7: entry trigger — setup exists, but has an actual actionable
-    # event happened? (spec sections 13-16 — this is the core setup vs
-    # trigger distinction)
     if trigger["score"] <= 0:
         why.append(f"{bias} setup {setup['state']} (score {setup['score']:.0f}) but no actionable "
                   f"trigger has occurred yet — {trigger['detail']}")
         blocking.append("no valid entry trigger")
         return STATE_WAIT, f"SETUP_{bias_word}", why, blocking
 
-    # STEP 8: location — is the trigger happening somewhere meaningful?
     if location["score"] < 35:
         why.append(f"{bias} trigger valid ({trigger['detail']}) but location quality is weak "
                   f"({location['score']:.0f}/100) — {location.get('detail', '')}")
         blocking.append("poor location")
         return STATE_WAIT, "WAIT_POOR_LOCATION", why, blocking
 
-    # STEP 9: timing / extension — genuinely new logic (max_extension_pct
-    # previously unused anywhere in the codebase, confirmed by direct
-    # inspection)
     if extension["state"] == "EXTENDED":
         why.append(f"{bias} trigger valid but price already extended — {extension.get('detail', '')}")
         blocking.append("extended")
         return STATE_WAIT, "WAIT_EXTENDED", why, blocking
     if extension["state"] == "UNKNOWN":
-        # Missing trigger origin must not silently pass as TIMELY.
         why.append(f"{bias} trigger has no verifiable origin — {extension.get('detail', '')}")
         blocking.append("extension origin unknown")
         return STATE_WAIT, "WAIT_NO_EXTENSION_REF", why, blocking
 
-    # HTF as an explicit gating step (spec section 12) — counter-trend
-    # is allowed, never a hard block, but called out on its own when
-    # it's specifically the reason the entry bar isn't cleared yet.
     htf_is_blocking = gate["relation"] == "counter-trend" and mag < score_req
 
-    # STEP 10-11: Brain confidence + entry score/confidence thresholds
     ready = mag >= score_req and directional_confidence >= conf_req
     if ready:
         why.append(f"Consensus {consensus:+.0f} ≥ required {score_req:.0f}")
@@ -391,9 +350,6 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
             why.append(f"Counter-trend to HTF regime ({regime}) — passed the higher bar anyway")
         return (STATE_LONG if bias == LONG else STATE_SHORT), f"FIRE_{bias_word}", why, blocking
 
-    # Setup + trigger + location + timing all pass, but entry
-    # thresholds not yet met → WAIT, with the SPECIFIC blocking reason
-    # identified rather than a generic catch-all.
     if htf_is_blocking:
         why.append(f"Counter-trend to HTF regime ({regime}) — higher bar applied "
                   f"(required {score_req:.0f}, have {mag:.0f})")
