@@ -150,8 +150,12 @@ def _record_full_decision(setup_id: str, symbol: str, timeframe: str, ts: int,
                 entry_filter_result, entry_filter_reason,
                 risk_status, risk_score, stop_distance, risk_reward, position_size_status,
                 final_decision, confidence, primary_reason, secondary_reason,
-                rejection_stage, rejection_reason, explanation
-            ) VALUES (?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?)""",
+                rejection_stage, rejection_reason, explanation,
+                direction, brain_confidence, setup_score, setup_state,
+                trigger_score, trigger_state, location_score, extension_state,
+                decision_state, brain_version, primary_evidence_json, supporting_evidence_json
+            ) VALUES (?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,
+                      ?,?,?,?, ?,?,?,?, ?,?,?,?)""",
             (
                 decision_id, setup_id, ts, symbol, timeframe,
                 price, risk.get("spread"), risk.get("spread_pct"), atr_val, atr_pct,
@@ -167,6 +171,16 @@ def _record_full_decision(setup_id: str, symbol: str, timeframe: str, ts: int,
                 final_decision, brain.get("confidence"),
                 (brain.get("reasons") or [None])[0], (brain.get("reasons") or [None, None])[1] if len(brain.get("reasons", [])) > 1 else None,
                 rejection_stage, rejection_reason, explanation,
+                # Brain V2 fields confirmed generated but not previously
+                # persisted (see audit) — pulled with .get() throughout
+                # since a caller could in principle still be running the
+                # pre-V2 Brain, which won't have these keys at all; NULL
+                # in that case is correct, not a bug to paper over.
+                bias, brain.get("brain_confidence"), brain.get("setup_score"), brain.get("setup_state"),
+                brain.get("trigger_score"), brain.get("trigger_state"), brain.get("location_score"),
+                brain.get("extension_state"), brain.get("decision_state"), brain.get("brain_version"),
+                json.dumps(brain.get("primary_evidence")) if brain.get("primary_evidence") is not None else None,
+                json.dumps(brain.get("supporting_evidence")) if brain.get("supporting_evidence") is not None else None,
             ),
         )
         for a in agents:

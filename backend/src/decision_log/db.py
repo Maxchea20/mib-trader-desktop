@@ -82,6 +82,30 @@ def init_db() -> None:
             explanation TEXT
         )""")
 
+        # Migration for Brain V2 fields confirmed generated but not
+        # persisted by direct audit: brain_confidence (the actual fix
+        # behind the confidence-collapse bug), setup/trigger/location/
+        # extension scoring, the rich internal decision_state, the
+        # directional bias itself (previously only recoverable when
+        # final_decision was LONG/SHORT — lost on every WAIT/AVOID row),
+        # V2's structured primary/supporting evidence (previously only
+        # the older, coarser reasons[0]/[1] survived), and a version tag
+        # so a row can be identified as pre- or post-Brain-V2. Existing
+        # rows simply get NULL for these — they genuinely predate this
+        # data, nothing to backfill.
+        for col, coltype in [
+            ("direction", "TEXT"), ("brain_confidence", "REAL"),
+            ("setup_score", "REAL"), ("setup_state", "TEXT"),
+            ("trigger_score", "REAL"), ("trigger_state", "TEXT"),
+            ("location_score", "REAL"), ("extension_state", "TEXT"),
+            ("decision_state", "TEXT"), ("brain_version", "TEXT"),
+            ("primary_evidence_json", "TEXT"), ("supporting_evidence_json", "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE decisions ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
         conn.execute("""CREATE TABLE IF NOT EXISTS agent_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             decision_id TEXT NOT NULL,
