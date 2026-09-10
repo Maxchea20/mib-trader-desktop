@@ -1,4 +1,4 @@
-﻿
+﻿"""
 
 Evaluates the Brain (all 10 agents + HTF regime) on each new candle close of the
 auto-trade timeframe and manages a single AUTO paper position:
