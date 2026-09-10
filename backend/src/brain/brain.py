@@ -25,7 +25,7 @@ numbers:
     brain_confidence          — confidence in THIS decision, which can be
                                  HIGH even during a contested WAIT (spec
                                  section 45's own worked example) — a lot
-                                 of strong evidence on both sides is a
+of strong evidence on both sides is a
                                  confidently-contested market, not "no
                                  signal."
 
@@ -366,6 +366,11 @@ def _resolve_state(bias, consensus, directional_confidence, brain_confidence, ac
         why.append(f"{bias} trigger valid but price already extended — {extension.get('detail', '')}")
         blocking.append("extended")
         return STATE_WAIT, "WAIT_EXTENDED", why, blocking
+    if extension["state"] == "UNKNOWN":
+        # Missing trigger origin must not silently pass as TIMELY.
+        why.append(f"{bias} trigger has no verifiable origin — {extension.get('detail', '')}")
+        blocking.append("extension origin unknown")
+        return STATE_WAIT, "WAIT_NO_EXTENSION_REF", why, blocking
 
     # HTF as an explicit gating step (spec section 12) — counter-trend
     # is allowed, never a hard block, but called out on its own when
