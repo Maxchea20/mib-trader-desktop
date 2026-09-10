@@ -133,6 +133,14 @@ class BreakoutLifecycle:
         self.breakout_lifecycle_score = 0.0
         self.breakout_lifecycle_confidence = 0.0
 
+        # Current distance from the broken level, in ATR, updated every
+        # candle regardless of state (unlike retest_distance_atr, which
+        # is only meaningful/updated once a retest has actually
+        # happened). Added purely for evidence-text/explanation
+        # purposes (spec section 13 of the lifecycle-fix task) — not
+        # read by any scoring logic.
+        self.current_distance_from_level_atr = 0.0
+
 
 def _volume_zscore(volume: np.ndarray) -> float:
     """Z-score of the LATEST element in the given array against the
@@ -330,6 +338,10 @@ def _track_breakout_lifecycle(high, low, close, open_, volume, timestamps) -> "B
 
         # --- Retest: price has returned close to the broken level itself ---
         retest_distance_atr = abs(c - tracked["level"]) / atr_ref
+        # Recorded every iteration, independent of the RETEST_ZONE_ATR
+        # threshold below -- this is "how far from the level right now,"
+        # not "did a retest happen." Evidence-text use only.
+        result.current_distance_from_level_atr = round(retest_distance_atr, 3)
         if retest_distance_atr <= RETEST_ZONE_ATR:
             _advance("RETEST")
             if not result.retest_detected:
@@ -392,15 +404,50 @@ def _track_breakout_lifecycle(high, low, close, open_, volume, timestamps) -> "B
     return result
 
 
+# What each lifecycle state means for "what happens next" — used only
+# to render an explanatory "Next:" evidence line (spec section 13 of
+# the lifecycle-fix task). Purely descriptive text about the state
+# machine's own documented transitions (see BreakoutLifecycle's
+# docstring) — never a computed value, and never read back by any
+# scoring logic.
+_LIFECYCLE_NEXT_HINTS = {
+    "BREAKOUT_DETECTED": "pullback/retest, or straight to continuation",
+    "PULLBACK": "retest of the broken level, or a resumed push without one",
+    "RETEST": "level holding would confirm; a close back through it fails",
+    "LEVEL_HOLD": "further extension would confirm continuation",
+    "CONTINUATION": "monitor for exhaustion or a late failure",
+    "FAILED": "thesis invalidated; opposite setup possible",
+    "EXPIRED": "stale — no longer actionable",
+}
+
+
 def _lifecycle_evidence(lc: "BreakoutLifecycle") -> list:
     """Builds the lifecycle evidence lines matching the format in spec
     section 28, from whatever the tracker actually found — never
-    inventing a stage that wasn't reached."""
+    inventing a stage that wasn't reached.
+
+    The final line is ALWAYS "State: {lc.state}" when a lifecycle is
+    active. This is not cosmetic: Brain's evidence-text state parser
+    (brain/evidence.py:extract_state()) scans every agent's evidence
+    list, from the end, for a line matching "^State:\\s*([A-Za-z_]+)" —
+    and until this fix, Breakout never emitted one (it only emitted the
+    human-readable "Bullish breakout lifecycle: X" line above), so the
+    entire Lifecycle V2 state machine was invisible to Brain's
+    trigger/negative/context classification, consensus scoring, and
+    position-management structural-failure checks. See
+    MIB_BREAKOUT_LIFECYCLE_FIX_REPORT.txt for the full trace. Every
+    other upgraded agent (momentum, volume, pattern, support_resistance)
+    already puts its own "State: X" line last, for the same reason —
+    this brings Breakout in line with that existing convention rather
+    than inventing a new one.
+    """
     if lc.state == "NONE":
         return []
     dir_word = "Bullish" if lc.direction == LONG else "Bearish"
     lines = [f"{dir_word} breakout lifecycle: {lc.state}",
              f"Breakout level: {lc.breakout_level:.1f} ({lc.bars_since_breakout} bar(s) ago)"]
+    if lc.state not in ("FAILED", "EXPIRED"):
+        lines.append(f"Distance from level: {lc.current_distance_from_level_atr:.2f} ATR")
     if lc.pullback_detected:
         lines.append(f"Pullback detected: {lc.pullback_depth_atr:.2f} ATR depth")
     if lc.retest_detected:
@@ -417,6 +464,11 @@ def _lifecycle_evidence(lc: "BreakoutLifecycle") -> list:
         lines.append("Breakout lifecycle EXPIRED: no meaningful development within max lifetime")
     if lc.state not in ("FAILED", "EXPIRED", "NONE"):
         lines.append(f"Lifecycle score: {lc.breakout_lifecycle_score:.0f}/100, confidence {lc.breakout_lifecycle_confidence:.0f}%")
+    next_hint = _LIFECYCLE_NEXT_HINTS.get(lc.state)
+    if next_hint:
+        lines.append(f"Next: {next_hint}")
+    # MUST be last -- see docstring above.
+    lines.append(f"State: {lc.state}")
     return lines
 
 

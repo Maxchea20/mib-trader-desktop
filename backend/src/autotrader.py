@@ -1,4 +1,4 @@
-"""Hands-free auto-trader.
+﻿
 
 Evaluates the Brain (all 10 agents + HTF regime) on each new candle close of the
 auto-trade timeframe and manages a single AUTO paper position:
@@ -140,8 +140,10 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = "DISABLED"
         return STATE
     tf = CONFIG["timeframe"]
-    from .market_data.closed_candles import filter_closed
-    candles = filter_closed(dao.read_candles(tf, limit=ANALYSIS_LOOKBACK + 2), tf)
+    # read_closed_candles(): the "new candle" gate must key off the last
+    # CLOSED bar, never a still-forming candle. This keeps live evaluation
+    # consistent with full_analysis() and backtest replay.
+    candles = dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK)
     if len(candles) < 30:
         return STATE
     last_ts = candles[-1]["ts"]

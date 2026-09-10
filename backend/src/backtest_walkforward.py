@@ -166,8 +166,10 @@ class WalkForwardBacktest:
         bars_wanted = int(self.days * 24 * 60 / bar_minutes)
         need = ANALYSIS_LOOKBACK + bars_wanted + 5
 
-        raw = dao.read_candles(tf, limit=need)
-        candles = filter_closed(raw, tf)
+        # Read raw candles, then explicitly filter to closed candles so
+        # the same closed-bar guarantee is preserved while also allowing
+        # the 15m run to construct its aligned 5m sub-window.
+        candles = filter_closed(dao.read_candles(tf, limit=need), tf)
         m5_all = filter_closed(dao.read_candles("5m", limit=need * 4), "5m") if tf == "15m" else []
         if len(candles) < ANALYSIS_LOOKBACK + 30:
             self.result = {"error": "insufficient_data", "timeframe": tf,

@@ -208,7 +208,13 @@ def _htf_regime() -> Dict:
     agents_by_tf = {}
 
     for tf in HTF_TIMEFRAMES:
-        candles = filter_closed(dao.read_candles(tf, limit=ANALYSIS_LOOKBACK), tf)
+        # read_closed_candles(), not read_candles(): agents must never
+        # see a still-forming bar as "the current candle" -- the live
+        # analysis path and backtest must use the same closed-bar state.
+        candles = dao.read_closed_candles(
+            tf,
+            limit=ANALYSIS_LOOKBACK,
+        )
 
         if len(candles) < 60:
             continue
@@ -226,9 +232,11 @@ def _htf_regime() -> Dict:
 
 
 def full_analysis(timeframe: str) -> Dict:
-    candles = filter_closed(
-        dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2),
+    # read_closed_candles(): every agent, price, and Brain calculation must
+    # see the same closed candle state that the backtest/live lifecycle uses.
+    candles = dao.read_closed_candles(
         timeframe,
+        limit=ANALYSIS_LOOKBACK,
     )
 
     if len(candles) < 30:
@@ -304,9 +312,11 @@ def single_agent(agent_id: str, timeframe: str) -> Dict:
     if agent_id not in AGENT_REGISTRY:
         return {"error": "unknown_agent"}
 
-    candles = filter_closed(
-        dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2),
+    # read_closed_candles(): every agent, price, and Brain calculation must
+    # see the same closed candle state that the backtest/live lifecycle uses.
+    candles = dao.read_closed_candles(
         timeframe,
+        limit=ANALYSIS_LOOKBACK,
     )
 
     if len(candles) < 30:

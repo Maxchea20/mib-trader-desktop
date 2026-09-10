@@ -42,12 +42,17 @@ def run_backtest(timeframe: str, lookback: int = 150, forward: int = 8, step: in
     step = max(1, min(int(step), 20))
 
     need = ANALYSIS_LOOKBACK + lookback + forward
-    candles = dao.read_candles(timeframe, limit=need)
+    # read_closed_candles(): if this runs while the market is live, the
+    # newest row in the DB can be a still-forming bar. Both the analyzed
+    # window AND the "forward" bars used to score each signal's outcome
+    # must be real, closed candles -- a forming tail bar would otherwise
+    # corrupt the forward-return measurement for the most recent signals.
+    candles = dao.read_closed_candles(timeframe, limit=need)
     if len(candles) < ANALYSIS_LOOKBACK + forward + 10:
         return {"error": "insufficient_data", "timeframe": timeframe,
                 "have": len(candles), "need": need}
 
-    htf_candles = {tf: dao.read_candles(tf, limit=ANALYSIS_LOOKBACK * 3) for tf in HTF_TIMEFRAMES}
+    htf_candles = {tf: dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK * 3) for tf in HTF_TIMEFRAMES}
     cache: Dict = {}
 
     n = len(candles)
