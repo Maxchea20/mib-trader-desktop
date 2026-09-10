@@ -3,6 +3,7 @@ from typing import List, Dict
 import numpy as np
 
 from .config import SYMBOL, HTF_TIMEFRAMES, ANALYSIS_LOOKBACK
+from .market_data.closed_candles import filter_closed
 from . import settings
 from .contract import AgentResult
 from .market_data import data_access as dao
@@ -31,7 +32,6 @@ AGENT_ORDER = list(AGENT_REGISTRY.keys())
 
 
 def _native(obj):
-    """Recursively convert numpy types to native Python for JSON serialization."""
     if isinstance(obj, dict):
         return {k: _native(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -44,91 +44,61 @@ def _native(obj):
         return float(obj)
     if isinstance(obj, np.ndarray):
         return _native(obj.tolist())
-
-    # Support dataclasses such as MarketState / SwingPoint if they
-    # are ever passed directly into the serializer.
     if hasattr(obj, "__dataclass_fields__"):
         from dataclasses import asdict
         return _native(asdict(obj))
-
     return obj
 
 
 def _market_state_to_dict(state) -> Dict:
-    """Expose the shared MarketState in a frontend/API-safe structure."""
     return {
         "symbol": state.symbol,
         "timeframe": state.timeframe,
         "timestamp": state.timestamp,
         "price": state.price,
-
         "structure": {
             "direction": state.structure.direction,
             "regime": state.structure.regime,
             "structure_sequence": state.structure.structure_sequence,
-
             "hh": state.structure.hh,
             "hl": state.structure.hl,
             "lh": state.structure.lh,
             "ll": state.structure.ll,
-
             "last_high": state.structure.last_high,
             "previous_high": state.structure.previous_high,
             "last_low": state.structure.last_low,
             "previous_low": state.structure.previous_low,
-
             "swing_high_strength": state.structure.swing_high_strength,
             "swing_low_strength": state.structure.swing_low_strength,
-
             "break_distance_atr": state.structure.break_distance_atr,
-
+            "actionable_state": getattr(state.structure, "actionable_state", "NONE"),
+            "m5_confirm": getattr(state.structure, "m5_confirm", "NONE"),
             "event": {
-    "event": state.structure.event.event,
-    "direction": state.structure.event.direction,
-    "price": state.structure.event.price,
-    "timestamp": state.structure.event.timestamp,
-    "reference_price": state.structure.event.reference_price,
-    "swing_index": state.structure.event.swing_index,
-    "distance_atr": state.structure.event.distance_atr,
-},
-
-"events": [
-    {
-        "event": e.event,
-        "direction": e.direction,
-        "price": e.price,
-        "timestamp": e.timestamp,
-        "reference_price": e.reference_price,
-        "swing_index": e.swing_index,
-        "distance_atr": e.distance_atr,
-    }
-    for e in state.structure.events
-],
+                "event": state.structure.event.event,
+                "direction": state.structure.event.direction,
+                "price": state.structure.event.price,
+                "timestamp": state.structure.event.timestamp,
+                "reference_price": state.structure.event.reference_price,
+                "swing_index": state.structure.event.swing_index,
+                "distance_atr": state.structure.event.distance_atr,
+            },
+            "events": [
+                {
+                    "event": e.event,
+                    "direction": e.direction,
+                    "price": e.price,
+                    "timestamp": e.timestamp,
+                    "reference_price": e.reference_price,
+                    "swing_index": e.swing_index,
+                    "distance_atr": e.distance_atr,
+                }
+                for e in state.structure.events
+            ],
         },
-
         "swings": {
-            "highs": [
-                {
-                    "index": swing.index,
-                    "timestamp": swing.timestamp,
-                    "price": swing.price,
-                    "kind": swing.kind,
-                    "strength": swing.strength,
-                }
-                for swing in state.swing_highs
-            ],
-            "lows": [
-                {
-                    "index": swing.index,
-                    "timestamp": swing.timestamp,
-                    "price": swing.price,
-                    "kind": swing.kind,
-                    "strength": swing.strength,
-                }
-                for swing in state.swing_lows
-            ],
+            "highs": [{"index": s.index, "timestamp": s.timestamp, "price": s.price, "kind": s.kind, "strength": s.strength} for s in state.swing_highs],
+            "lows": [{"index": s.index, "timestamp": s.timestamp, "price": s.price, "kind": s.kind, "strength": s.strength} for s in state.swing_lows],
         },
-
         "location": {
             "support": state.location.support,
             "resistance": state.location.resistance,
@@ -139,7 +109,6 @@ def _market_state_to_dict(state) -> Dict:
             "liquidity_high": state.location.liquidity_high,
             "liquidity_low": state.location.liquidity_low,
         },
-
         "volatility": {
             "atr": state.volatility.atr,
             "atr_pct": state.volatility.atr_pct,
@@ -148,7 +117,6 @@ def _market_state_to_dict(state) -> Dict:
             "range_position_pct": state.volatility.range_position_pct,
             "compression_pct": state.volatility.compression_pct,
         },
-
         "support": list(state.support),
         "resistance": list(state.resistance),
         "market_phase": state.market_phase,
@@ -156,127 +124,57 @@ def _market_state_to_dict(state) -> Dict:
     }
 
 
-def run_agents(
-    candles: List[Dict],
-    timeframe: str,
-    market_state=None,
-    pivot_window_override=None,
-) -> List[AgentResult]:
+def run_agents(candles: List[Dict], timeframe: str, market_state=None, pivot_window_override=None) -> List[AgentResult]:
     results = []
-
     for aid in AGENT_ORDER:
         try:
             analyzer = AGENT_REGISTRY[aid]
-
-            # Market Structure already accepts the shared MarketState.
-            # Keep the compatibility fallback for the other agents until
-            # they are migrated to the shared-state architecture.
             if aid == "market_structure":
-                res = analyzer(
-                    candles,
-                    timeframe,
-                    market_state=market_state,
-                    pivot_window_override=pivot_window_override,
-                )
+                res = analyzer(candles, timeframe, market_state=market_state, pivot_window_override=pivot_window_override)
             else:
                 res = analyzer(candles, timeframe)
-
         except Exception as e:
             from .contract import neutral
-            res = neutral(
-                aid,
-                timeframe,
-                f"error: {e}",
-                valid=False,
-            )
-
+            res = neutral(aid, timeframe, f"error: {e}", valid=False)
         results.append(res)
-
     return results
 
 
 def _htf_regime() -> Dict:
     agents_by_tf = {}
-
     for tf in HTF_TIMEFRAMES:
-        candles = dao.read_candles(
-            tf,
-            limit=ANALYSIS_LOOKBACK,
-        )
-
+        candles = filter_closed(dao.read_candles(tf, limit=ANALYSIS_LOOKBACK), tf)
         if len(candles) < 60:
             continue
-
         agents_by_tf[tf] = run_agents(candles, tf)
-
     if not agents_by_tf:
-        return {
-            "regime": "NEUTRAL",
-            "regime_score": 0.0,
-            "per_timeframe": {},
-        }
-
+        return {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
     return regime_from_agents(agents_by_tf)
 
 
 def full_analysis(timeframe: str) -> Dict:
-    candles = dao.read_candles(
-        timeframe,
-        limit=ANALYSIS_LOOKBACK,
-    )
-
+    candles = filter_closed(dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2), timeframe)
     if len(candles) < 30:
-        return {
-            "error": "insufficient_data",
-            "timeframe": timeframe,
-            "candles": len(candles),
-        }
-
+        return {"error": "insufficient_data", "timeframe": timeframe, "candles": len(candles)}
     price = float(candles[-1]["close"])
-
-    # Build ONE shared MarketState for the current timeframe.
-    # This becomes the common source of truth for structure/location/
-    # volatility information.
-    market_state = build_market_state(
-        candles,
-        symbol=SYMBOL,
-        timeframe=timeframe,
-    )
-
-    agents = run_agents(
-        candles,
-        timeframe,
-        market_state=market_state,
-    )
-
+    m5_closed = None
+    if timeframe == "15m":
+        m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m")
+    market_state = build_market_state(candles, symbol=SYMBOL, timeframe=timeframe)
+    from .market_state.actionable import apply_actionable_structure
+    apply_actionable_structure(market_state.structure, candles, market_state.volatility.atr, m5_candles=m5_closed, timeframe=timeframe)
+    agents = run_agents(candles, timeframe, market_state=market_state)
     htf = _htf_regime()
-
-    brain = brain_engine.decide(
-        agents,
-        price,
-        timeframe,
-        htf,
-        atr_value=market_state.volatility.atr,
-    )
-
+    brain = brain_engine.decide(agents, price, timeframe, htf, atr_value=market_state.volatility.atr)
     return _native({
         "symbol": SYMBOL,
         "timeframe": timeframe,
         "price": price,
         "candle_count": len(candles),
-
-        # Shared MarketState exposed to the frontend.
         "market_state": _market_state_to_dict(market_state),
-
-        "agents": [
-            a.to_dict()
-            for a in agents
-        ],
-
+        "agents": [a.to_dict() for a in agents],
         "agent_weights": settings.weights(),
-
         "htf_regime": htf,
-
         "brain": brain,
     })
 
@@ -284,33 +182,15 @@ def full_analysis(timeframe: str) -> Dict:
 def single_agent(agent_id: str, timeframe: str) -> Dict:
     if agent_id not in AGENT_REGISTRY:
         return {"error": "unknown_agent"}
-
-    candles = dao.read_candles(
-        timeframe,
-        limit=ANALYSIS_LOOKBACK,
-    )
-
+    candles = filter_closed(dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2), timeframe)
     if len(candles) < 30:
         return {"error": "insufficient_data"}
-
-    # Give Market Structure the same shared-state source when it is
-    # requested individually.
     if agent_id == "market_structure":
-        market_state = build_market_state(
-            candles,
-            symbol=SYMBOL,
-            timeframe=timeframe,
-        )
-
-        result = AGENT_REGISTRY[agent_id](
-            candles,
-            timeframe,
-            market_state=market_state,
-        )
+        market_state = build_market_state(candles, symbol=SYMBOL, timeframe=timeframe)
+        from .market_state.actionable import apply_actionable_structure
+        m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m") if timeframe == "15m" else None
+        apply_actionable_structure(market_state.structure, candles, market_state.volatility.atr, m5_candles=m5_closed, timeframe=timeframe)
+        result = AGENT_REGISTRY[agent_id](candles, timeframe, market_state=market_state)
     else:
-        result = AGENT_REGISTRY[agent_id](
-            candles,
-            timeframe,
-        )
-
+        result = AGENT_REGISTRY[agent_id](candles, timeframe)
     return _native(result.to_dict())
