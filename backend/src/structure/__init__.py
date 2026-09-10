@@ -441,6 +441,21 @@ def analyze(
         if br.state in ("FAILED", "EXPIRED") and br.reason:
             evidence.append(f"{br.state}: {br.reason}")
 
+    act = getattr(structure, "actionable_state", "NONE") or "NONE"
+    lvl = getattr(structure, "actionable_level", None)
+    adist = getattr(structure, "actionable_distance_atr", 0.0) or 0.0
+    m5c = getattr(structure, "m5_confirm", "NONE") or "NONE"
+    evidence.append(
+        f"Actionable: {act} | Level: "
+        f"{(f'{lvl:.1f}' if lvl is not None else 'n/a')} | "
+        f"Distance: {adist:.2f} ATR | M5: {m5c}"
+    )
+    if getattr(structure, "developing_high", False):
+        evidence.append("Developing: HIGH (not confirmed)")
+    if getattr(structure, "developing_low", False):
+        evidence.append("Developing: LOW (not confirmed)")
+    evidence.append(f"State: {act}")
+
     return AgentResult(
         AGENT_ID,
         direction,
@@ -450,4 +465,5 @@ def analyze(
         key_levels,
         timeframe,
         valid=True,
+        state=act,
     )
