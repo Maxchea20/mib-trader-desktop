@@ -1,1 +1,1 @@
-see-file
+"""A4 — Honest, reconstructable Brain explanation.\n\nPure function of decide() outputs + the current agent list. Does not\nscore, gate, or change FIRE/WAIT. Never invents a price or a\nconfirmation. Never uses agent-headcount as the thesis.\n"""\nfrom typing import Dict, List, Optional\n\nfrom ..contract import LONG, SHORT, NEUTRAL\nfrom . import evidence as ev\nfrom .scoring import EXCLUDE_FROM_EXECUTION\n\nEXPLANATION_VERSION = \"BRAIN_EXPLANATION_V1\"\n
