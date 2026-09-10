@@ -3,6 +3,8 @@ from typing import List, Dict
 import numpy as np
 
 from .config import SYMBOL, HTF_TIMEFRAMES, ANALYSIS_LOOKBACK
+from .market_data.closed_candles import filter_closed
+from .market_state.actionable import apply_actionable_structure
 from . import settings
 from .contract import AgentResult
 from .market_data import data_access as dao
@@ -81,6 +83,13 @@ def _market_state_to_dict(state) -> Dict:
             "swing_low_strength": state.structure.swing_low_strength,
 
             "break_distance_atr": state.structure.break_distance_atr,
+
+            "actionable_state": getattr(state.structure, "actionable_state", "NONE"),
+            "actionable_level": getattr(state.structure, "actionable_level", None),
+            "actionable_distance_atr": getattr(state.structure, "actionable_distance_atr", 0.0),
+            "m5_confirm": getattr(state.structure, "m5_confirm", "NONE"),
+            "developing_high": getattr(state.structure, "developing_high", False),
+            "developing_low": getattr(state.structure, "developing_low", False),
 
             "event": {
     "event": state.structure.event.event,
@@ -199,10 +208,7 @@ def _htf_regime() -> Dict:
     agents_by_tf = {}
 
     for tf in HTF_TIMEFRAMES:
-        candles = dao.read_candles(
-            tf,
-            limit=ANALYSIS_LOOKBACK,
-        )
+        candles = filter_closed(dao.read_candles(tf, limit=ANALYSIS_LOOKBACK), tf)
 
         if len(candles) < 60:
             continue
@@ -220,9 +226,9 @@ def _htf_regime() -> Dict:
 
 
 def full_analysis(timeframe: str) -> Dict:
-    candles = dao.read_candles(
+    candles = filter_closed(
+        dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2),
         timeframe,
-        limit=ANALYSIS_LOOKBACK,
     )
 
     if len(candles) < 30:
@@ -237,9 +243,22 @@ def full_analysis(timeframe: str) -> Dict:
     # Build ONE shared MarketState for the current timeframe.
     # This becomes the common source of truth for structure/location/
     # volatility information.
+    m5_closed = None
+    if timeframe == "15m":
+        m5_closed = filter_closed(
+            dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3),
+            "5m",
+        )
     market_state = build_market_state(
         candles,
         symbol=SYMBOL,
+        timeframe=timeframe,
+    )
+    apply_actionable_structure(
+        market_state.structure,
+        candles,
+        market_state.volatility.atr,
+        m5_candles=m5_closed,
         timeframe=timeframe,
     )
 
@@ -285,9 +304,9 @@ def single_agent(agent_id: str, timeframe: str) -> Dict:
     if agent_id not in AGENT_REGISTRY:
         return {"error": "unknown_agent"}
 
-    candles = dao.read_candles(
+    candles = filter_closed(
+        dao.read_candles(timeframe, limit=ANALYSIS_LOOKBACK + 2),
         timeframe,
-        limit=ANALYSIS_LOOKBACK,
     )
 
     if len(candles) < 30:
@@ -296,9 +315,22 @@ def single_agent(agent_id: str, timeframe: str) -> Dict:
     # Give Market Structure the same shared-state source when it is
     # requested individually.
     if agent_id == "market_structure":
+        m5_closed = None
+        if timeframe == "15m":
+            m5_closed = filter_closed(
+                dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3),
+                "5m",
+            )
         market_state = build_market_state(
             candles,
             symbol=SYMBOL,
+            timeframe=timeframe,
+        )
+        apply_actionable_structure(
+            market_state.structure,
+            candles,
+            market_state.volatility.atr,
+            m5_candles=m5_closed,
             timeframe=timeframe,
         )
 
