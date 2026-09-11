@@ -1,4 +1,4 @@
-﻿"""
+"""
 
 Evaluates the Brain (all 10 agents + HTF regime) on each new candle close of the
 auto-trade timeframe and manages a single AUTO paper position:
@@ -26,6 +26,10 @@ CONFIG = {
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
+    # Paper policy from 30d/90d research: SHORT FIRE sleeve was a drag
+    # (30d PF 0.82). Brain still computes SHORT. This gate only blocks
+    # opening/flipping into SHORT paper trades. LIVE remains unused.
+    "allowed_sides": "LONG",
     # Post-trade re-evaluation (spec section 9) — a brief pause before a
     # FRESH Brain decision is allowed to open a new position, not a
     # blind permanent timer. Longer after a thesis failure (SL/BRAIN_EXIT)
@@ -68,6 +72,10 @@ def update(payload: Dict) -> Dict:
         mode = str(payload["mode"]).upper()
         if mode in ("PAPER", "LIVE"):
             CONFIG["mode"] = mode
+    if "allowed_sides" in payload:
+        sides = str(payload["allowed_sides"]).upper()
+        if sides in ("LONG", "SHORT", "BOTH"):
+            CONFIG["allowed_sides"] = sides
     if payload.get("timeframe"):
         CONFIG["timeframe"] = str(payload["timeframe"])
     for k in ("notional_usd", "sl_atr_mult", "tp_atr_mult"):
@@ -77,7 +85,6 @@ def update(payload: Dict) -> Dict:
             except (TypeError, ValueError):
                 pass
     if turned_on:
-        # act immediately when switched on
         try:
             from .market_data import manager
             evaluate(manager.STATE.get("last_price"), force=True)
@@ -97,17 +104,13 @@ def _open(side: str, price: float, tf: str, brain: Dict, candles, decision_id: O
     else:
         sl = price + CONFIG["sl_atr_mult"] * _atr
         tp = price - CONFIG["tp_atr_mult"] * _atr
-    # Immutable original thesis (spec section 2) — snapshot NOW, at the
-    # moment of entry, never touched again after this. build_thesis()
-    # reads straight from the same `brain` dict that decided to fire,
-    # so this is exactly what Brain believed when it opened the trade.
     thesis = None
     try:
         brain_with_price = dict(brain)
         brain_with_price["price"] = price
         thesis = brain_position.build_thesis(brain_with_price)
     except Exception:
-        pass  # thesis storage failing must never block opening the actual trade
+        pass
     paper_trading.open_trade(
         symbol=SYMBOL, side=side, entry_price=price, sl_price=sl, tp_price=tp,
         notional_usd=CONFIG["notional_usd"], timeframe=tf,
@@ -118,10 +121,6 @@ def _open(side: str, price: float, tf: str, brain: Dict, candles, decision_id: O
 
 
 def _in_cooldown(tf_seconds: int) -> bool:
-    """Post-trade re-evaluation pause (spec section 9) — NOT a blind
-    permanent timer, just enough bars for a genuinely fresh Brain
-    decision to form before re-entering. Longer after a thesis
-    failure than after a clean TP."""
     if STATE["last_close_ts"] is None:
         return False
     bars = CONFIG["cooldown_bars_after_failure"] if STATE["last_close_reason"] in ("SL", "BRAIN_EXIT") \
@@ -140,23 +139,13 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = "DISABLED"
         return STATE
     tf = CONFIG["timeframe"]
-    # read_closed_candles(): the "new candle" gate must key off the last
-    # CLOSED bar, never a still-forming candle. This keeps live evaluation
-    # consistent with full_analysis() and backtest replay.
     candles = dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK)
     if len(candles) < 30:
         return STATE
     last_ts = candles[-1]["ts"]
 
-    open_auto_before = _open_auto()  # checked BEFORE the new-candle
-    # gate below, so an externally-triggered close (SL/TP, happening in
-    # between evaluate() calls via a separate live-price path) is still
-    # detected and cooled-down correctly even if this exact call
-    # otherwise short-circuits on the "no new candle" check.
+    open_auto_before = _open_auto()
     if open_auto_before is None and STATE.get("_had_open_auto"):
-        # The AUTO position that was open last time is gone now, and
-        # THIS function didn't close it (that always clears the flag
-        # below) — so something else did: SL or TP.
         recent = paper_trading.list_trades("CLOSED")
         recent_auto = next((t for t in recent if t.get("source") == "AUTO"), None)
         if recent_auto and recent_auto.get("exit_reason") in ("SL", "TP"):
@@ -164,7 +153,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["_had_open_auto"] = open_auto_before is not None
 
     if not force and STATE["last_candle_ts"] == last_ts:
-        return STATE  # only act on a new candle
+        return STATE
     STATE["last_candle_ts"] = last_ts
 
     result = analysis_service.full_analysis(tf)
@@ -174,10 +163,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["last_state"] = state
     STATE["last_eval_at"] = int(time.time())
 
-    # --- Decision logging: purely observational, cannot affect anything
-    # below this point. Wrapped here even though observe() already
-    # catches its own exceptions internally — defense in depth per the
-    # spec's "logging must never block the trading engine" requirement.
     decision_id = None
     try:
         from .market_data import manager as _mgr
@@ -189,7 +174,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         )
     except Exception:
         pass
-    # --- end decision logging ---
 
     if CONFIG.get("mode") == "LIVE":
         STATE["last_action"] = "LIVE MODE - NO ORDER"
@@ -200,18 +184,24 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     tf_seconds = _tf_seconds(tf)
 
     if open_auto is not None:
-        # POSITION MANAGEMENT MODE (spec section 33) — a position is
-        # already open, so Brain re-evaluates the ORIGINAL thesis
-        # against current evidence rather than making a fresh entry
-        # decision. This runs regardless of whether the fresh `state`
-        # above is LONG/SHORT/WAIT/AVOID — a thesis can weaken even
-        # while the raw consensus hasn't yet flipped sides.
         _manage_open_position(open_auto, result, price, tf, decision_id)
-        # After managing (which may have closed the position via
-        # BRAIN_EXIT above), re-check before considering a flip/hold.
         open_auto = _open_auto()
 
     if state in ("LONG", "SHORT"):
+        allowed = CONFIG.get("allowed_sides", "BOTH")
+        if allowed in ("LONG", "SHORT") and state != allowed:
+            if open_auto is None:
+                STATE["last_action"] = f"SKIP {state} (allowed_sides={allowed})"
+                STATE["last_reason"] = (
+                    f"Brain {state} but paper policy is {allowed}-only — not opening"
+                )
+                return STATE
+            if open_auto["side"] != state:
+                STATE["last_action"] = f"HOLD {open_auto['side']} (no flip to {state})"
+                STATE["last_reason"] = (
+                    f"Brain flipped to {state} but paper policy blocks that side"
+                )
+                return STATE
         if open_auto is None:
             if _in_cooldown(tf_seconds):
                 STATE["last_action"] = "COOLDOWN"
@@ -240,9 +230,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         if open_auto is None:
             STATE["last_action"] = f"NO-TRADE ({state})"
             STATE["last_reason"] = f"Brain {state}"
-        # else: position management above already handled this cycle —
-        # WAIT/AVOID on fresh consensus doesn't override an existing,
-        # still-valid thesis.
     return STATE
 
 
@@ -253,24 +240,15 @@ def _tf_seconds(tf: str) -> int:
 
 def _manage_open_position(open_auto: Dict, result: Dict, price: float, tf: str,
                           decision_id: Optional[str]) -> None:
-    """Brain V2 position management (spec sections 33-37). Brain only
-    RECOMMENDS — this function is the one and only place that turns a
-    recommendation into an action, and the only action it ever takes
-    is closing via the existing paper_trading.close_trade() (the same
-    mechanism SL/TP/FLIP already use). PROTECT/REDUCE are logged as
-    recommendations but not acted on, since no partial-close mechanism
-    exists in this codebase — inventing one wasn't part of this task
-    and would be new infrastructure, not wiring.
-    """
     thesis = paper_trading.get_thesis(open_auto["id"])
     if not thesis:
-        return  # trade opened without a thesis (e.g. MANUAL) — nothing to manage against
+        return
     agents = result.get("agents") or []
     current_decision = result.get("brain") or {}
     try:
         rec = brain_position.evaluate_open_position(thesis, agents, current_decision)
     except Exception:
-        return  # position management must never crash the trading loop
+        return
     STATE["last_position_recommendation"] = rec
 
     try:
@@ -281,7 +259,7 @@ def _manage_open_position(open_auto: Dict, result: Dict, price: float, tf: str,
                     "reasons": rec["reasons"], "structural_failures": rec["structural_failures"]},
         )
     except Exception:
-        pass  # observational logging must never affect the recommendation/action below
+        pass
 
     if rec["recommendation"] == "EXIT":
         paper_trading.close_trade(open_auto["id"], price, "BRAIN_EXIT")
