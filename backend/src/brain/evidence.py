@@ -26,20 +26,11 @@ STATE_LINE_RE = re.compile(r"^State:\s*([A-Za-z_]+)")
 
 
 def _get(res, key, default=None):
-    """Uniform accessor — works whether `res` is a live AgentResult
-    object (attribute access) or its _native()-serialized dict form
-    (e.g. what analysis_service.full_analysis()/autotrader.py actually
-    hand around once results have passed through JSON conversion).
-    Avoids re-running run_agents() a second time just to get objects
-    with attributes, which would duplicate real computation."""
     if isinstance(res, dict):
         return res.get(key, default)
     return getattr(res, key, default)
 
 
-# Role groups — agents in the same group often describe the same
-# underlying phenomenon (spec section 30). Used to avoid pretending
-# correlated signals are fully independent votes.
 ROLE_GROUPS = {
     "STRUCTURE": ("market_structure",),
     "TREND": ("trend",),
@@ -52,44 +43,35 @@ ROLE_GROUPS = {
 }
 AGENT_ROLE = {a: role for role, agents in ROLE_GROUPS.items() for a in agents}
 
-# Coarser roles for directional CONSENSUS and CONFLICT only.
-# ROLE_GROUPS above stay as-is — setup_score uses them for role-diversity
-# of a forming setup. Consensus was still counting every agent as a vote,
-# including two STRUCTURE-like reads (Market Structure + Trend) and three
-# DRIVE-like reads (Breakout + Momentum + Volume). These groups collapse
-# correlated observations of the same market condition into one unit.
-# Elliott Wave is omitted: zero execution influence.
+# V2.1 — TREND is its own role. High-confidence EMA must not share a
+# bucket with Structure or drown Location/S/R.
 CONSENSUS_ROLE_GROUPS = {
-    "STRUCTURE": ("market_structure", "trend"),
+    "STRUCTURE": ("market_structure",),
+    "TREND": ("trend",),
     "DRIVE": ("breakout", "momentum", "volume"),
     "LOCATION": ("support_resistance", "fair_value_gap", "fibonacci"),
     "PATTERN": ("pattern",),
 }
+TREND_ROLE_CAP = 50.0
 CONSENSUS_AGENT_ROLE = {
     a: role for role, agents in CONSENSUS_ROLE_GROUPS.items() for a in agents
 }
-_ROLE_DIMINISH = 0.5  # same diminishing-returns idea as confluence zones
+_ROLE_DIMINISH = 0.5
 
-# Keyword-based classification — deliberately generic rather than a
-# hardcoded per-agent state list, since new states can appear as agents
-# evolve without this needing to be updated in lockstep. A state can
-# score on multiple axes at once (e.g. "CONFIRMED" is both a trigger
-# and positive).
+# V2.1 — ACCELERATING and BREAKOUT_DETECTED are context, not doors.
 TRIGGER_KEYWORDS = (
     "TRIGGERED", "CONFIRMED", "REJECTION", "RECOVERY", "REVERSAL",
-    "LEVEL_HOLD", "CONTINUATION", "BREAKOUT_DETECTED", "ACCELERATING",
-    "ABSORPTION", "DIVERGENCE", "BREAKOUT_VOLUME_STRONG", "RETEST",
+    "LEVEL_HOLD", "CONTINUATION", "ABSORPTION", "DIVERGENCE", "RETEST",
 )
 NEGATIVE_KEYWORDS = ("FAILED", "EXPIRED", "INVALID", "EXHAUSTING", "WEAK", "FAILURE")
 CONTEXT_ONLY_KEYWORDS = (
     "FORMING", "DEVELOPING", "WATCH", "CANDIDATE", "NONE", "STABLE",
     "MATURE", "BUILDING", "NEUTRAL", "RETRACING", "PULLBACK", "RETEST",
+    "ACCELERATING", "BREAKOUT_DETECTED",
 )
 
 
 def extract_state(evidence: List[str]) -> Optional[str]:
-    """Pulls the state token from a \"State: X\" evidence line, if any.
-    Scans from the end since every upgraded agent puts this line last."""
     for line in reversed(evidence or []):
         m = STATE_LINE_RE.match(line.strip())
         if m:
@@ -98,10 +80,6 @@ def extract_state(evidence: List[str]) -> Optional[str]:
 
 
 def classify_state(state: Optional[str]) -> Dict[str, float]:
-    """Returns {\"trigger\": 0-1, \"negative\": 0-1, \"context_only\": 0-1} —
-    how strongly a state token reads as an actionable trigger, a
-    failure/negative signal, or merely descriptive context. Not
-    mutually exclusive; a state can score on more than one axis."""
     if not state:
         return {"trigger": 0.0, "negative": 0.0, "context_only": 0.0}
     s = state.upper()
@@ -116,19 +94,12 @@ def agent_role(agent_id: str) -> str:
 
 
 def role_grouped_evidence(agents: List, exclude_agents: tuple = ()) -> Dict[str, Dict]:
-    """Groups valid agents by role and returns, per role, the NET
-    directional lean and the single strongest agent in that role — this
-    is what setup-quality scoring uses instead of counting all 10
-    agents as independent votes. exclude_agents lets the caller drop
-    Elliott Wave (or anything else) from execution-relevant grouping
-    while it can still appear elsewhere in evidence/UI."""
     groups: Dict[str, List] = {}
     for res in agents:
         if not res.valid or res.agent in exclude_agents:
             continue
         role = agent_role(res.agent)
         groups.setdefault(role, []).append(res)
-
     out = {}
     for role, members in groups.items():
         long_w = sum(r.confidence for r in members if r.direction == "LONG")
@@ -150,9 +121,6 @@ def consensus_role(agent_id: str) -> str:
 
 
 def _diminished_mass(weighted_values: List[float]) -> float:
-    """First observation keeps full mass; each extra same-side agent
-    inside the role is worth half the previous. 3 correlated agents
-    are not 3 independent votes."""
     total = 0.0
     factor = 1.0
     for v in sorted(weighted_values, reverse=True):
@@ -162,25 +130,6 @@ def _diminished_mass(weighted_values: List[float]) -> float:
 
 
 def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -> Dict:
-    """Role-net directional evidence for BOTH sides.
-
-    Per role:
-        mass_i    = confidence_i × existing agent_weight_i
-        long_eff  = diminished(long masses)
-        short_eff = diminished(short masses)
-        cap       = diminished(100 × lean-side weights)
-        quality   = 100 × max(L,S) / cap     (0..100, confidence-scaled)
-        purity    = |L-S| / (L+S)            (internal role disagreement)
-        score     = quality × purity
-
-    Neutral / invalid / excluded / OTHER agents never enter the
-    denominator. Roles with no directional members are omitted.
-
-    Cross-role consensus is the unweighted mean of signed role scores
-    among roles that actually produced directional evidence. Role
-    weights across STRUCTURE/DRIVE/LOCATION/PATTERN are intentionally
-    not applied here.
-    """
     buckets: Dict[str, List] = {role: [] for role in CONSENSUS_ROLE_GROUPS}
     for res in agents:
         if not res.valid or res.agent in exclude_agents:
@@ -189,12 +138,10 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
         if role == "OTHER":
             continue
         buckets[role].append(res)
-
     roles = {}
     contributions = []
     long_role_scores = []
     short_role_scores = []
-
     for role, members in buckets.items():
         long_items = []
         short_items = []
@@ -214,12 +161,10 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
                 long_items.append((mass, w, res.agent))
             elif res.direction == "SHORT":
                 short_items.append((mass, w, res.agent))
-
         long_eff = _diminished_mass([m for m, _, _ in long_items])
         short_eff = _diminished_mass([m for m, _, _ in short_items])
         if long_eff <= 0 and short_eff <= 0:
             continue
-
         if long_eff >= short_eff:
             direction = "LONG"
             lean_items = long_items
@@ -231,8 +176,9 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
         denom = long_eff + short_eff
         purity = abs(long_eff - short_eff) / denom if denom else 0.0
         score = quality * purity
+        if role == "TREND":
+            score = min(score, TREND_ROLE_CAP)
         signed = score if direction == "LONG" else -score
-
         rec = {
             "direction": direction,
             "score": round(score, 1),
@@ -258,7 +204,6 @@ def role_net_evidence(agents: List, weights: Dict, exclude_agents: tuple = ()) -
             long_role_scores.append(score)
         else:
             short_role_scores.append(score)
-
     n = len(contributions)
     consensus = (sum(c["signed"] for c in contributions) / n) if n else 0.0
     return {
