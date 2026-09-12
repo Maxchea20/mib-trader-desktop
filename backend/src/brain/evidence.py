@@ -39,26 +39,24 @@ ROLE_GROUPS = {
     "LOCATION": ("support_resistance", "fair_value_gap", "fibonacci"),
     "PATTERN": ("pattern",),
     "BREAKOUT": ("breakout",),
-    "CONTEXT": ("elliott_wave",),
+    "CONTEXT": ("elliott_wave", "trend"),
 }
 AGENT_ROLE = {a: role for role, agents in ROLE_GROUPS.items() for a in agents}
 
-# V2.1 — TREND is its own role. High-confidence EMA must not share a
-# bucket with Structure or drown Location/S/R.
+# V2.2 — Trend is context-only (see EXCLUDE_FROM_EXECUTION). It has no
+# consensus bucket. Structure / Drive / Location / Pattern remain.
 CONSENSUS_ROLE_GROUPS = {
     "STRUCTURE": ("market_structure",),
-    "TREND": ("trend",),
     "DRIVE": ("breakout", "momentum", "volume"),
     "LOCATION": ("support_resistance", "fair_value_gap", "fibonacci"),
     "PATTERN": ("pattern",),
 }
-TREND_ROLE_CAP = 50.0
+TREND_ROLE_CAP = 50.0  # unused while Trend is excluded; kept for rollback
 CONSENSUS_AGENT_ROLE = {
     a: role for role, agents in CONSENSUS_ROLE_GROUPS.items() for a in agents
 }
 _ROLE_DIMINISH = 0.5
 
-# V2.1 — ACCELERATING and BREAKOUT_DETECTED are context, not doors.
 TRIGGER_KEYWORDS = (
     "TRIGGERED", "CONFIRMED", "REJECTION", "RECOVERY", "REVERSAL",
     "LEVEL_HOLD", "CONTINUATION", "ABSORPTION", "DIVERGENCE", "RETEST",
