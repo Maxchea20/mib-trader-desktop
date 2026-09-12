@@ -3,18 +3,12 @@
 Agents do not set side. Consensus does not set side.
 Side is allowed only when the closed price is actually at a mapped level.
 """
-from typing import Any, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..contract import LONG, SHORT, NEUTRAL
 
-AT_LEVEL_ATR = 0.40
+AT_LEVEL_ATR = 0.60
 BREAK_BUFFER_ATR = 0.05
-
-
-def _loc(market_state) -> Any:
-    if market_state is None:
-        return None
-    return getattr(market_state, "location", None)
 
 
 def _atr(market_state, atr_value: Optional[float]) -> float:
@@ -28,96 +22,116 @@ def _atr(market_state, atr_value: Optional[float]) -> float:
     return float(getattr(vol, "atr", 0.0) or 0.0)
 
 
+def _collect_levels(market_state):
+    supports = []
+    resistances = []
+    if market_state is None:
+        return supports, resistances
+    loc = getattr(market_state, "location", None)
+    if loc is not None:
+        s = getattr(loc, "support", None)
+        r = getattr(loc, "resistance", None)
+        if s:
+            supports.append(("location.support", float(s)))
+        if r:
+            resistances.append(("location.resistance", float(r)))
+    st = getattr(market_state, "structure", None)
+    if st is not None:
+        ll = getattr(st, "last_low", None)
+        pl = getattr(st, "previous_low", None)
+        lh = getattr(st, "last_high", None)
+        ph = getattr(st, "previous_high", None)
+        if ll:
+            supports.append(("structure.last_low", float(ll)))
+        if pl:
+            supports.append(("structure.previous_low", float(pl)))
+        if lh:
+            resistances.append(("structure.last_high", float(lh)))
+        if ph:
+            resistances.append(("structure.previous_high", float(ph)))
+    return supports, resistances
+
+
+def _nearest(levels, price, atr):
+    if not levels:
+        return None
+    ranked = sorted(((abs(price - px) / atr, name, px) for name, px in levels), key=lambda x: x[0])
+    dist, name, px = ranked[0]
+    return dist, name, px
+
+
 def chart_permission(price: float, market_state=None, atr_value: Optional[float] = None) -> Dict:
     empty = {
         "ok": False,
         "side": NEUTRAL,
         "level": None,
         "level_kind": None,
+        "level_source": None,
         "distance_atr": None,
         "support": None,
         "resistance": None,
         "detail": "no MarketState — Brain refuses to take a side from votes alone",
     }
-    loc = _loc(market_state)
     atr = _atr(market_state, atr_value)
-    if loc is None or atr <= 0 or price <= 0:
+    if market_state is None or atr <= 0 or price <= 0:
         return empty
-
-    support = getattr(loc, "support", None)
-    resistance = getattr(loc, "resistance", None)
-    empty["support"] = support
-    empty["resistance"] = resistance
-
-    dist_s = abs(price - float(support)) / atr if support else None
-    dist_r = abs(price - float(resistance)) / atr if resistance else None
-
-    at_s = dist_s is not None and dist_s <= AT_LEVEL_ATR
-    at_r = dist_r is not None and dist_r <= AT_LEVEL_ATR
-
+    supports, resistances = _collect_levels(market_state)
+    near_s = _nearest(supports, price, atr)
+    near_r = _nearest(resistances, price, atr)
+    empty["support"] = near_s[2] if near_s else None
+    empty["resistance"] = near_r[2] if near_r else None
+    at_s = near_s is not None and near_s[0] <= AT_LEVEL_ATR
+    at_r = near_r is not None and near_r[0] <= AT_LEVEL_ATR
     if at_s and at_r:
-        if dist_s < dist_r:
+        if near_s[0] < near_r[0]:
             at_r = False
-        elif dist_r < dist_s:
+        elif near_r[0] < near_s[0]:
             at_s = False
         else:
             empty["detail"] = (
-                f"price {price:.1f} sits equally on support {support} and "
-                f"resistance {resistance} — ambiguous, no side"
+                f"price {price:.1f} equally near {near_s[1]} {near_s[2]} and "
+                f"{near_r[1]} {near_r[2]} — ambiguous, no side"
             )
-            empty["distance_atr"] = dist_s
+            empty["distance_atr"] = near_s[0]
             return empty
-
     if at_s:
-        broken = price < float(support) - BREAK_BUFFER_ATR * atr
-        if broken:
+        dist, src, level = near_s
+        if price < level - BREAK_BUFFER_ATR * atr:
             return {
                 **empty,
-                "level": float(support),
-                "level_kind": "support",
-                "distance_atr": round(dist_s, 3),
-                "detail": f"at support {support} but close already through the level",
+                "level": level, "level_kind": "support", "level_source": src,
+                "distance_atr": round(dist, 3),
+                "detail": f"at {src} {level} but close already through the level",
             }
         return {
-            "ok": True,
-            "side": LONG,
-            "level": float(support),
-            "level_kind": "support",
-            "distance_atr": round(dist_s, 3),
-            "support": support,
-            "resistance": resistance,
-            "detail": f"price {price:.1f} at support {support} ({dist_s:.2f} ATR)",
+            "ok": True, "side": LONG, "level": level, "level_kind": "support",
+            "level_source": src, "distance_atr": round(dist, 3),
+            "support": level, "resistance": empty["resistance"],
+            "detail": f"price {price:.1f} at {src} {level} ({dist:.2f} ATR)",
         }
-
     if at_r:
-        broken = price > float(resistance) + BREAK_BUFFER_ATR * atr
-        if broken:
+        dist, src, level = near_r
+        if price > level + BREAK_BUFFER_ATR * atr:
             return {
                 **empty,
-                "level": float(resistance),
-                "level_kind": "resistance",
-                "distance_atr": round(dist_r, 3),
-                "detail": f"at resistance {resistance} but close already through the level",
+                "level": level, "level_kind": "resistance", "level_source": src,
+                "distance_atr": round(dist, 3),
+                "detail": f"at {src} {level} but close already through the level",
             }
         return {
-            "ok": True,
-            "side": SHORT,
-            "level": float(resistance),
-            "level_kind": "resistance",
-            "distance_atr": round(dist_r, 3),
-            "support": support,
-            "resistance": resistance,
-            "detail": f"price {price:.1f} at resistance {resistance} ({dist_r:.2f} ATR)",
+            "ok": True, "side": SHORT, "level": level, "level_kind": "resistance",
+            "level_source": src, "distance_atr": round(dist, 3),
+            "support": empty["support"], "resistance": level,
+            "detail": f"price {price:.1f} at {src} {level} ({dist:.2f} ATR)",
         }
-
     bits = []
-    if dist_s is not None:
-        bits.append(f"support {support} is {dist_s:.2f} ATR away")
-    if dist_r is not None:
-        bits.append(f"resistance {resistance} is {dist_r:.2f} ATR away")
-    empty["distance_atr"] = min([d for d in (dist_s, dist_r) if d is not None], default=None)
+    if near_s:
+        bits.append(f"{near_s[1]} {near_s[2]} is {near_s[0]:.2f} ATR away")
+    if near_r:
+        bits.append(f"{near_r[1]} {near_r[2]} is {near_r[0]:.2f} ATR away")
+    empty["distance_atr"] = min([x[0] for x in (near_s, near_r) if x], default=None)
     empty["detail"] = (
         "not at a mapped level (" + "; ".join(bits) + f", need ≤ {AT_LEVEL_ATR} ATR)"
-        if bits else "MarketState has no support/resistance to check"
+        if bits else "MarketState has no support/resistance/swing to check"
     )
     return empty
