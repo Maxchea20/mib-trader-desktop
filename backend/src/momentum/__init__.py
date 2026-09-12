@@ -342,3 +342,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
 
     return AgentResult(AGENT_ID, direction, round(confidence, 1), round(strength, 1),
                        evidence, [], timeframe, valid=valid)
+
+
+from .observe import observe  # Step 6E — AnalysisObservation producer
