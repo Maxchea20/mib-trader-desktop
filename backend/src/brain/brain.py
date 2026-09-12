@@ -161,7 +161,7 @@ def decide(agents: List, price: float, timeframe: str, htf: Dict, weights_overri
         "entry_readiness": state in (STATE_LONG, STATE_SHORT),
         "decision_state": decision_state, "primary_evidence": primary_evidence,
         "supporting_evidence": supporting_evidence, "blocking_reasons": blocking,
-        "brain_version": "BRAIN_V2",
+        "brain_version": "BRAIN_V2.1",
     }
     explanation = build_explanation(result, agents)
     result["explanation"] = explanation
