@@ -12,8 +12,9 @@ from typing import Dict, List
 from . import evidence as ev
 from ..contract import LONG, SHORT
 
-EXCLUDE_FROM_EXECUTION = ("elliott_wave",)  # spec section 2 — research/
-# diagnostic only, zero execution influence. Still visible in evidence/UI.
+# V2.2 — Trend (EMA lean) is context / UI only. It must not set bias,
+# pad setup breadth, or open a trigger. Same contract as Elliott Wave.
+EXCLUDE_FROM_EXECUTION = ("elliott_wave", "trend")
 
 # Agents whose key_levels are treated as event origins when they also
 # report an actionable trigger state. Lower rank wins. Location agents
@@ -57,13 +58,11 @@ def setup_score(agents: List, bias: str) -> Dict:
             opposed.append(role)
 
     n_roles = max(len(groups), 1)
-    breadth = len(aligned) / n_roles  # how many independent roles agree
+    breadth = len(aligned) / n_roles
     avg_strength = (total_aligned_conf / len(aligned)) if aligned else 0.0
 
     score = min(100.0, breadth * 55.0 + (avg_strength / 100.0) * 45.0)
 
-    # Full setup-state progression (spec section 13) — a setup is not
-    # binary "exists or doesn't"; it develops.
     if score < 20:
         setup_state = "NO_SETUP"
     elif score < 45:
@@ -84,12 +83,10 @@ def setup_score(agents: List, bias: str) -> Dict:
     }
 
 
-# Same-event clustering radius in ATR units.
 _CLUSTER_ATR_MULT = 0.5
 
 
 def _published_origin_price(res):
-    """Read an origin from this agent's own key_levels only. Does not invent a price."""
     best = None
     for lv in (res.key_levels or []):
         raw = lv.get("price")
@@ -181,11 +178,6 @@ def _summarize_cluster(cluster: List) -> Dict:
 
 
 def trigger_score(agents: List, bias: str, atr_value: float = None, price: float = None) -> Dict:
-    """A trigger is an ACTIONABLE event clustered by published origin.
-
-    Multiple agents on the SAME origin are one event with corroboration.
-    Early single-agent triggers still count. `price` is unused for clustering.
-    """
     if bias not in (LONG, SHORT):
         return {
             "score": 0.0, "state": "TRIGGER_PENDING", "primary": [],
@@ -240,16 +232,7 @@ def trigger_score(agents: List, bias: str, atr_value: float = None, price: float
 
 
 def location_score(agents: List, price: float, bias: str, confluence_zones: List[Dict]) -> Dict:
-    """Location asks: is this trigger happening somewhere meaningful?
-    Reuses the EXISTING confluence-zone deduplication (confluence.py's
-    diminishing-returns clustering already prevents FVG+Fibonacci+S/R
-    describing the same zone from being triple-counted) rather than
-    re-summing key_levels independently (section 17's explicit
-    \"avoid double counting multiple agents describing the same level\")."""
     if bias not in (LONG, SHORT) or not confluence_zones:
-        # No confluence zone found is an absence of information, not
-        # evidence of BAD location — should read as neutral, not get
-        # penalized the same way an actively unfavorable zone would.
         return {"score": 50.0, "detail": "no nearby confluence zone identified"}
 
     relevant = [z for z in confluence_zones
@@ -260,12 +243,12 @@ def location_score(agents: List, price: float, bias: str, confluence_zones: List
 
     best = max(relevant, key=lambda z: z["count"])
     dist_pct = abs(best["price"] - price) / max(price, 1e-9) * 100
-    proximity = max(0.0, 1.0 - dist_pct / 1.5)  # zones within ~1.5% matter most
+    proximity = max(0.0, 1.0 - dist_pct / 1.5)
     quality = min(1.0, best["count"] / 3.0)
     score = min(100.0, (proximity * 0.5 + quality * 0.5) * 100.0)
     favorable = (best["side"] == "support" and bias == LONG) or (best["side"] == "resistance" and bias == SHORT)
     if not favorable:
-        score *= 0.5  # trigger sitting right under resistance (for LONG) or above support (for SHORT) is a weaker location
+        score *= 0.5
     return {
         "score": round(score, 1),
         "zone_price": best["price"], "zone_agents": best["agents"], "distance_pct": round(dist_pct, 2),
@@ -275,9 +258,6 @@ def location_score(agents: List, price: float, bias: str, confluence_zones: List
 
 
 def _is_trigger_agent(res, bias: str) -> bool:
-    """Same classification trigger_score() uses, read-only.
-    Does not change trigger scoring — only identifies which agents
-    own the event whose origin extension must measure."""
     if not res.valid or res.agent in EXCLUDE_FROM_EXECUTION:
         return False
     if res.direction != bias:
@@ -293,12 +273,6 @@ def _level_behind_move(price: float, level_price: float, bias: str) -> bool:
 
 
 def _pick_origin_from_trigger_agents(agents: List, price: float, bias: str):
-    """Return (origin_price, source_agent, source_label) from TRIGGER
-    agents only. Never inspects key_levels on non-trigger agents.
-
-    When several trigger agents publish origins, prefer Structure /
-    Breakout over location agents, then the farthest level (impulse
-    start) — never the nearest wallpaper level."""
     candidates = []
     for res in agents:
         if not _is_trigger_agent(res, bias):
@@ -326,17 +300,6 @@ def _pick_origin_from_trigger_agents(agents: List, price: float, bias: str):
 
 
 def extension_timing(agents: List, price: float, bias: str, atr_value: float, max_extension_pct: float) -> Dict:
-    """Extension is an entry-QUALITY filter, not a directional signal.
-
-    Reference MUST be the origin of the actionable trigger event that
-    armed the setup (Structure BOS, Breakout level, etc.). It must NOT
-    be the nearest same-direction key_level from an unrelated agent
-    (e.g. an S/R print sitting 50 points under price while the BOS
-    that actually triggered was 12% ago).
-
-    If a directional trigger exists but no origin can be read from
-    those trigger agents, state is UNKNOWN — never silently TIMELY.
-    """
     if bias not in (LONG, SHORT) or atr_value <= 0:
         return {"state": "TIMELY", "extension_pct": 0.0, "detail": "no directional bias to evaluate extension against"}
 
