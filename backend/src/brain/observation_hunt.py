@@ -3,14 +3,13 @@
 Watchers (observe()) report facts. This module decides the click.
 Does not change agent detect math. Does not count votes.
 
-Rules (tested 30d PF ~1.36 / 90d PF ~1.33):
+Rules (90d: Structure V2 + Volume tags, PF ~1.39; Breakout V2 filter removed):
 - Arm on 15m BREAKOUT_DETECTED / BOS / CHoCH only (not FVG_CREATED).
 - A stale/extended BOS (3rd+ consecutive same-direction since the
   last CHoCH) does not arm alone. CHoCH always arms.
-- A low-reliability or already-failed breakout does not arm alone.
+- Breakout DETECTED still arms (Breakout V2 skip reverted after 90d PF drop).
 - HTF 4h Trend opposing the side blocks unless the 15m event is CHoCH.
-- Volume contradiction blocks (checks all absorption/exhaustion/
-  divergence tags, not just the single collapsed state string).
+- Volume contradiction blocks (tags + state).
 - M5 must tag the 15m level band (0.25 * 15m ATR) and close on-side
   no more than 0.25 ATR through the level.
 - Close through the band = late. Kill the arm. Do not chase.
@@ -66,15 +65,6 @@ def _trend_side(state):
 
 
 def _vol_bad(o, side):
-    # "new glasses" #4 (2026-09-13): check the full tags list, not just
-    # the single, lossy `state` string. volume/observe.py collapses
-    # absorption/exhaustion/divergence into ONE priority-ordered state
-    # string (analyze()'s own logic, untouched) -- if two of these
-    # conditions are true on the same candle, only the highest-
-    # priority one survives into `state`. observe() now independently
-    # exposes all three as tags regardless of which one "won," so
-    # scanning tags catches a real contradiction that state alone
-    # could silently shadow.
     labels = set(o.tags or [])
     if o.state:
         labels.add(str(o.state).upper())
@@ -140,38 +130,13 @@ def evaluate_hunt(
 
     trigs = []
     extended_bos_skipped = False
-    weak_breakout_skipped = False
     for e in _fresh(br, bar15["ts"]):
         if e.event_type == "BREAKOUT_DETECTED":
-            # "new glasses" #2 (2026-09-13): a breakout that's already
-            # low-reliability (thin penetration AND thin volume, per
-            # breakout/observe.py's existing `valid=reliable` check) or
-            # whose lifecycle has already flagged FAILED (a decisive
-            # close back through the level) is not treated as an
-            # arming trigger on its own. Plain-English version: don't
-            # arm on a shaky breakout that's already showing signs of
-            # snapping back. Detect math in breakout/__init__.py is
-            # untouched -- this only reads flags/valid that
-            # breakout/observe.py already computes but the hunt
-            # previously ignored.
-            if (not br.valid) or br.flags.get("failure"):
-                weak_breakout_skipped = True
-                continue
             s = _dir(e.direction)
             if s:
                 trigs.append(("breakout", s, e))
     for e in _fresh(st, bar15["ts"]):
         if e.event_type in ("BOS", "CHoCH", "CHOCH"):
-            # "new glasses" #1 (2026-09-13): a BOS deep into an already-
-            # extended continuation (3rd+ consecutive same-direction
-            # BOS since the last CHoCH) is not treated as an arming
-            # trigger on its own. Per the backtest notes: "BOS is not
-            # automatically a reversal" -- CHoCH (any) and a FRESH
-            # first-BOS-after-CHoCH still arm normally; only a stale,
-            # already-extended BOS is skipped. Detect math in
-            # structure/observe.py and market_state/builder.py is
-            # untouched -- this is purely a hunt-side filter on the
-            # existing extended_bos flag.
             if e.event_type == "BOS" and st.flags.get("extended_bos"):
                 extended_bos_skipped = True
                 continue
@@ -195,11 +160,6 @@ def evaluate_hunt(
         if extended_bos_skipped:
             return _wait(
                 "15m trigger was only an extended/stale continuation BOS — skipped, no fresh confirmation",
-                extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
-            )
-        if weak_breakout_skipped:
-            return _wait(
-                "15m breakout was low-reliability or already failing — skipped, no snap-back chase",
                 extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
             )
         return _wait(
