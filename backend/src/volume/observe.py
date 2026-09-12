@@ -17,6 +17,7 @@ from . import (
     AGENT_ID,
     BREAKOUT_LOOKBACK,
     DIRECTIONAL_LOOKBACK,
+    DIVERGENCE_LOOKBACK,
     EFFICIENCY_RVOL_REF,
     EXHAUSTION_MIN_STREAK,
     EXPANSION_LOOKBACK,
@@ -133,6 +134,36 @@ def observe(candles, timeframe: str) -> AnalysisObservation:
     if streak >= EXHAUSTION_MIN_STREAK and vol_trend == "CONTRACTING" and body_declining:
         exhaustion = "BULLISH_EXHAUSTION" if streak_dir else "BEARISH_EXHAUSTION"
 
+    # "new glasses" #4 (2026-09-13): divergence is independently
+    # recomputed here (same exact formula as analyze()), mirroring the
+    # existing absorption/exhaustion pattern above. Previously this
+    # module only surfaced divergence when it happened to WIN
+    # analyze()'s single-string state-priority race (absorption >
+    # exhaustion > divergence > ...) -- if absorption or exhaustion
+    # also fired on the same candle, a real divergence would be
+    # silently invisible to every consumer of this observation. Now
+    # it's its own flag/tag regardless of what state ends up winning.
+    # Detect math in __init__.py::analyze() is untouched; this is a
+    # read-only, additive recomputation of a formula that already
+    # exists there.
+    price_window = close[-DIVERGENCE_LOOKBACK:]
+    dvol_series = []
+    for i in range(n - DIVERGENCE_LOOKBACK, n):
+        sign = 1 if close[i] >= open_[i] else -1
+        dvol_series.append(sign * volume[i])
+    dvol_series = np.array(dvol_series, dtype=float)
+    divergence = None
+    mid = len(price_window) // 2
+    if mid > 2:
+        recent_hi = int(np.argmax(price_window[mid:])) + mid
+        early_hi = int(np.argmax(price_window[:mid]))
+        recent_lo = int(np.argmin(price_window[mid:])) + mid
+        early_lo = int(np.argmin(price_window[:mid]))
+        if price_window[recent_hi] > price_window[early_hi] and dvol_series[recent_hi] < dvol_series[early_hi]:
+            divergence = "VOLUME_DIVERGENCE_BEARISH"
+        if divergence is None and price_window[recent_lo] < price_window[early_lo] and dvol_series[recent_lo] > dvol_series[early_lo]:
+            divergence = "VOLUME_DIVERGENCE_BULLISH"
+
     recent_high = float(np.max(high[-BREAKOUT_LOOKBACK - 1:-1])) if n > BREAKOUT_LOOKBACK + 1 else float(high[-2])
     recent_low = float(np.min(low[-BREAKOUT_LOOKBACK - 1:-1])) if n > BREAKOUT_LOOKBACK + 1 else float(low[-2])
     breakout_context = None
@@ -173,6 +204,7 @@ def observe(candles, timeframe: str) -> AnalysisObservation:
         "has_absorption": absorption is not None,
         "has_exhaustion": exhaustion is not None,
         "has_breakout_volume": breakout_context is not None,
+        "has_divergence": divergence is not None,
     }
 
     tags = ["VOLUME", state, participation, vol_trend]
@@ -180,6 +212,8 @@ def observe(candles, timeframe: str) -> AnalysisObservation:
         tags.append(absorption)
     if exhaustion:
         tags.append(exhaustion)
+    if divergence:
+        tags.append(divergence)
     if breakout_context:
         tags.append(breakout_context)
     if followthrough:
@@ -189,6 +223,7 @@ def observe(candles, timeframe: str) -> AnalysisObservation:
     notes = [
         f"RVOL {_rvol:.2f} — {participation} participation",
         f"Volume trend: {vol_trend}",
+        f"Divergence: {divergence or 'none'}",
         f"State: {state}",
     ]
 

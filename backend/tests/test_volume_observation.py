@@ -38,6 +38,55 @@ def test_construction():
     assert not hasattr(obs, "strength")
 
 
+# ---------------------------------------------------------------------------
+# "New glasses" #4 (2026-09-13): divergence is independently recomputed
+# (same formula as analyze()) instead of only surfacing when it wins
+# analyze()'s single-string state-priority race.
+# ---------------------------------------------------------------------------
+
+def _divergence_series():
+    """Early half: strong up-move on strong volume. Recent half: price
+    pushes to an even HIGHER high, but on much weaker volume -- the
+    exact bearish-volume-divergence shape (price HH, volume LL)."""
+    candles = []
+    p = 100.0
+    i = 0
+    for _ in range(MIN_CANDLES - 20):
+        p += 0.1
+        candles.append(_bar(i, p - 0.05, p + 0.1, p - 0.15, p, 150.0)); i += 1
+    for _ in range(10):
+        p += 0.5
+        candles.append(_bar(i, p - 0.4, p + 0.1, p - 0.5, p, 400.0)); i += 1
+    for _ in range(10):
+        p += 0.6
+        candles.append(_bar(i, p - 0.5, p + 0.1, p - 0.6, p, 80.0)); i += 1
+    return candles
+
+
+def test_divergence_flag_and_tag_are_exposed():
+    obs = observe(_divergence_series(), TF)
+    assert obs.flags["has_divergence"] is True
+    assert "VOLUME_DIVERGENCE_BEARISH" in obs.tags
+
+
+def test_no_divergence_flag_when_no_divergence_present():
+    obs = observe(_series(), TF)
+    assert obs.flags["has_divergence"] is False
+    assert not any("DIVERGENCE" in t for t in obs.tags)
+
+
+def test_divergence_recomputation_matches_analyze_formula():
+    """Not just presence -- the recomputed value must match what
+    analyze() itself would report as `divergence` in its evidence,
+    proving this isn't a different, drifted formula."""
+    candles = _divergence_series()
+    obs = observe(candles, TF)
+    a = analyze(candles, TF)
+    analyze_divergence_line = next((e for e in a.evidence if e.startswith("Divergence:")), "")
+    assert "bearish" in analyze_divergence_line.lower()
+    assert obs.flags["has_divergence"] is True
+
+
 def test_serialization():
     import json
     d = observe(_series(), TF).to_dict()

@@ -9,7 +9,8 @@ Rules (tested 30d PF ~1.36 / 90d PF ~1.33):
   last CHoCH) does not arm alone. CHoCH always arms.
 - A low-reliability or already-failed breakout does not arm alone.
 - HTF 4h Trend opposing the side blocks unless the 15m event is CHoCH.
-- Volume contradiction blocks.
+- Volume contradiction blocks (checks all absorption/exhaustion/
+  divergence tags, not just the single collapsed state string).
 - M5 must tag the 15m level band (0.25 * 15m ATR) and close on-side
   no more than 0.25 ATR through the level.
 - Close through the band = late. Kill the arm. Do not chase.
@@ -65,10 +66,21 @@ def _trend_side(state):
 
 
 def _vol_bad(o, side):
-    st = (o.state or "").upper()
-    if side == LONG and any(x in st for x in ("BEARISH_ABSORPTION", "BULLISH_EXHAUSTION", "VOLUME_DIVERGENCE_BEARISH")):
+    # "new glasses" #4 (2026-09-13): check the full tags list, not just
+    # the single, lossy `state` string. volume/observe.py collapses
+    # absorption/exhaustion/divergence into ONE priority-ordered state
+    # string (analyze()'s own logic, untouched) -- if two of these
+    # conditions are true on the same candle, only the highest-
+    # priority one survives into `state`. observe() now independently
+    # exposes all three as tags regardless of which one "won," so
+    # scanning tags catches a real contradiction that state alone
+    # could silently shadow.
+    labels = set(o.tags or [])
+    if o.state:
+        labels.add(str(o.state).upper())
+    if side == LONG and labels & {"BEARISH_ABSORPTION", "BULLISH_EXHAUSTION", "VOLUME_DIVERGENCE_BEARISH"}:
         return True
-    if side == SHORT and any(x in st for x in ("BULLISH_ABSORPTION", "BEARISH_EXHAUSTION", "VOLUME_DIVERGENCE_BULLISH")):
+    if side == SHORT and labels & {"BULLISH_ABSORPTION", "BEARISH_EXHAUSTION", "VOLUME_DIVERGENCE_BULLISH"}:
         return True
     return False
 

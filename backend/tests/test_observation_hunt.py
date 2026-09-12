@@ -39,12 +39,12 @@ def _flat_candles_15m(n=60, price=100.0):
               "low": price - 1, "close": price, "volume": 10.0} for i in range(n)]
 
 
-def _empty_obs(source, obs_type, flags=None, history=None, valid=True, measurements=None):
+def _empty_obs(source, obs_type, flags=None, history=None, valid=True, measurements=None, tags=None, state="NONE"):
     return AnalysisObservation(
         source=source, observation_type=obs_type, timeframe="15m",
         provenance=Provenance(source_module=source, timeframe="15m", detection_timestamp=BAR15_TS),
-        state="NONE", flags=flags or {}, history=history or [],
-        valid=valid, measurements=measurements or [],
+        state=state, flags=flags or {}, history=history or [],
+        valid=valid, measurements=measurements or [], tags=tags or [],
     )
 
 
@@ -56,12 +56,12 @@ def _breakout_event(direction="BULLISH"):
     return AnalysisEvent(event_type="BREAKOUT_DETECTED", direction=direction, timestamp=BAR15_TS, price=100.0)
 
 
-def _patch_watchers(monkeypatch, structure_obs=None, breakout_obs=None):
+def _patch_watchers(monkeypatch, structure_obs=None, breakout_obs=None, volume_obs=None):
     monkeypatch.setattr(oh, "obs_breakout", lambda c, tf: breakout_obs or _empty_obs("breakout", "RANGE"))
     monkeypatch.setattr(oh, "obs_structure", lambda c, tf: structure_obs or _empty_obs("market_structure", "STRUCTURE"))
     monkeypatch.setattr(oh, "obs_fvg", lambda c, tf: _empty_obs("fair_value_gap", "FVG"))
     monkeypatch.setattr(oh, "obs_sr", lambda c, tf: _empty_obs("support_resistance", "SR_LEVEL"))
-    monkeypatch.setattr(oh, "obs_vol", lambda c, tf: _empty_obs("volume", "VOLUME_READING"))
+    monkeypatch.setattr(oh, "obs_vol", lambda c, tf: volume_obs or _empty_obs("volume", "VOLUME_READING"))
 
 
 def test_extended_bos_alone_is_skipped_not_armed(monkeypatch):
@@ -188,3 +188,66 @@ def test_breakout_quality_present_even_with_default_watchers(monkeypatch):
     out = evaluate_hunt(_flat_candles_15m(), {"ts": 2, "open": 100, "high": 100, "low": 100, "close": 100}, atr_15m=100.0)
     assert out["action"] == "WAIT"
     assert "breakout_quality" in out
+
+
+# ---------------------------------------------------------------------------
+# "New glasses" #4 wiring (2026-09-13): _vol_bad() now checks the full
+# tags list, not just the single collapsed `state` string, so a
+# contradiction that analyze()'s state-priority logic shadowed (e.g.
+# absorption won the state string, but divergence was ALSO true) still
+# blocks the trade. volume/observe.py's detect math is untouched --
+# absorption/exhaustion/divergence are all still computed exactly as
+# before, just no longer collapsed to one value before reaching here.
+# ---------------------------------------------------------------------------
+from src.brain.observation_hunt import _vol_bad
+
+
+def test_vol_bad_catches_state_that_matches_directly():
+    """Baseline: the original behavior (state itself is the
+    contradiction) must still work."""
+    obs = _empty_obs("volume", "VOLUME", state="BEARISH_ABSORPTION", tags=["VOLUME", "BEARISH_ABSORPTION"])
+    assert _vol_bad(obs, LONG) is True
+    assert _vol_bad(obs, SHORT) is False
+
+
+def test_vol_bad_catches_a_tag_shadowed_by_a_different_winning_state():
+    """The core fix: divergence is TRUE but a neutral/unrelated state
+    won analyze()'s state-priority race, so `state` alone would hide
+    it. Before this fix, _vol_bad only looked at `state` and would
+    have returned False here, wrongly allowing a LONG through despite
+    a real bearish divergence underneath."""
+    obs = _empty_obs(
+        "volume", "VOLUME",
+        state="NEUTRAL",  # the "winning" state -- not itself contradictory for either side
+        tags=["VOLUME", "NEUTRAL", "VOLUME_DIVERGENCE_BEARISH"],  # but divergence also fired underneath
+    )
+    assert _vol_bad(obs, LONG) is True   # caught via tags, not state
+    assert _vol_bad(obs, SHORT) is False
+
+
+def test_vol_bad_false_when_nothing_contradicts():
+    obs = _empty_obs("volume", "VOLUME", state="NEUTRAL", tags=["VOLUME", "NEUTRAL", "STABLE"])
+    assert _vol_bad(obs, LONG) is False
+    assert _vol_bad(obs, SHORT) is False
+
+
+def test_hunt_blocks_long_on_shadowed_divergence(monkeypatch):
+    """End-to-end: a fresh bullish BOS with a volume observation whose
+    STATE looks fine but whose TAGS reveal a shadowed bearish
+    divergence must still WAIT, not FIRE."""
+    structure_obs = _empty_obs(
+        "market_structure", "STRUCTURE",
+        flags={"extended_bos": False, "first_bos_after_choch": True},
+        history=[_bos_event("BULLISH")],
+    )
+    volume_obs = _empty_obs(
+        "volume", "VOLUME",
+        state="BULLISH_ABSORPTION",
+        tags=["VOLUME", "BULLISH_ABSORPTION", "VOLUME_DIVERGENCE_BEARISH"],
+    )
+    _patch_watchers(monkeypatch, structure_obs=structure_obs, volume_obs=volume_obs)
+
+    candle_5m = {"ts": 2, "open": 100.0, "high": 100.5, "low": 100.0, "close": 100.0}
+    out = evaluate_hunt(_flat_candles_15m(), candle_5m, atr_15m=100.0)
+    assert out["action"] == "WAIT"
+    assert "volume contradicts" in out["why_state"][0]
