@@ -12,10 +12,9 @@ from src.breakout import (
     MAX_FOLLOWTHROUGH_LOOKBACK,
     _find_active_breakout,
     _range_as_of,
-    _tv_volume_oscillator,
     analyze,
-    observe,
 )
+from src.breakout.observe import observe, _tv_volume_oscillator
 from src.contract import LONG, SHORT, NEUTRAL
 from src.indicators import arrays, ema
 from src.observation import AnalysisObservation, to_agent_result_compat
