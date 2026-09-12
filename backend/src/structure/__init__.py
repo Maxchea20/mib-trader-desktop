@@ -360,14 +360,6 @@ def analyze(
             100.0,
         )
 
-    # Explicit summary line — makes the regime/direction/event
-    # separation visible directly in the evidence, not just inferable
-    # from reading the other lines. This is the exact distinction this
-    # rebuild exists to surface: regime describes the swing SHAPE,
-    # direction describes CURRENT BIAS, and a market can be, for
-    # example, structurally EXPANDING while carrying a clear SHORT bias
-    # from its most recent confirmed break — these are no longer
-    # collapsed into each other.
     evidence.append(
         f"Structure sequence: {structure.structure_sequence} | "
         f"Regime: {structure.regime} | "
@@ -378,10 +370,6 @@ def analyze(
         f"Structural strength: {strength:.0f}%"
     )
 
-    # Reversal Monitor evidence — CHoCH is an early warning, not an
-    # automatic confirmation. This surfaces exactly where a candidate
-    # currently stands, separate from the structural direction/regime
-    # above, per the explicit "these are separate fields" requirement.
     rev = structure.reversal
     if rev.state != "NONE":
         evidence.append(
@@ -404,9 +392,6 @@ def analyze(
         )
         evidence.append(f"Reversal state: {rev.state}" + (f" ({rev.reason})" if rev.reason else ""))
 
-    # BOS Recovery / Early Reversal Detection — a SEPARATE, earlier-
-    # firing system from the CHoCH-based candidate above. This is where
-    # "EARLY != FULL CONFIRMATION" gets surfaced.
     br = structure.bos_recovery
     if br.state != "NONE":
         evidence.append(
@@ -467,3 +452,6 @@ def analyze(
         valid=True,
         state=act,
     )
+
+
+from .observe import observe  # Step 6C — AnalysisObservation producer
