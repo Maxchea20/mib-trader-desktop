@@ -28,8 +28,8 @@ def test_band_constant():
 # history that happens to produce the right structure event.
 # ---------------------------------------------------------------------------
 import src.brain.observation_hunt as oh
-from src.observation import AnalysisEvent, AnalysisObservation, Provenance
-from src.contract import LONG, STATE_WAIT
+from src.observation import AnalysisEvent, AnalysisObservation, Measurement, Provenance
+from src.contract import LONG, SHORT, STATE_WAIT
 
 BAR15_TS = 1_700_000_000
 
@@ -39,11 +39,12 @@ def _flat_candles_15m(n=60, price=100.0):
               "low": price - 1, "close": price, "volume": 10.0} for i in range(n)]
 
 
-def _empty_obs(source, obs_type, flags=None, history=None):
+def _empty_obs(source, obs_type, flags=None, history=None, valid=True, measurements=None):
     return AnalysisObservation(
         source=source, observation_type=obs_type, timeframe="15m",
         provenance=Provenance(source_module=source, timeframe="15m", detection_timestamp=BAR15_TS),
         state="NONE", flags=flags or {}, history=history or [],
+        valid=valid, measurements=measurements or [],
     )
 
 
@@ -51,9 +52,13 @@ def _bos_event(direction="BULLISH"):
     return AnalysisEvent(event_type="BOS", direction=direction, timestamp=BAR15_TS, price=100.0)
 
 
-def _patch_watchers(monkeypatch, structure_obs, breakout_history=None):
-    monkeypatch.setattr(oh, "obs_breakout", lambda c, tf: _empty_obs("breakout", "BREAKOUT", history=breakout_history or []))
-    monkeypatch.setattr(oh, "obs_structure", lambda c, tf: structure_obs)
+def _breakout_event(direction="BULLISH"):
+    return AnalysisEvent(event_type="BREAKOUT_DETECTED", direction=direction, timestamp=BAR15_TS, price=100.0)
+
+
+def _patch_watchers(monkeypatch, structure_obs=None, breakout_obs=None):
+    monkeypatch.setattr(oh, "obs_breakout", lambda c, tf: breakout_obs or _empty_obs("breakout", "RANGE"))
+    monkeypatch.setattr(oh, "obs_structure", lambda c, tf: structure_obs or _empty_obs("market_structure", "STRUCTURE"))
     monkeypatch.setattr(oh, "obs_fvg", lambda c, tf: _empty_obs("fair_value_gap", "FVG"))
     monkeypatch.setattr(oh, "obs_sr", lambda c, tf: _empty_obs("support_resistance", "SR_LEVEL"))
     monkeypatch.setattr(oh, "obs_vol", lambda c, tf: _empty_obs("volume", "VOLUME_READING"))
@@ -120,3 +125,66 @@ def test_extended_bos_diagnostics_present_on_every_wait_branch(monkeypatch):
     assert out["action"] == "WAIT"
     assert "bos_quality" in out
     assert out["bos_quality"]["extended_bos"] is False
+
+
+# ---------------------------------------------------------------------------
+# "New glasses" #2 wiring (2026-09-13): a low-reliability or already-
+# failed breakout no longer arms the hunt on its own. Same pattern as
+# #1 -- breakout/observe.py's `valid`/`flags["failure"]` already
+# existed and were simply not being read by the hunt before this.
+# breakout/__init__.py's detection math is untouched.
+# ---------------------------------------------------------------------------
+
+def test_low_reliability_breakout_is_skipped_not_armed(monkeypatch):
+    breakout_obs = _empty_obs(
+        "breakout", "BREAKOUT", history=[_breakout_event("BULLISH")],
+        valid=False,  # low-reliability: thin penetration AND thin volume
+        measurements=[Measurement("penetration_atr", 0.1), Measurement("close_location", 0.2)],
+    )
+    _patch_watchers(monkeypatch, breakout_obs=breakout_obs)
+
+    out = evaluate_hunt(_flat_candles_15m(), {"ts": 1, "open": 100, "high": 100, "low": 100, "close": 100}, atr_15m=100.0)
+    assert out["action"] == "WAIT"
+    assert "low-reliability" in out["why_state"][0] or "low-reliability" in out["blocking_reasons"][0]
+    assert out["breakout_quality"]["low_reliability"] is True
+
+
+def test_already_failed_breakout_is_skipped_not_armed(monkeypatch):
+    """Even if breakout/observe.py still reports valid=True on some
+    other measure, an already-FAILED lifecycle (decisive close back
+    through the level) must block arming -- this is the literal
+    'fail if snap-back' case."""
+    breakout_obs = _empty_obs(
+        "breakout", "BREAKOUT", history=[_breakout_event("BULLISH")],
+        valid=True, flags={"failure": True},
+        measurements=[Measurement("penetration_atr", 0.8), Measurement("close_location", 0.9)],
+    )
+    _patch_watchers(monkeypatch, breakout_obs=breakout_obs)
+
+    out = evaluate_hunt(_flat_candles_15m(), {"ts": 1, "open": 100, "high": 100, "low": 100, "close": 100}, atr_15m=100.0)
+    assert out["action"] == "WAIT"
+    assert out["breakout_quality"]["already_failed"] is True
+
+
+def test_strong_breakout_still_arms_and_can_fire(monkeypatch):
+    breakout_obs = _empty_obs(
+        "breakout", "BREAKOUT", history=[_breakout_event("BEARISH")],
+        valid=True, flags={"failure": False},
+        measurements=[Measurement("penetration_atr", 0.9), Measurement("close_location", 0.85)],
+    )
+    _patch_watchers(monkeypatch, breakout_obs=breakout_obs)
+
+    candle_5m = {"ts": 2, "open": 100.0, "high": 100.0, "low": 99.5, "close": 100.0}
+    out = evaluate_hunt(_flat_candles_15m(), candle_5m, atr_15m=100.0)
+    assert out["action"] == "FIRE"
+    assert out["direction"] == SHORT
+    assert out["breakout_quality"]["low_reliability"] is False
+    assert out["breakout_quality"]["already_failed"] is False
+    assert out["breakout_quality"]["penetration_atr"] == 0.9
+
+
+def test_breakout_quality_present_even_with_default_watchers(monkeypatch):
+    _patch_watchers(monkeypatch)
+    out = evaluate_hunt(_flat_candles_15m(), {"ts": 2, "open": 100, "high": 100, "low": 100, "close": 100}, atr_15m=100.0)
+    assert out["action"] == "WAIT"
+    assert "breakout_quality" in out

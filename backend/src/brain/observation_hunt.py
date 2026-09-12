@@ -5,6 +5,9 @@ Does not change agent detect math. Does not count votes.
 
 Rules (tested 30d PF ~1.36 / 90d PF ~1.33):
 - Arm on 15m BREAKOUT_DETECTED / BOS / CHoCH only (not FVG_CREATED).
+- A stale/extended BOS (3rd+ consecutive same-direction since the
+  last CHoCH) does not arm alone. CHoCH always arms.
+- A low-reliability or already-failed breakout does not arm alone.
 - HTF 4h Trend opposing the side blocks unless the 15m event is CHoCH.
 - Volume contradiction blocks.
 - M5 must tag the 15m level band (0.25 * 15m ATR) and close on-side
@@ -125,8 +128,23 @@ def evaluate_hunt(
 
     trigs = []
     extended_bos_skipped = False
+    weak_breakout_skipped = False
     for e in _fresh(br, bar15["ts"]):
         if e.event_type == "BREAKOUT_DETECTED":
+            # "new glasses" #2 (2026-09-13): a breakout that's already
+            # low-reliability (thin penetration AND thin volume, per
+            # breakout/observe.py's existing `valid=reliable` check) or
+            # whose lifecycle has already flagged FAILED (a decisive
+            # close back through the level) is not treated as an
+            # arming trigger on its own. Plain-English version: don't
+            # arm on a shaky breakout that's already showing signs of
+            # snapping back. Detect math in breakout/__init__.py is
+            # untouched -- this only reads flags/valid that
+            # breakout/observe.py already computes but the hunt
+            # previously ignored.
+            if (not br.valid) or br.flags.get("failure"):
+                weak_breakout_skipped = True
+                continue
             s = _dir(e.direction)
             if s:
                 trigs.append(("breakout", s, e))
@@ -154,26 +172,40 @@ def evaluate_hunt(
         "first_bos_after_choch": st.flags.get("first_bos_after_choch", False),
         "extended_bos": st.flags.get("extended_bos", False),
     }
+    breakout_quality = {
+        "penetration_atr": br.measurement("penetration_atr"),
+        "close_location": br.measurement("close_location"),
+        "low_reliability": bool(not br.valid),
+        "already_failed": bool(br.flags.get("failure")),
+    }
 
     if not trigs:
         if extended_bos_skipped:
             return _wait(
                 "15m trigger was only an extended/stale continuation BOS — skipped, no fresh confirmation",
-                extra={"bos_quality": bos_quality},
+                extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
             )
-        return _wait("no fresh 15m BOS/CHoCH/breakout on this closed 15m", extra={"bos_quality": bos_quality})
+        if weak_breakout_skipped:
+            return _wait(
+                "15m breakout was low-reliability or already failing — skipped, no snap-back chase",
+                extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
+            )
+        return _wait(
+            "no fresh 15m BOS/CHoCH/breakout on this closed 15m",
+            extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
+        )
     sides = {t[1] for t in trigs}
     if len(sides) != 1:
-        return _wait("conflicting 15m triggers", extra={"bos_quality": bos_quality})
+        return _wait("conflicting 15m triggers", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
     side = next(iter(sides))
     primary = trigs[0]
 
     htf_side = _trend_side(htf.state) if htf else None
     choch = any(t[2].event_type in ("CHoCH", "CHOCH") for t in trigs)
     if htf_side and htf_side != side and not choch:
-        return _wait("4h trend opposes 15m trigger", extra={"bos_quality": bos_quality})
+        return _wait("4h trend opposes 15m trigger", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
     if _vol_bad(vo, side):
-        return _wait("volume contradicts 15m trigger", extra={"bos_quality": bos_quality})
+        return _wait("volume contradicts 15m trigger", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
 
     level = _level(sr, fv, side, p15, atr15)
     band = BAND * atr15
@@ -185,6 +217,7 @@ def evaluate_hunt(
         return _wait("late M5 close — chased through the level", extra={
             "hunt": {"armed": True, "late": True, "level": level, "side": side},
             "bos_quality": bos_quality,
+            "breakout_quality": breakout_quality,
         })
     on_side = (side == LONG and candle_5m["close"] >= level) or (
         side == SHORT and candle_5m["close"] <= level
@@ -194,6 +227,7 @@ def evaluate_hunt(
         return _wait("M5 has not held the 15m level", extra={
             "hunt": {"armed": True, "level": level, "side": side, "atr15": atr15},
             "bos_quality": bos_quality,
+            "breakout_quality": breakout_quality,
         })
 
     entry = float(level)
@@ -222,6 +256,7 @@ def evaluate_hunt(
         "blocking_reasons": [],
         "brain_version": HUNT_VERSION,
         "bos_quality": bos_quality,
+        "breakout_quality": breakout_quality,
         "primary": primary[0],
         "event": primary[2].event_type,
         "htf_trend": htf.state if htf else None,
