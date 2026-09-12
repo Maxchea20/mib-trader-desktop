@@ -106,6 +106,32 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass  # column already exists
 
+        # Trigger provenance (2026-09-12 audit, Step 2). Previously the
+        # per-event detail computed by brain/scoring.py::trigger_score()
+        # (origin price, contributing agents, corroboration, states)
+        # existed only in the ephemeral `events` list returned inside
+        # the Brain result dict for that one tick -- never written to
+        # disk, so a trigger could never be looked up after the fact.
+        # One row per clustered trigger event on decisions that get a
+        # full decision record (same cadence as agent_decisions).
+        conn.execute("""CREATE TABLE IF NOT EXISTS trigger_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            decision_id TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            symbol TEXT, timeframe TEXT,
+            direction TEXT NOT NULL,
+            trigger_type TEXT,
+            price REAL,
+            origin_price REAL,
+            source_agents_json TEXT,
+            source_roles_json TEXT,
+            corroboration INTEGER,
+            max_confidence REAL,
+            avg_confidence REAL,
+            structural_context_json TEXT
+        )""")
+
         conn.execute("""CREATE TABLE IF NOT EXISTS agent_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             decision_id TEXT NOT NULL,
@@ -148,6 +174,8 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_final ON decisions(final_decision)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_rejstage ON decisions(rejection_stage)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_agentdec_decision ON agent_decisions(decision_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_triggerevents_decision ON trigger_events(decision_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_triggerevents_ts ON trigger_events(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tradeexec_decision ON trade_executions(decision_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tradeevents_trade ON trade_events(trade_id)")
 

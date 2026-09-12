@@ -78,6 +78,58 @@ def _record_checkpoint(setup_id: str, symbol: str, timeframe: str, ts: int,
     return {"status": status, "changed_fields": changed_fields}
 
 
+def _trigger_structural_context(brain: Dict) -> Dict:
+    """Compact snapshot of the structural context a trigger fired
+    inside -- HTF regime, directional consensus, setup maturity, and
+    the resolved decision state. Deliberately NOT a full MarketState
+    dump: the trigger event already carries its own origin/sources,
+    this only adds the surrounding decision-level context needed to
+    interpret it later (spec: "relevant structural context"), without
+    duplicating the full `decisions` row this event is already
+    foreign-keyed to via decision_id.
+    """
+    htf = brain.get("htf_regime", {}) or {}
+    gate = brain.get("htf_gate", {}) or {}
+    return {
+        "htf_regime": htf.get("regime"),
+        "htf_regime_score": htf.get("regime_score"),
+        "htf_relation": gate.get("relation"),
+        "consensus_score": brain.get("consensus_score"),
+        "setup_state": brain.get("setup_state"),
+        "setup_score": brain.get("setup_score"),
+        "extension_state": brain.get("extension_state"),
+        "decision_state": brain.get("decision_state"),
+        "brain_confidence": brain.get("brain_confidence"),
+    }
+
+
+def get_trigger_events(decision_id: str) -> list:
+    """Read back the persisted trigger-provenance rows for one
+    decision. Returns [] if the decision has none (e.g. no directional
+    trigger fired that tick) or on any lookup failure -- read-only,
+    safe to call from diagnostics/tests without affecting the trading
+    loop."""
+    try:
+        with logdb._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM trigger_events WHERE decision_id=? ORDER BY id",
+                (decision_id,),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            for key in ("source_agents_json", "source_roles_json", "structural_context_json"):
+                if d.get(key):
+                    try:
+                        d[key[:-5]] = json.loads(d[key])
+                    except (TypeError, ValueError):
+                        d[key[:-5]] = None
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
 def _record_full_decision(setup_id: str, symbol: str, timeframe: str, ts: int,
                           price: float, agents: list, market_state: Dict,
                           brain: Dict, sl_atr_mult: float, tp_atr_mult: float,
@@ -193,6 +245,38 @@ def _record_full_decision(setup_id: str, symbol: str, timeframe: str, ts: int,
                  ("FAIL" if a.get("direction") in ("LONG", "SHORT") else "NEUTRAL"),
                  a.get("confidence"), (a.get("evidence") or [None])[0],
                  json.dumps(a.get("evidence") or [])),
+            )
+
+        # Trigger provenance (audit Step 2). trigger_detail.events is the
+        # SAME event list brain.decide()/scoring.trigger_score() already
+        # computed this tick (see brain.py's `trigger_detail` key) --
+        # nothing here is recomputed, only persisted. One row per
+        # clustered trigger event. `timestamp`/`price` are recorded at
+        # the moment this decision was logged, since AgentResult/
+        # key_levels carry no timestamp of their own for when the
+        # underlying candle event actually occurred -- see explanation
+        # in _trigger_structural_context() below.
+        trigger_detail = brain.get("trigger_detail") or {}
+        for event in (trigger_detail.get("events") or []):
+            conn.execute(
+                """INSERT INTO trigger_events (
+                    decision_id, setup_id, timestamp, symbol, timeframe,
+                    direction, trigger_type, price, origin_price,
+                    source_agents_json, source_roles_json,
+                    corroboration, max_confidence, avg_confidence,
+                    structural_context_json
+                ) VALUES (?,?,?,?,?, ?,?,?,?, ?,?, ?,?,?, ?)""",
+                (
+                    decision_id, setup_id, ts, symbol, timeframe,
+                    event.get("direction"),
+                    ",".join(dict.fromkeys(event.get("states") or [])) or None,
+                    price, event.get("origin_price"),
+                    json.dumps(event.get("sources") or []),
+                    json.dumps(event.get("roles") or []),
+                    event.get("corroboration"), event.get("max_confidence"),
+                    event.get("avg_confidence"),
+                    json.dumps(_trigger_structural_context(brain)),
+                ),
             )
         conn.commit()
 

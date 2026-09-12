@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from ..indicators import atr as _shared_atr, find_pivots as _shared_find_pivots
+
 from .models import (
     BosRecoveryState,
     LocationState,
@@ -115,36 +117,27 @@ def _find_pivots(
     left: int = 3,
     right: int = 3,
 ) -> List[Dict[str, Any]]:
-    pivots: List[Dict[str, Any]] = []
-
-    if len(highs) < left + right + 1:
-        return pivots
-
-    for i in range(left, len(highs) - right):
-        high_window = highs[i - left : i + right + 1]
-        low_window = lows[i - left : i + right + 1]
-
-        if highs[i] == np.max(high_window):
-            pivots.append(
-                {
-                    "index": i,
-                    "price": float(highs[i]),
-                    "type": "HIGH",
-                }
-            )
-
-        if lows[i] == np.min(low_window):
-            pivots.append(
-                {
-                    "index": i,
-                    "price": float(lows[i]),
-                    "type": "LOW",
-                }
-            )
-
-    pivots.sort(key=lambda x: x["index"])
-
-    return pivots
+    # Pivot centralization (2026-09-12 audit, Step 4): this was a
+    # second, independent pivot-detection algorithm alongside
+    # indicators.py::find_pivots() (also used directly by
+    # support_resistance, pattern, elliott_wave, fibonacci). Verified
+    # numerically IDENTICAL across 414 synthetic scenarios --
+    # tie-heavy integer data, monotonic runs, flat arrays, spikes,
+    # asymmetric left/right windows, and near-boundary short arrays
+    # (see tests/test_pivot_centralization.py). The two only ever
+    # differed in output SCHEMA, not in which bars get selected as
+    # pivots: indicators.find_pivots() returns {"i","price","type":
+    # "H"/"L"}, while every caller in THIS module expects {"index",
+    # "price","type":"HIGH"/"LOW"} (see the SwingPoint construction a
+    # few lines below build_market_state() calls this). Delegates to
+    # the shared algorithm and translates the schema, rather than
+    # forcing every call site in this file to change.
+    raw = _shared_find_pivots(highs, lows, left=left, right=right)
+    _TYPE_MAP = {"H": "HIGH", "L": "LOW"}
+    return [
+        {"index": p["i"], "price": p["price"], "type": _TYPE_MAP[p["type"]]}
+        for p in raw
+    ]
 
 
 def _calculate_atr(
@@ -153,23 +146,13 @@ def _calculate_atr(
     closes: np.ndarray,
     period: int = 14,
 ) -> float:
-    if len(closes) < 2:
-        return 0.0
-
-    previous_close = closes[:-1]
-
-    true_range = np.maximum(
-        highs[1:] - lows[1:],
-        np.maximum(
-            np.abs(highs[1:] - previous_close),
-            np.abs(lows[1:] - previous_close),
-        ),
-    )
-
-    if len(true_range) == 0:
-        return 0.0
-
-    return float(np.mean(true_range[-period:]))
+    # ATR centralization (2026-09-12 audit, Step 3): this was a second,
+    # independent reimplementation of indicators.py::atr() -- verified
+    # numerically IDENTICAL to it across every input tested, including
+    # n=0/1/2 and flat-candle edge cases (see
+    # tests/test_atr_centralization.py). Delegates directly now instead
+    # of carrying parallel math that has to be kept in sync by hand.
+    return _shared_atr(highs, lows, closes, period)
 
 
 def _calculate_swing_strength(

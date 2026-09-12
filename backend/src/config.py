@@ -77,7 +77,7 @@ CONFLUENCE = {
     # max confidence bonus a single confluence zone can add
     "max_zone_bonus": 12.0,
     # agents whose key levels participate in confluence clustering
-    "level_agents": ["fibonacci", "support_resistance", "fair_value_gap", "breakout"],
+    "level_agents": ["fibonacci", "support_resistance", "fair_value_gap", "breakout", "market_structure"],
 }
 
 # --- PHASE E: Conflict / contradiction rules (V1 assumptions) ------------

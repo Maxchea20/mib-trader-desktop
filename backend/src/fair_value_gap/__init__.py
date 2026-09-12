@@ -20,7 +20,7 @@ from ..contract import (
     neutral,
     clamp,
 )
-from ..indicators import arrays
+from ..indicators import arrays, atr as _shared_atr
 
 
 AGENT_ID = "fair_value_gap"
@@ -34,29 +34,16 @@ MIN_FVG_PCT = 0.03
 MIN_DISPLACEMENT_ATR = 0.35
 MAX_FVGS = 20
 
-
-def _atr(high, low, close, period=14):
-    """Simple ATR used only for FVG quality filtering."""
-
-    if len(close) < 2:
-        return 0.0
-
-    prev_close = np.roll(close, 1)
-
-    tr = np.maximum(
-        high - low,
-        np.maximum(
-            np.abs(high - prev_close),
-            np.abs(low - prev_close),
-        ),
-    )
-
-    tr[0] = high[0] - low[0]
-
-    if len(tr) < period:
-        return float(np.mean(tr))
-
-    return float(np.mean(tr[-period:]))
+# ATR centralization (2026-09-12 audit, Step 3): this module used to
+# carry its own local `_atr()` -- functionally near-identical to
+# indicators.py::atr() for every candle count this module is ever
+# actually called with (every caller enforces >=30 candles; the two
+# formulas only diverge below 15), but a genuine second formula
+# nonetheless. Now delegates to the shared implementation directly;
+# see indicators.py::atr for the authoritative formula and
+# tests/test_atr_centralization.py for the side-by-side verification
+# that motivated keeping this as a pure delegation, not a rewrite.
+_atr = _shared_atr
 
 
 def _mitigation_state(fvg, highs, lows, start_index):
