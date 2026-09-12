@@ -98,8 +98,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
         return neutral(AGENT_ID, timeframe, "Invalid ATR")
 
     # ---- 1. EMA Alignment ----
-    # Alignment alone is only one component now, not sufficient for high
-    # confidence on its own — that's the core problem this rebuild fixes.
     bull_align = e20_now > e50_now > e100_now
     bear_align = e20_now < e50_now < e100_now
 
@@ -110,15 +108,11 @@ def analyze(candles, timeframe: str) -> AgentResult:
     def _sep_component(sep_atr: float) -> float:
         return _c01((sep_atr - EMA_SEPARATION_WEAK) / (EMA_SEPARATION_STRONG - EMA_SEPARATION_WEAK))
 
-    # Separation only counts as directional evidence when that
-    # direction's ribbon is actually aligned in the right order — a wide
-    # gap between EMAs that aren't stacked correctly isn't trend
-    # evidence, just noise.
     sep_component = (_sep_component(ema20_50_sep_atr) + _sep_component(ema50_100_sep_atr)) / 2.0
     bull_sep_score = sep_component if bull_align else 0.0
     bear_sep_score = sep_component if bear_align else 0.0
 
-    # ---- 3. Multi-EMA slope (ATR-normalized, partial agreement allowed) ----
+    # ---- 3. Multi-EMA slope ----
     if len(close) > SLOPE_LOOKBACK:
         slope20 = (e20_now - float(e20[-SLOPE_LOOKBACK - 1])) / _atr
         slope50 = (e50_now - float(e50[-SLOPE_LOOKBACK - 1])) / _atr
@@ -167,8 +161,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
         ribbon_state = "STABLE"
         expansion_component = 0.3
 
-    # Expansion only reinforces a direction the ribbon is ALREADY aligned
-    # in — an expanding-but-unaligned ribbon isn't trend confirmation.
     bull_expansion_score = expansion_component if bull_align else (0.3 if ribbon_state == "STABLE" else 0.0)
     bear_expansion_score = expansion_component if bear_align else (0.3 if ribbon_state == "STABLE" else 0.0)
 
@@ -180,7 +172,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
     else:
         bull_persistence = bear_persistence = 0.0
 
-    # ---- Combine into bull/bear composite scores (0-100 each) ----
     bull_score = (
         (1.0 if bull_align else 0.0) * W_ALIGNMENT
         + bull_sep_score * W_SEPARATION
@@ -206,7 +197,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
     else:
         direction = NEUTRAL
 
-    # ---- Confidence: requires agreement across factors, not just one strong one ----
     directional_strength = abs(net_score)
     if direction == LONG:
         factor_values = [1.0 if bull_align else 0.0, bull_sep_score, bull_slope_score,
@@ -249,3 +239,6 @@ def analyze(candles, timeframe: str) -> AgentResult:
 
     return AgentResult(AGENT_ID, direction, round(confidence, 1), round(strength, 1),
                        evidence, key_levels, timeframe, valid=True)
+
+
+from .observe import observe  # Step 6F — AnalysisObservation producer
