@@ -124,6 +124,7 @@ def evaluate_hunt(
         htf = obs_trend(candles_4h[-200:], "4h")
 
     trigs = []
+    extended_bos_skipped = False
     for e in _fresh(br, bar15["ts"]):
         if e.event_type == "BREAKOUT_DETECTED":
             s = _dir(e.direction)
@@ -131,24 +132,48 @@ def evaluate_hunt(
                 trigs.append(("breakout", s, e))
     for e in _fresh(st, bar15["ts"]):
         if e.event_type in ("BOS", "CHoCH", "CHOCH"):
+            # "new glasses" #1 (2026-09-13): a BOS deep into an already-
+            # extended continuation (3rd+ consecutive same-direction
+            # BOS since the last CHoCH) is not treated as an arming
+            # trigger on its own. Per the backtest notes: "BOS is not
+            # automatically a reversal" -- CHoCH (any) and a FRESH
+            # first-BOS-after-CHoCH still arm normally; only a stale,
+            # already-extended BOS is skipped. Detect math in
+            # structure/observe.py and market_state/builder.py is
+            # untouched -- this is purely a hunt-side filter on the
+            # existing extended_bos flag.
+            if e.event_type == "BOS" and st.flags.get("extended_bos"):
+                extended_bos_skipped = True
+                continue
             s = _dir(e.direction)
             if s:
                 trigs.append(("structure", s, e))
 
+    bos_quality = {
+        "bos_streak": st.measurement("bos_streak"),
+        "first_bos_after_choch": st.flags.get("first_bos_after_choch", False),
+        "extended_bos": st.flags.get("extended_bos", False),
+    }
+
     if not trigs:
-        return _wait("no fresh 15m BOS/CHoCH/breakout on this closed 15m")
+        if extended_bos_skipped:
+            return _wait(
+                "15m trigger was only an extended/stale continuation BOS — skipped, no fresh confirmation",
+                extra={"bos_quality": bos_quality},
+            )
+        return _wait("no fresh 15m BOS/CHoCH/breakout on this closed 15m", extra={"bos_quality": bos_quality})
     sides = {t[1] for t in trigs}
     if len(sides) != 1:
-        return _wait("conflicting 15m triggers")
+        return _wait("conflicting 15m triggers", extra={"bos_quality": bos_quality})
     side = next(iter(sides))
     primary = trigs[0]
 
     htf_side = _trend_side(htf.state) if htf else None
     choch = any(t[2].event_type in ("CHoCH", "CHOCH") for t in trigs)
     if htf_side and htf_side != side and not choch:
-        return _wait("4h trend opposes 15m trigger")
+        return _wait("4h trend opposes 15m trigger", extra={"bos_quality": bos_quality})
     if _vol_bad(vo, side):
-        return _wait("volume contradicts 15m trigger")
+        return _wait("volume contradicts 15m trigger", extra={"bos_quality": bos_quality})
 
     level = _level(sr, fv, side, p15, atr15)
     band = BAND * atr15
@@ -158,7 +183,8 @@ def evaluate_hunt(
     through = (candle_5m["close"] - level) if side == LONG else (level - candle_5m["close"])
     if tagged and through > band:
         return _wait("late M5 close — chased through the level", extra={
-            "hunt": {"armed": True, "late": True, "level": level, "side": side}
+            "hunt": {"armed": True, "late": True, "level": level, "side": side},
+            "bos_quality": bos_quality,
         })
     on_side = (side == LONG and candle_5m["close"] >= level) or (
         side == SHORT and candle_5m["close"] <= level
@@ -166,7 +192,8 @@ def evaluate_hunt(
     near = abs(candle_5m["close"] - level) <= band
     if not (tagged and on_side and near):
         return _wait("M5 has not held the 15m level", extra={
-            "hunt": {"armed": True, "level": level, "side": side, "atr15": atr15}
+            "hunt": {"armed": True, "level": level, "side": side, "atr15": atr15},
+            "bos_quality": bos_quality,
         })
 
     entry = float(level)
@@ -194,6 +221,7 @@ def evaluate_hunt(
         ],
         "blocking_reasons": [],
         "brain_version": HUNT_VERSION,
+        "bos_quality": bos_quality,
         "primary": primary[0],
         "event": primary[2].event_type,
         "htf_trend": htf.state if htf else None,

@@ -167,6 +167,97 @@ def test_compat_still_unimplemented():
         to_agent_result_compat(observe(_uptrend(), TF, pivot_window_override=PW))
 
 
+def _downtrend(i0, base0, waves):
+    """Mirror-image of _uptrend(), starting at candle index i0/price
+    base0, producing `waves` bearish continuation waves. Used to build
+    an uptrend -> CHoCH -> bearish-continuation sequence for testing
+    BOS streak/quality tagging."""
+    candles = []
+    i = i0
+    base = base0
+    for wave in range(waves):
+        hi = base + 2.0
+        for k in range(4):
+            candles.append(_bar(i, base, hi - 0.4, base - 0.8, base - 0.3)); i += 1
+        trough = base - 6.0 - wave
+        candles.append(_bar(i, base - 1.0, base - 0.5, trough, trough + 0.4)); i += 1
+        for k in range(3):
+            candles.append(_bar(i, trough + 1.0, hi - wave * 0.4 - 0.5, trough + 0.2, base - 1.0)); i += 1
+        peak = base + 1.0 - wave * 0.8
+        candles.append(_bar(i, base, peak, base - 0.5, peak - 0.6)); i += 1
+        base -= 3.0
+    return candles
+
+
+def _reversal(waves):
+    up = _uptrend()
+    return up + _downtrend(len(up), up[-1]["close"], waves)
+
+
+def test_extended_continuation_uptrend_has_high_bos_streak():
+    """_uptrend() is 9 consecutive same-direction BOS with no CHoCH at
+    all -- the canonical 'stale continuation, deep in trend' case from
+    the user's own backtest notes ('BOS is not automatically a
+    reversal')."""
+    obs = observe(_uptrend(), TF, pivot_window_override=PW)
+    assert obs.state == "BOS"
+    assert obs.measurement("bos_streak") >= 3
+    assert obs.flags["extended_bos"] is True
+    assert obs.flags["first_bos_after_choch"] is False
+    assert "EXTENDED_CONTINUATION" in obs.tags
+    assert "FRESH_REVERSAL_CONFIRMATION" not in obs.tags
+
+
+def test_first_bos_after_choch_is_tagged_fresh():
+    """uptrend -> CHoCH (reversal) -> exactly one bearish BOS. That one
+    BOS should be tagged as a fresh reversal confirmation, not lumped
+    in with an extended continuation."""
+    obs = observe(_reversal(3), TF, pivot_window_override=PW)
+    breaks = [e.event_type for e in obs.history if e.event_type in ("BOS", "CHoCH")]
+    assert breaks[-2:] == ["CHoCH", "BOS"]
+    assert obs.state == "BOS"
+    assert obs.measurement("bos_streak") == 1.0
+    assert obs.flags["first_bos_after_choch"] is True
+    assert obs.flags["extended_bos"] is False
+    assert "FRESH_REVERSAL_CONFIRMATION" in obs.tags
+    assert "EXTENDED_CONTINUATION" not in obs.tags
+
+
+def test_bos_streak_resets_on_choch_then_grows_again():
+    """The CHoCH itself resets the streak to 0 (it is not a BOS), and
+    the streak grows again with each subsequent same-direction BOS."""
+    obs_at_choch = observe(_reversal(2), TF, pivot_window_override=PW)
+    assert obs_at_choch.state == "CHoCH"
+    assert obs_at_choch.measurement("bos_streak") == 0.0
+
+    obs_extended = observe(_reversal(8), TF, pivot_window_override=PW)
+    assert obs_extended.state == "BOS"
+    assert obs_extended.measurement("bos_streak") >= 3
+    assert obs_extended.flags["extended_bos"] is True
+
+
+def test_bos_streak_measurement_is_mib_native_origin():
+    """This is MiB's own interpretation of the existing events list --
+    not a TradingView-sourced formula -- so it must be tagged origin
+    'mib', consistent with the Measurement.origin convention."""
+    obs = observe(_uptrend(), TF, pivot_window_override=PW)
+    by = {m.name: m.origin for m in obs.measurements}
+    assert by["bos_streak"] == "mib"
+
+
+def test_bos_quality_flags_do_not_touch_detect_math():
+    """analyze()/AgentResult must be completely unaffected by this
+    addition -- these flags are pure interpretation of the existing
+    events list, never fed back into detection."""
+    candles = _uptrend()
+    a = analyze(candles, TF, pivot_window_override=PW)
+    st = build_market_state(candles, "UNKNOWN", TF, pivot_window_override=PW)
+    assert a.direction == st.structure.direction
+    # the new fields exist only on the observation, never on AgentResult
+    assert not hasattr(a, "bos_streak")
+    assert not hasattr(a, "flags")
+
+
 def test_eq_tolerance_matches_source():
     candles = _uptrend()
     a = arrays(candles)

@@ -187,6 +187,40 @@ def observe(
                 lower=round(float(low[si]), 2),
             ))
 
+    # --- BOS/CHoCH sequence quality ("new glasses" #1, 2026-09-13) ---
+    # User's own framing from the backtest notes: "BOS = continuation
+    # (or later confirmation after a CHoCH). CHoCH = first sign of
+    # flip. BOS is not automatically a reversal." Today's consumers
+    # (e.g. brain/observation_hunt.py) treat every fresh BOS and CHoCH
+    # identically. This distinguishes a FRESH reversal confirmation
+    # (the first BOS immediately after a CHoCH) from a STALE
+    # continuation (the Nth consecutive same-direction BOS, deep into
+    # an already-extended trend) -- without touching detect math in
+    # market_state/builder.py at all; this only interprets the
+    # existing, unchanged structure.events list.
+    EXTENDED_BOS_STREAK = 3  # 3rd+ consecutive same-direction BOS = "extended"
+
+    bos_streak = 0
+    streak_direction = None
+    anchored_by_choch = False
+    for ev in structure.events:
+        if ev.event == "CHoCH":
+            streak_direction = ev.direction
+            bos_streak = 0
+            anchored_by_choch = True
+        elif ev.event == "BOS":
+            if streak_direction == ev.direction:
+                bos_streak += 1
+            else:
+                streak_direction = ev.direction
+                bos_streak = 1
+                anchored_by_choch = False
+
+    first_bos_after_choch = bool(anchored_by_choch and bos_streak == 1)
+    extended_bos = bool(bos_streak >= EXTENDED_BOS_STREAK)
+
+    measurements.append(Measurement("bos_streak", float(bos_streak), unit="count", origin="mib"))
+
     flags = {
         "closed_candle": True,
         "hh": bool(structure.hh),
@@ -199,6 +233,8 @@ def observe(
         "has_choch": structure.event.event == "CHoCH",
         "developing_high": bool(structure.developing_high),
         "developing_low": bool(structure.developing_low),
+        "first_bos_after_choch": first_bos_after_choch,
+        "extended_bos": extended_bos,
     }
 
     tags = ["SWING"]
@@ -212,6 +248,10 @@ def observe(
         tags.append("CHOCH")
     if any(lv.level_type == "order_block" for lv in levels):
         tags.append("ORDER_BLOCK")
+    if first_bos_after_choch:
+        tags.append("FRESH_REVERSAL_CONFIRMATION")
+    if extended_bos:
+        tags.append("EXTENDED_CONTINUATION")
 
     history = []
     prior = "NEUTRAL"
@@ -281,6 +321,13 @@ def observe(
         f"Sequence {structure.structure_sequence} | regime {structure.regime} | "
         f"event {structure.event.event}",
     ]
+    if structure.event.event == "BOS":
+        if first_bos_after_choch:
+            notes.append("First BOS confirming the most recent CHoCH (fresh reversal confirmation).")
+        elif extended_bos:
+            notes.append(f"BOS #{bos_streak} in the current continuation (extended — treat with caution).")
+        else:
+            notes.append(f"BOS #{bos_streak} in the current continuation since the last CHoCH.")
 
     obs_state = structure.event.event if structure.event.event != "NONE" else structure.regime
 
