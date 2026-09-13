@@ -1,14 +1,15 @@
-"""Auto-trade: Brain entry on 15m + V1b lifecycle on each closed 5m."""
+"""Auto-trade: Hunt entry on 15m + V1b lifecycle on each closed 5m.
+Paper only. LIVE mode still does not send exchange orders.
+"""
 import time
 from typing import Dict, Optional
 
-from .config import SYMBOL, ANALYSIS_LOOKBACK
+from .config import SYMBOL, ANALYSIS_LOOKBACK, TF_SECONDS
 from .market_data import data_access as dao
-from .indicators import arrays, atr
 from . import analysis_service
 from . import paper_trading
-from .brain import position as brain_position
 from .brain.lifecycle_tick import manage_open_on_5m
+from .brain.weather import side_allowed
 
 CONFIG = {
     "enabled": True,
@@ -29,9 +30,9 @@ STATE = {
     "last_eval_at": None,
     "last_close_ts": None,
     "last_close_reason": None,
-    "last_position_recommendation": None,
     "last_5m_ts": None,
     "last_lifecycle": None,
+    "last_hunt": None,
 }
 
 
@@ -47,11 +48,8 @@ def status() -> Dict:
 
 
 def update(payload: Dict) -> Dict:
-    turned_on = False
     if "enabled" in payload:
-        new_enabled = bool(payload["enabled"])
-        turned_on = new_enabled and not CONFIG["enabled"]
-        CONFIG["enabled"] = new_enabled
+        CONFIG["enabled"] = bool(payload["enabled"])
     if "mode" in payload:
         mode = str(payload["mode"]).upper()
         if mode in ("PAPER", "LIVE"):
@@ -64,46 +62,29 @@ def update(payload: Dict) -> Dict:
                 CONFIG[k] = float(payload[k])
             except (TypeError, ValueError):
                 pass
-    if turned_on:
-        try:
-            from .market_data import manager
-            evaluate(manager.STATE.get("last_price"), force=True)
-        except Exception:
-            pass
     return status()
 
 
-def _open(side: str, price: float, tf: str, brain: Dict, candles, decision_id: Optional[str] = None) -> None:
-    a = arrays(candles)
-    _atr = atr(a["high"], a["low"], a["close"], 14)
-    if _atr <= 0:
-        _atr = price * 0.005
-    if side == "LONG":
-        sl = price - CONFIG["sl_atr_mult"] * _atr
-        tp = price + CONFIG["tp_atr_mult"] * _atr
-    else:
-        sl = price + CONFIG["sl_atr_mult"] * _atr
-        tp = price - CONFIG["tp_atr_mult"] * _atr
-    thesis = None
-    try:
-        brain_with_price = dict(brain)
-        brain_with_price["price"] = price
-        thesis = brain_position.build_thesis(brain_with_price)
-    except Exception:
-        pass
+def _open_from_hunt(hunt: Dict, tf: str) -> None:
+    side = hunt.get("direction")
+    entry = float(hunt["entry"])
+    sl = float(hunt["stop"])
+    tp = float(hunt["target"])
     paper_trading.open_trade(
-        symbol=SYMBOL, side=side, entry_price=price, sl_price=sl, tp_price=tp,
+        symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
         notional_usd=CONFIG["notional_usd"], timeframe=tf,
-        brain_state=brain.get("state", ""), consensus=brain.get("consensus_score", 0),
-        confidence=brain.get("confidence", 0), note="auto-trade", source="AUTO",
-        decision_id=decision_id, thesis=thesis,
+        brain_state=side, consensus=0, confidence=0,
+        note=f"hunt {hunt.get('hunt', {}).get('m5_path')} {(hunt.get('why_state') or [''])[0]}",
+        source="AUTO",
     )
 
 
 def _in_cooldown(tf_seconds: int) -> bool:
     if STATE["last_close_ts"] is None:
         return False
-    bars = CONFIG["cooldown_bars_after_failure"] if STATE["last_close_reason"] in ("SL", "BRAIN_EXIT") else CONFIG["cooldown_bars_normal"]
+    bars = CONFIG["cooldown_bars_after_failure"] if STATE["last_close_reason"] in (
+        "SL", "BRAIN_EXIT", "FLY", "cancel"
+    ) else CONFIG["cooldown_bars_normal"]
     return (time.time() - STATE["last_close_ts"]) < bars * tf_seconds
 
 
@@ -129,108 +110,54 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
                 STATE["last_reason"] = rec.get("reason")
     except Exception:
         pass
+
     tf = CONFIG["timeframe"]
     candles = dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK)
     if len(candles) < 30:
         return STATE
     last_ts = candles[-1]["ts"]
-    open_auto_before = _open_auto()
-    if open_auto_before is None and STATE.get("_had_open_auto"):
-        recent = paper_trading.list_trades("CLOSED")
-        recent_auto = next((t for t in recent if t.get("source") == "AUTO"), None)
-        if recent_auto and recent_auto.get("exit_reason") in ("SL", "TP"):
-            _record_close(recent_auto["exit_reason"])
-    STATE["_had_open_auto"] = open_auto_before is not None
     if not force and STATE["last_candle_ts"] == last_ts:
         return STATE
     STATE["last_candle_ts"] = last_ts
-    result = analysis_service.full_analysis(tf)
-    brain = result.get("brain") or {}
-    state = brain.get("state")
-    price = live_price or result.get("price")
-    STATE["last_state"] = state
     STATE["last_eval_at"] = int(time.time())
-    decision_id = None
-    try:
-        from .market_data import manager as _mgr
-        ticker = _mgr.live_status().get("ticker") or {}
-        from . import decision_log
-        decision_id = decision_log.logger.observe(
-            result, CONFIG["sl_atr_mult"], CONFIG["tp_atr_mult"], CONFIG["notional_usd"],
-            bid=ticker.get("bid"), ask=ticker.get("ask"),
-        )
-    except Exception:
-        pass
+
+    result = analysis_service.full_analysis(tf)
+    hunt = result.get("hunt") or {}
+    weather = result.get("weather") or {}
+    STATE["last_hunt"] = {
+        "action": hunt.get("action"),
+        "path": (hunt.get("hunt") or {}).get("m5_path"),
+        "why": (hunt.get("why_state") or [None])[0],
+    }
+    STATE["last_state"] = hunt.get("action")
+    STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
+
     if CONFIG.get("mode") == "LIVE":
         STATE["last_action"] = "LIVE MODE - NO ORDER"
         STATE["last_reason"] = "Live execution is not enabled"
         return STATE
+
     open_auto = _open_auto()
-    tf_seconds = _tf_seconds(tf)
     if open_auto is not None:
-        _manage_open_position(open_auto, result, price, tf, decision_id)
-        open_auto = _open_auto()
-    if state in ("LONG", "SHORT"):
-        if open_auto is None:
-            if _in_cooldown(tf_seconds):
-                STATE["last_action"] = "COOLDOWN"
-                STATE["last_reason"] = f"Post-trade pause after {STATE['last_close_reason']}"
-            else:
-                _open(state, price, tf, brain, candles, decision_id)
-                STATE["last_action"] = f"OPEN {state}"
-                STATE["last_reason"] = f"Brain {state}"
-        elif open_auto["side"] != state:
-            paper_trading.close_trade(open_auto["id"], price, "FLIP")
-            _record_close("FLIP")
-            if not _in_cooldown(tf_seconds):
-                _open(state, price, tf, brain, candles, decision_id)
-                STATE["last_action"] = f"FLIP -> {state}"
-            else:
-                STATE["last_action"] = "FLIP-CLOSE (cooldown)"
-        else:
-            STATE["last_action"] = f"HOLD {state}"
-            STATE["last_reason"] = "Signal unchanged"
-    else:
-        if open_auto is None:
-            STATE["last_action"] = f"NO-TRADE ({state})"
-            STATE["last_reason"] = f"Brain {state}"
+        STATE["last_action"] = f"HOLD {open_auto.get('side')}"
+        return STATE
+
+    if hunt.get("action") != "FIRE":
+        STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
+        return STATE
+
+    side = hunt.get("direction")
+    flag = weather.get("flag")
+    if flag and not side_allowed(flag, side):
+        STATE["last_action"] = "WEATHER_BLOCK"
+        STATE["last_reason"] = f"{flag} blocks {side}"
+        return STATE
+
+    tf_seconds = TF_SECONDS.get(tf, 900)
+    if _in_cooldown(tf_seconds):
+        STATE["last_action"] = "COOLDOWN"
+        return STATE
+
+    _open_from_hunt(hunt, tf)
+    STATE["last_action"] = f"OPEN {side} hunt"
     return STATE
-
-
-def _tf_seconds(tf: str) -> int:
-    from .config import TF_SECONDS
-    return TF_SECONDS.get(tf, 900)
-
-
-def _manage_open_position(open_auto: Dict, result: Dict, price: float, tf: str,
-                          decision_id: Optional[str]) -> None:
-    thesis = paper_trading.get_thesis(open_auto["id"])
-    if not thesis:
-        return
-    agents = result.get("agents") or []
-    current_decision = result.get("brain") or {}
-    try:
-        rec = brain_position.evaluate_open_position(thesis, agents, current_decision)
-    except Exception:
-        return
-    STATE["last_position_recommendation"] = rec
-    try:
-        from . import decision_log
-        decision_log.logger.record_trade_event(
-            trade_id=open_auto["id"], event_type=f"POSITION_MANAGEMENT_{rec['recommendation']}",
-            details={"thesis_state": rec["thesis_state"], "consensus_delta": rec["consensus_delta"],
-                    "reasons": rec["reasons"], "structural_failures": rec["structural_failures"]},
-        )
-    except Exception:
-        pass
-    if rec["recommendation"] == "EXIT":
-        paper_trading.close_trade(open_auto["id"], price, "BRAIN_EXIT")
-        _record_close("BRAIN_EXIT")
-        STATE["last_action"] = "BRAIN_EXIT"
-        STATE["last_reason"] = "; ".join(rec["reasons"])
-    elif rec["recommendation"] in ("PROTECT", "REDUCE"):
-        STATE["last_action"] = f"RECOMMEND {rec['recommendation']}"
-        STATE["last_reason"] = "; ".join(rec["reasons"])
-    else:
-        STATE["last_action"] = f"HOLD (thesis {rec['thesis_state'].lower()})"
-        STATE["last_reason"] = "; ".join(rec["reasons"])
