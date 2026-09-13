@@ -15,7 +15,7 @@ import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
-import { BacktestModal } from "@/components/trading/BacktestModal";
+import { BacktestHuntModal } from "@/components/trading/BacktestHuntModal";
 import { PaperTradingPanel } from "@/components/trading/PaperTradingPanel";
 
 function App() {
@@ -51,58 +51,33 @@ function App() {
   const loadCandles = useCallback(async (tf) => {
     try {
       const d = await getCandles(tf, 500);
-
-      if (tfRef.current === tf) {
-        setCandles(d.candles || []);
-      }
+      if (tfRef.current === tf) setCandles(d.candles || []);
     } catch (e) {}
   }, []);
 
   const loadAnalysis = useCallback(async (tf) => {
     try {
       const d = await getAnalysis(tf);
-
-      if (tfRef.current === tf) {
-        setAnalysis(d);
-      }
+      if (tfRef.current === tf) setAnalysis(d);
     } catch (e) {}
   }, []);
 
   const loadSync = useCallback(async () => {
-    try {
-      setSyncStatus(await getSyncStatus());
-    } catch (e) {}
+    try { setSyncStatus(await getSyncStatus()); } catch (e) {}
   }, []);
 
-  const refreshAll = useCallback(
-    async (tf) => {
-      setRefreshing(true);
+  const refreshAll = useCallback(async (tf) => {
+    setRefreshing(true);
+    await Promise.all([loadCandles(tf), loadAnalysis(tf)]);
+    setRefreshing(false);
+  }, [loadCandles, loadAnalysis]);
 
-      await Promise.all([
-        loadCandles(tf),
-        loadAnalysis(tf),
-      ]);
-
-      setRefreshing(false);
-    },
-    [loadCandles, loadAnalysis]
-  );
-
-  // on timeframe change
   useEffect(() => {
     setCandles([]);
     setAnalysis(null);
     refreshAll(timeframe);
   }, [timeframe, refreshAll]);
 
-  // Self-scheduling poll: waits for the previous call to fully resolve
-  // before scheduling the next one. A naive setInterval fires on a fixed
-  // clock regardless of whether the last call finished — if the backend
-  // is briefly slow (e.g. during a heavy background backtest), that lets
-  // overlapping requests pile up and exhaust the browser's per-origin
-  // connection limit, starving OTHER requests (including the backtest's
-  // own status polls) out entirely. Same fix already proven correct in
-  // BacktestModal's own polling, applied here to the main dashboard.
   const startPoll = useCallback((fn, intervalMs, immediate, activeRef) => {
     let timeoutId = null;
     const tick = async () => {
@@ -115,420 +90,137 @@ function App() {
     return () => { if (timeoutId) clearTimeout(timeoutId); };
   }, []);
 
-  // pollers
   useEffect(() => {
     const activeRef = { current: true };
     const stopTicker = startPoll(loadTicker, 20000, true, activeRef);
     const stopCandles = startPoll(() => loadCandles(tfRef.current), 8000, false, activeRef);
     const stopAnalysis = startPoll(() => loadAnalysis(tfRef.current), 12000, false, activeRef);
     const stopSync = startPoll(loadSync, 15000, true, activeRef);
-
     return () => {
       activeRef.current = false;
       [stopTicker, stopCandles, stopAnalysis, stopSync].forEach((stop) => stop());
     };
-  }, [
-    loadTicker,
-    loadCandles,
-    loadAnalysis,
-    loadSync,
-    startPoll,
-  ]);
+  }, [loadTicker, loadCandles, loadAnalysis, loadSync, startPoll]);
 
-  // live WebSocket price feed
   useEffect(() => {
     let closed = false;
     let reconnectTimer = null;
     let currentWs = null;
     let reconnectDelay = 5000;
-
-    const backendUrl =
-      process.env.REACT_APP_BACKEND_URL ||
-      "http://127.0.0.1:8811";
-
-    const base = backendUrl.replace(/^http/, "ws");
-    const url = `${base}/api/ws/live`;
-
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8811";
+    const url = `${backendUrl.replace(/^http/, "ws")}/api/ws/live`;
     const connect = () => {
       if (closed) return;
-
-      // Never create a second socket while one is already connecting/open.
-      if (
-        currentWs &&
-        (
-          currentWs.readyState === WebSocket.CONNECTING ||
-          currentWs.readyState === WebSocket.OPEN
-        )
-      ) {
-        return;
-      }
-
+      if (currentWs && (currentWs.readyState === WebSocket.CONNECTING || currentWs.readyState === WebSocket.OPEN)) return;
       let ws;
-
       try {
         ws = new WebSocket(url);
         currentWs = ws;
         wsRef.current = ws;
-      } catch (e) {
-        scheduleReconnect();
-        return;
-      }
-
-      ws.onopen = () => {
-        if (closed) return;
-
-        reconnectDelay = 5000;
-
-        console.log(
-          "MIB live WebSocket connected:",
-          url
-        );
-      };
-
+      } catch (e) { scheduleReconnect(); return; }
+      ws.onopen = () => { if (!closed) reconnectDelay = 5000; };
       ws.onmessage = (evt) => {
         try {
           const d = JSON.parse(evt.data);
-
           if (d.type === "tick") {
-            if (d.price != null) {
-              setLivePrice(d.price);
-            }
-
+            if (d.price != null) setLivePrice(d.price);
             setLive((prev) => ({
-              ...(prev || {}),
-              connected: true,
-              ws_connected: d.ws_connected,
-              source: d.source,
-              last_price: d.price,
-              ticker: d.ticker || prev?.ticker,
+              ...(prev || {}), connected: true, ws_connected: d.ws_connected,
+              source: d.source, last_price: d.price, ticker: d.ticker || prev?.ticker,
             }));
-
-            if (
-              d.ticker &&
-              Object.keys(d.ticker).length > 2
-            ) {
-              setTicker(d.ticker);
-            }
+            if (d.ticker && Object.keys(d.ticker).length > 2) setTicker(d.ticker);
           }
         } catch (e) {}
       };
-
-      ws.onerror = () => {
-        // Do not call ws.close() here.
-        // The browser will normally fire onclose afterwards.
-      };
-
+      ws.onerror = () => {};
       ws.onclose = () => {
-        if (currentWs === ws) {
-          currentWs = null;
-          wsRef.current = null;
-        }
-
-        if (closed) return;
-
-        scheduleReconnect();
+        if (currentWs === ws) { currentWs = null; wsRef.current = null; }
+        if (!closed) scheduleReconnect();
       };
     };
-
     const scheduleReconnect = () => {
       if (closed || reconnectTimer) return;
-
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-
-        if (closed) return;
-
-        connect();
-
-        // If the connection keeps failing, gradually slow down.
-        reconnectDelay = Math.min(
-          reconnectDelay * 2,
-          30000
-        );
+        if (!closed) connect();
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
       }, reconnectDelay);
     };
-
     connect();
-
     return () => {
       closed = true;
-
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       const ws = currentWs;
       currentWs = null;
       wsRef.current = null;
-
-      if (ws) {
-        try {
-          ws.close();
-        } catch (e) {}
-      }
+      if (ws) try { ws.close(); } catch (e) {}
     };
   }, []);
 
-  // chart levels from agents
   const levels = [];
-
   if (analysis?.agents) {
-    const pull = (id) =>
-      analysis.agents.find(
-        (a) => a.agent === id
-      )?.key_levels || [];
-
-    pull("support_resistance").forEach((l) =>
-      levels.push(l)
-    );
-
-    pull("fibonacci")
-      .slice(0, 4)
-      .forEach((l) => levels.push(l));
-
-    pull("breakout").forEach((l) =>
-      levels.push(l)
-    );
-
-    pull("trend").forEach((l) =>
-      levels.push(l)
-    );
+    const pull = (id) => analysis.agents.find((a) => a.agent === id)?.key_levels || [];
+    pull("support_resistance").forEach((l) => levels.push(l));
+    pull("fibonacci").slice(0, 4).forEach((l) => levels.push(l));
+    pull("breakout").forEach((l) => levels.push(l));
+    pull("trend").forEach((l) => levels.push(l));
   }
-
-  const fvgZones =
-    analysis?.agents?.find(
-      (a) => a.agent === "fair_value_gap"
-    )?.key_levels || [];
-
-  const confluenceZones =
-    analysis?.brain?.confluence_zones || [];
+  const fvgZones = analysis?.agents?.find((a) => a.agent === "fair_value_gap")?.key_levels || [];
+  const confluenceZones = analysis?.brain?.confluence_zones || [];
 
   return (
-    <div
-      className="min-h-screen scanlines"
-      style={{ background: "#080b10" }}
-    >
+    <div className="min-h-screen scanlines" style={{ background: "#080b10" }}>
       <AppHeader
-        ticker={ticker}
-        live={live}
-        timeframe={timeframe}
-        onTimeframe={setTimeframe}
+        ticker={ticker} live={live} timeframe={timeframe} onTimeframe={setTimeframe}
         syncStatus={syncStatus}
-        onOpenSettings={() =>
-          setSettingsOpen(true)
-        }
-        onOpenBacktest={() =>
-          setBacktestOpen(true)
-        }
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenBacktest={() => setBacktestOpen(true)}
       />
-
       <main className="pt-16 px-3 pb-6 max-w-[1800px] mx-auto">
         <div className="grid grid-cols-12 gap-3">
-
-          {/* LAYER 1 — market data (left) */}
           <section className="col-span-12 xl:col-span-8 flex flex-col gap-3">
-
             <div className="flex items-center justify-between px-0.5">
               <div className="flex items-center gap-2">
-                <span className="font-head font-bold text-slate-200 tracking-wide text-lg">
-                  MARKET DATA
-                </span>
-
-                <span className="widget-label">
-                  Layer 1 · MEXC Futures · SQLite
-                </span>
+                <span className="font-head font-bold text-slate-200 tracking-wide text-lg">MARKET DATA</span>
+                <span className="widget-label">Layer 1 \u00b7 MEXC Futures \u00b7 SQLite</span>
               </div>
-
-              <button
-                data-testid="refresh-analysis-button"
-                onClick={() =>
-                  refreshAll(timeframe)
-                }
-                className="flex items-center gap-1.5 font-mono-t text-[11px] text-slate-300 px-2.5 py-1 rounded-sm bg-[#0d121b] border border-[#1d2635] hover:border-cyan-500/60 transition-colors"
-              >
-                <RefreshCw
-                  className={`w-3 h-3 ${
-                    refreshing
-                      ? "animate-spin"
-                      : ""
-                  }`}
-                />
-
-                Recompute
+              <button data-testid="refresh-analysis-button" onClick={() => refreshAll(timeframe)}
+                className="flex items-center gap-1.5 font-mono-t text-[11px] text-slate-300 px-2.5 py-1 rounded-sm bg-[#0d121b] border border-[#1d2635]">
+                <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} /> Recompute
               </button>
             </div>
-
             <div className="panel h-[420px] relative">
-
-              {/* CHART OVERLAY TOGGLES */}
               <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
-
-                {/* STRUCTURE TOGGLE */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setStructureVisible(
-                      (visible) => !visible
-                    )
-                  }
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] tracking-wide transition-colors ${
-                    structureVisible
-                      ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300"
-                      : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      structureVisible
-                        ? "bg-cyan-400"
-                        : "bg-slate-600"
-                    }`}
-                  />
-
-                  STRUCTURE{" "}
-                  {structureVisible
-                    ? "ON"
-                    : "OFF"}
+                <button type="button" onClick={() => setStructureVisible((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${structureVisible ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
+                  STRUCTURE {structureVisible ? "ON" : "OFF"}
                 </button>
-
-                {/* FVG TOGGLE */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFvgVisible(
-                      (visible) => !visible
-                    )
-                  }
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] tracking-wide transition-colors ${
-                    fvgVisible
-                      ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300"
-                      : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      fvgVisible
-                        ? "bg-emerald-400"
-                        : "bg-slate-600"
-                    }`}
-                  />
-
-                  FVG{" "}
-                  {fvgVisible
-                    ? "ON"
-                    : "OFF"}
+                <button type="button" onClick={() => setFvgVisible((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${fvgVisible ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
+                  FVG {fvgVisible ? "ON" : "OFF"}
                 </button>
-
               </div>
-
               {candles.length > 0 ? (
-                <CandleChart
-                  candles={candles}
-                  levels={levels}
-                  fvgZones={
-                    fvgVisible
-                      ? fvgZones
-                      : []
-                  }
-                  confluenceZones={
-                    confluenceZones
-                  }
-                  livePrice={livePrice}
-                  timeframe={timeframe}
-                  marketState={
-                    structureVisible
-                      ? analysis?.market_state
-                      : null
-                  }
-                />
+                <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} />
               ) : (
-                <div className="w-full h-full flex items-center justify-center widget-label">
-                  Loading local candles…
-                </div>
+                <div className="w-full h-full flex items-center justify-center widget-label">Loading local candles\u2026</div>
               )}
             </div>
-
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <MultiTimeframeRegime
-                htf={analysis?.htf_regime}
-              />
-
-              <div className="lg:col-span-2">
-                <KeyLevelsPanel
-                  analysis={analysis}
-                  onHover={setHoveredType}
-                />
-              </div>
+              <MultiTimeframeRegime htf={analysis?.htf_regime} />
+              <div className="lg:col-span-2"><KeyLevelsPanel analysis={analysis} onHover={setHoveredType} /></div>
             </div>
           </section>
-
-          {/* LAYER 2 — brain (right) */}
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-
-            <div className="flex items-center gap-2 px-0.5">
-              <span className="font-head font-bold text-slate-200 tracking-wide text-lg">
-                BRAIN DECISION
-              </span>
-
-              <span className="widget-label">
-                Layer 2 · Command
-              </span>
-            </div>
-
-            <BrainHeroPanel
-              brain={analysis?.brain}
-            />
-
-            <ExplainabilityPanel
-              brain={analysis?.brain}
-            />
-
+            <BrainHeroPanel brain={analysis?.brain} />
+            <ExplainabilityPanel brain={analysis?.brain} />
           </section>
         </div>
-
-        {/* LAYER 3 — observations */}
-        <div className="mt-4">
-          <ObservationLayer
-            agents={analysis?.agents || []}
-            price={analysis?.price}
-          />
-        </div>
-
-        {/* PAPER TRADING — always visible below the agents */}
-        <PaperTradingPanel
-          brain={analysis?.brain}
-          livePrice={livePrice}
-          timeframe={timeframe}
-        />
-
-        <div className="mt-4 font-mono-t text-[10px] text-slate-600 leading-relaxed panel p-3">
-          <span className="text-slate-400">
-            V1 assumptions:
-          </span>{" "}
-          {(
-            analysis?.brain?.assumptions || []
-          ).join("  ·  ")}
-        </div>
+        <div className="mt-4"><ObservationLayer agents={analysis?.agents || []} price={analysis?.price} /></div>
+        <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} />
       </main>
-
-      <SettingsPanel
-        open={settingsOpen}
-        onClose={() =>
-          setSettingsOpen(false)
-        }
-        onChanged={() =>
-          loadAnalysis(tfRef.current)
-        }
-      />
-
-      <BacktestModal
-        open={backtestOpen}
-        onClose={() =>
-          setBacktestOpen(false)
-        }
-        timeframe={timeframe}
-      />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} onChanged={() => loadAnalysis(tfRef.current)} />
+      <BacktestHuntModal open={backtestOpen} onClose={() => setBacktestOpen(false)} timeframe={timeframe} />
     </div>
   );
 }
