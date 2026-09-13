@@ -58,7 +58,6 @@ async def get_config():
     }
 
 
-# --- Market data (infrastructure) ---------------------------------------
 @api_router.get("/market/ticker")
 async def market_ticker():
     return manager.live_status()
@@ -97,7 +96,6 @@ async def market_gaps(timeframe: str = Query("15m")):
     return {"timeframe": timeframe, "gaps": gap_sync.detect_gaps(SYMBOL, timeframe)}
 
 
-# --- Analysis (10 agents + Brain) ---------------------------------------
 @api_router.get("/analysis")
 async def analysis(timeframe: str = Query("15m")):
     if timeframe not in TIMEFRAMES:
@@ -110,7 +108,6 @@ async def agent_detail(agent_id: str, timeframe: str = Query("15m")):
     return analysis_service.single_agent(agent_id, timeframe)
 
 
-# --- Live config tuning --------------------------------------------------
 class SettingsUpdate(BaseModel):
     agent_weights: Optional[Dict[str, float]] = None
     htf_gate: Optional[Dict[str, float]] = None
@@ -134,7 +131,6 @@ async def reset_settings():
     return runtime_settings.reset()
 
 
-# --- Backtesting ---------------------------------------------------------
 @api_router.get("/backtest")
 async def backtest(timeframe: str = Query("15m"), lookback: int = Query(150),
                    forward: int = Query(8), step: int = Query(3)):
@@ -144,12 +140,10 @@ async def backtest(timeframe: str = Query("15m"), lookback: int = Query(150),
     result = await asyncio.to_thread(backtest_engine.run_backtest, timeframe,
                                      lookback, forward, step)
     if "summary" in result:
-        # Auto-log every run (not just ones you explicitly save) so nothing
-        # gets lost — you can always clear old ones later.
         try:
             backtest_log.record(timeframe, lookback, result["summary"])
         except Exception:
-            pass  # logging a run should never break returning its result
+            pass
     return result
 
 
@@ -170,13 +164,6 @@ async def clear_backtest_log(timeframe: Optional[str] = Query(None)):
     return {"ok": True, "deleted": n}
 
 
-# --- Walk-forward backtest (real bar-by-bar SL/TP simulation) -----------
-# Ported from mib-gold-MT5's backtest harness design: "same engines,
-# consensus... as live" — this calls the exact same analysis_service /
-# brain functions autotrader.py uses, rather than a separate simplified
-# test-only implementation. Runs as a background job because a multi-day
-# walk-forward run (re-running all 10 agents on every single bar) is too
-# slow to hold an HTTP request open for.
 class WalkForwardRunReq(BaseModel):
     timeframe: str = "15m"
     days: float = 7.0
@@ -185,33 +172,15 @@ class WalkForwardRunReq(BaseModel):
     leverage: float = 5.0
     sl_atr_mult: float = 1.5
     tp_atr_mult: float = 2.5
-    weights: Optional[Dict[str, float]] = None  # test a hypothetical weight
-    # set for this run only — never touches your live settings. Omit to
-    # use whatever your live weights currently are.
-    htf_timeframes: Optional[List[str]] = None  # e.g. ["1h","4h"] or
-    # ["30m","1h","4h","1d"] — independent of the live HTF_TIMEFRAMES
-    # config. Omit to use the live default (4h + 1d).
-    use_htf_gate: bool = True  # False = ignore the regime gate entirely
-    # for this run (every bar treated as regime=NEUTRAL, i.e. no extra
-    # score/confidence requirement either way).
-    entry: Optional[Dict[str, float]] = None       # test hypothetical
-    # Entry Thresholds (direction_min_score, entry_min_score,
-    # entry_min_confidence, min_valid_agents, max_extension_pct) for this
-    # run only. Omit to use live Settings values.
-    conflict: Optional[Dict[str, float]] = None    # test hypothetical
-    # Conflict/Contradiction settings for this run only. Omit for live.
-    htf_gate_values: Optional[Dict[str, float]] = None  # test hypothetical
-    # HTF Gate magnitudes (regime_min_score, counter_trend_penalty, etc.)
-    # for this run only — separate from htf_timeframes above, which
-    # controls WHICH timeframes feed the gate, not these numeric knobs.
-    # Omit for live.
-    pivot_window_override: Optional[int] = None  # None = use the new
-    # dynamic per-timeframe swing-detection window (the live default,
-    # anchored so 15m stays at window=5, unchanged). Pass an int (e.g. 5)
-    # to force the OLD fixed window for an A/B comparison against the
-    # new dynamic default — this is a structural-detection parameter,
-    # not one of the four Settings-page panels, but gets the same
-    # test-safely-never-touches-live treatment.
+    weights: Optional[Dict[str, float]] = None
+    htf_timeframes: Optional[List[str]] = None
+    use_htf_gate: bool = True
+    entry: Optional[Dict[str, float]] = None
+    conflict: Optional[Dict[str, float]] = None
+    htf_gate_values: Optional[Dict[str, float]] = None
+    pivot_window_override: Optional[int] = None
+    use_weather: bool = True
+    use_hunt_lifecycle: bool = True
 
 
 @api_router.post("/backtest/walkforward/run")
@@ -224,20 +193,11 @@ async def walkforward_run(req: WalkForwardRunReq):
             return {"error": "invalid_htf_timeframes", "bad": bad, "timeframes": TIMEFRAMES}
     weights = req.weights
     if weights is not None:
-        # Same bound as the live Settings panel enforces — a backtest
-        # testing a hypothetical weight shouldn't be able to try something
-        # (e.g. an accidental 50, or a negative value that would flip an
-        # engine's vote) that live trading itself would never allow.
         weights = {
             k: max(runtime_settings.WEIGHT_MIN, min(runtime_settings.WEIGHT_MAX, float(v)))
             for k, v in weights.items()
         }
-    # Entry/Conflict/HTF-gate overrides intentionally get NO bound
-    # clamping here, unlike weights — their valid ranges vary wildly by
-    # field (a percentage vs. a ratio vs. a raw score) and guessing wrong
-    # bounds would be worse than no bounds. Merge onto live values instead
-    # of requiring the full dict, so a partial override (e.g. just
-    # entry_min_score) doesn't silently zero out every other key.
+
     def _merged_override(custom, live_getter):
         if not custom:
             return None
@@ -258,12 +218,9 @@ async def walkforward_run(req: WalkForwardRunReq):
         use_htf_gate=req.use_htf_gate, entry_override=entry_override,
         conflict_override=conflict_override, htf_gate_override=htf_gate_override,
         pivot_window_override=req.pivot_window_override,
+        use_weather=req.use_weather,
+        use_hunt_lifecycle=req.use_hunt_lifecycle,
     )
-    # Runs in a genuinely separate OS process now (see
-    # backtest_process_runner.py) — the exact same WalkForwardBacktest
-    # class and _run() computation, just executed with its own
-    # independent GIL so heavy agent computation can never make this
-    # server's own API responses stall.
     backtest_process_runner.runner.start(run_id, params)
     return {"id": run_id, "status": "started"}
 
@@ -281,22 +238,8 @@ async def walkforward_result(run_id: str):
     result = backtest_process_runner.runner.get_result(run_id)
     if result is None:
         return {"error": "run_not_found"}
-    # Not finished yet ({"error": "not_finished", "status": "running", ...}),
-    # a genuine worker-level error ({"error": msg}, no status key at all),
-    # or the "insufficient_data" shape _run() itself can return (also no
-    # status key) — none of these are an actual completed result. Only a
-    # real success dict has status == "done" specifically. Same
-    # distinction the old bt.error / bt.result checks made, just as one
-    # clean check now that get_result() folds all three non-result cases
-    # together.
     if result.get("status") != "done":
         return result
-    # Log on first successful fetch only — repeated polling/re-fetching of
-    # the same finished run should never create duplicate log rows.
-    # IMPORTANT: only marked logged on an actual successful write — a
-    # transient failure (e.g. a momentary SQLite lock) must not
-    # permanently mark this run as "already logged" with no visible
-    # error, which is exactly what happened before this fix existed.
     if not backtest_process_runner.runner.is_logged(run_id):
         try:
             walkforward_log.record(result)
@@ -329,7 +272,6 @@ async def walkforward_stop(run_id: str):
     return {"ok": True}
 
 
-# --- Paper trading -------------------------------------------------------
 class OpenTradeReq(BaseModel):
     side: str
     entry_price: Optional[float] = None
@@ -402,7 +344,6 @@ async def set_paper_balance(req: SetPaperBalanceReq):
     return paper_trading.get_balance(live.get("last_price"))
 
 
-# --- Auto-trader ---------------------------------------------------------
 class AutoTradeReq(BaseModel):
     enabled: Optional[bool] = None
     timeframe: Optional[str] = None
@@ -421,12 +362,6 @@ async def autotrade_update(req: AutoTradeReq):
     return autotrader.update(req.model_dump(exclude_none=True))
 
 
-# --- Decision Logging diagnostics ------------------------------------
-# Read-only, per the spec's "backend logging comes first, no UI changes
-# yet" priority — these exist so the questions the spec cares about
-# (how many setups, how often does HTF block, which agents pass most)
-# can actually be answered, without yet building any dashboard around
-# them.
 @api_router.get("/decisions/stats")
 async def decision_stats(since_hours: int = Query(24)):
     import time as _time
@@ -488,10 +423,8 @@ async def ws_live(ws: WebSocket):
     await ws.accept()
     await manager.register(ws)
     try:
-        # send an immediate snapshot so the client shows a price instantly
         await ws.send_text(manager._snapshot_msg())
         while True:
-            # keep the connection open; ignore any inbound messages
             await ws.receive_text()
     except WebSocketDisconnect:
         pass

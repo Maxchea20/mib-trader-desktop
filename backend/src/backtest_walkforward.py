@@ -1,38 +1,10 @@
-"""Walk-forward backtest — real bar-by-bar trade simulation.
+"""Walk-forward backtest — hunt + V1b lifecycle + weather (default).
 
-Built after reviewing mib-gold's backtest harness, which has one design
-principle worth copying exactly: "Same engines, consensus, risk, trailing
-and book as live." It doesn't reimplement a simplified version of the
-strategy for testing — it feeds historical bars through the *actual*
-production decision path. This module does the same thing here, calling
-analysis_service.run_agents() and brain.decide() — the exact functions
-autotrader.py uses live — rather than any separate approximation.
-
-This replaces the old backtest.py's "check price N candles later" method
-with real trade lifecycle simulation: a position opens, then every
-subsequent bar's high/low is checked against its actual SL/TP until one
-is hit (or the Brain flips, or data runs out). That's a materially more
-honest test of the strategy than a fixed forward-return window, at the
-cost of being slower to run (it's why this runs as a background job with
-progress polling, same as mib-gold does).
-
-Known simplifications vs mib-gold, called out explicitly rather than
-silently glossed over:
-  - Single position at a time, no layering/pyramiding (mib-gold's
-    PositionBook supports up to N stacked layers; this does not).
-  - No spread or slippage modeled (mib-gold explicitly simulates both).
-  - No news gate (mib-gold can block entries around calendar events).
-  - Worst-case same-bar SL/TP ordering: if a single bar's range touches
-    both the stop and the target (only knowable with OHLC, not exact
-    intrabar path), this always resolves it as the STOP hitting first.
-    That's deliberately the pessimistic assumption, matching mib-gold's
-    own stated "stops filled worst-case" philosophy — never let a
-    backtest flatter itself by assuming the lucky order of events.
+Old agent-vote path remains if use_hunt_lifecycle=False.
 """
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from typing import Dict, List, Optional
 
@@ -57,11 +29,6 @@ def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict,
                     weights_override: Optional[Dict] = None,
                     htf_gate_override: Optional[Dict] = None,
                     pivot_window_override: Optional[int] = None) -> Dict:
-    """Identical approach to the existing backtest.py: slice HTF candles to
-    only those at-or-before the simulated bar's timestamp, so the regime
-    gate never sees the future. This is the load-bearing anti-lookahead
-    guard — if this ever used the full current HTF history instead, every
-    result from this module would be silently cheating."""
     agents_by_tf = {}
     subs = {}
     for tf, candles in htf_candles.items():
@@ -82,6 +49,10 @@ def _htf_regime_at(ts: int, htf_candles: Dict[str, List], cache: Dict,
     return res
 
 
+def _pref(rows, ts):
+    return [c for c in rows if c["ts"] <= ts]
+
+
 class WalkForwardBacktest:
     def __init__(self, timeframe: str = "15m", days: float = 7.0,
                  start_balance: float = 250.0, capital_pct: float = 10.0,
@@ -92,7 +63,9 @@ class WalkForwardBacktest:
                  conflict_override: Optional[Dict[str, float]] = None,
                  htf_gate_override: Optional[Dict[str, float]] = None,
                  pivot_window_override: Optional[int] = None,
-                 progress_callback: Optional[callable] = None):
+                 progress_callback: Optional[callable] = None,
+                 use_weather: bool = True,
+                 use_hunt_lifecycle: bool = True):
         self.timeframe = timeframe
         self.days = days
         self.start_balance = start_balance
@@ -101,50 +74,21 @@ class WalkForwardBacktest:
         self.sl_atr_mult = sl_atr_mult
         self.tp_atr_mult = tp_atr_mult
         self.weights_override = weights_override
-        # Same pattern as weights_override: None means "read live settings
-        # fresh at decision time", an explicit dict means "test this
-        # hypothetical instead, without ever touching live settings." All
-        # four settings panels (weights, entry, conflict, htf_gate) now
-        # support this, matching what the Settings page itself exposes —
-        # so nothing in Settings can be untestable here.
         self.entry_override = entry_override
         self.conflict_override = conflict_override
         self.htf_gate_override = htf_gate_override
-        # None = use the new dynamic per-timeframe pivot window (the live
-        # default). Pass an int (e.g. 5) to force the OLD fixed window
-        # instead, for an A/B comparison of dynamic vs fixed swing
-        # detection — this is NOT one of the four Settings-page panels,
-        # it's a structural-detection parameter, but it gets the same
-        # "test safely, never touches live" treatment.
         self.pivot_window_override = pivot_window_override
-
-        # Independent from the live HTF_TIMEFRAMES config on purpose — this
-        # lets a backtest test "what if the regime gate looked at 1h/30m
-        # instead of/alongside 4h/1d" without touching config.py or any
-        # live behavior. Falls back to the live default set when not given,
-        # so existing behavior (and any run that doesn't care) is unchanged.
         valid = [t for t in (htf_timeframes or []) if t in TIMEFRAMES]
         self.htf_timeframes = valid if valid else list(HTF_TIMEFRAMES)
-        # False disables the regime gate entirely for this run — every bar
-        # is treated as regime=NEUTRAL, which apply_gate() already treats
-        # as "no extra score/confidence requirement, no bonus either" (see
-        # mtf.py's apply_gate: regime==NEUTRAL -> extra_score=extra_conf=0).
-        # That's the correct, minimal way to turn the gate off without
-        # touching apply_gate's own logic.
         self.use_htf_gate = use_htf_gate
-
+        self.use_weather = use_weather
+        self.use_hunt_lifecycle = use_hunt_lifecycle
         self.id = f"BT-{uuid.uuid4().hex[:10]}"
         self.status = "pending"
         self.progress = 0.0
         self.error: Optional[str] = None
         self.result: Optional[Dict] = None
         self._stop = False
-        # Pure infrastructure hook — never touches trading/agent/Brain
-        # logic. Optional: when running via the process-based runner,
-        # this is how the worker process reports progress (and checks
-        # for a stop signal) back to the parent, since separate OS
-        # processes don't share memory — self.progress updates inside
-        # this object are otherwise invisible outside this process.
         self.progress_callback = progress_callback
 
     def stop(self):
@@ -166,20 +110,16 @@ class WalkForwardBacktest:
         bars_wanted = int(self.days * 24 * 60 / bar_minutes)
         need = ANALYSIS_LOOKBACK + bars_wanted + 5
 
-        # Read raw candles, then explicitly filter to closed candles so
-        # the same closed-bar guarantee is preserved while also allowing
-        # the 15m run to construct its aligned 5m sub-window.
         candles = filter_closed(dao.read_candles(tf, limit=need), tf)
         m5_all = filter_closed(dao.read_candles("5m", limit=need * 4), "5m") if tf == "15m" else []
+        c4_all = filter_closed(dao.read_candles("4h", limit=4000), "4h")
+        c1_all = filter_closed(dao.read_candles("1h", limit=10000), "1h")
         if len(candles) < ANALYSIS_LOOKBACK + 30:
             self.result = {"error": "insufficient_data", "timeframe": tf,
                             "have": len(candles), "need": need}
             self.status = "error"
             return
 
-        # Only load HTF candle history if the gate is actually going to be
-        # used this run — skipping it when disabled also makes gate-off
-        # runs meaningfully faster, not just behaviorally different.
         htf_candles = ({t: dao.read_candles(t, limit=ANALYSIS_LOOKBACK * 3) for t in self.htf_timeframes}
                        if self.use_htf_gate else {})
         cache: Dict = {}
@@ -192,7 +132,6 @@ class WalkForwardBacktest:
         equity_curve = []
         trades: List[Dict] = []
         open_pos: Optional[Dict] = None
-        bars_log = []
 
         for i in range(start, n):
             if self._stop:
@@ -201,9 +140,6 @@ class WalkForwardBacktest:
             hi, lo, close_price = float(bar["high"]), float(bar["low"]), float(bar["close"])
             ts = bar["ts"]
 
-            # --- 1. Check the CURRENTLY open position against this bar first,
-            #        exactly like a live system finding out what happened on
-            #        the newest candle before deciding anything else. ---
             if open_pos is not None:
                 hit = None
                 if open_pos["side"] == LONG:
@@ -211,7 +147,7 @@ class WalkForwardBacktest:
                         hit = ("SL", open_pos["sl"])
                     elif hi >= open_pos["tp"]:
                         hit = ("TP", open_pos["tp"])
-                else:  # SHORT
+                else:
                     if hi >= open_pos["sl"]:
                         hit = ("SL", open_pos["sl"])
                     elif lo <= open_pos["tp"]:
@@ -221,8 +157,6 @@ class WalkForwardBacktest:
                     balance = self._close(open_pos, exit_price, reason, ts, balance, trades)
                     open_pos = None
 
-            # --- 2. Build the analysis window and get a fresh decision,
-            #        using the exact same functions live trading calls. ---
             window = candles[max(0, i - ANALYSIS_LOOKBACK):i + 1]
             if len(window) < 30:
                 equity_curve.append({"ts": ts, "equity": round(balance, 2)})
@@ -234,64 +168,136 @@ class WalkForwardBacktest:
                     c for c in m5_all
                     if int(c["ts"]) + 300 <= horizon and int(c["ts"]) >= int(window[0]["ts"])
                 ]
-            market_state = build_market_state(
-                window,
-                symbol=SYMBOL,
-                timeframe=tf,
-                pivot_window_override=self.pivot_window_override,
-            )
-            apply_actionable_structure(
-                market_state.structure,
-                window,
-                market_state.volatility.atr,
-                m5_candles=m5_window,
-                timeframe=tf,
-            )
-            agents = svc.run_agents(
-                window,
-                tf,
-                market_state=market_state,
-                pivot_window_override=self.pivot_window_override,
-            )
-            if self.use_htf_gate:
-                htf = _htf_regime_at(ts, htf_candles, cache, self.weights_override, self.htf_gate_override, self.pivot_window_override)
-            else:
-                htf = {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
-            # Same ATR the rest of this backtest already uses elsewhere
-            # (see the existing `arrays`/`atr` import) — this is what
-            # lets Brain's extension/timing check actually run in
-            # backtest, rather than always defaulting to "assumed
-            # timely" (which is what happens if atr_value is omitted).
-            _w = arrays(window)
-            bar_atr = atr(_w["high"], _w["low"], _w["close"], 14) if len(window) >= 15 else 0.0
-            decision = brain_engine.decide(agents, close_price, tf, htf, self.weights_override,
-                                           self.entry_override, self.conflict_override,
-                                           self.htf_gate_override, atr_value=bar_atr)
-            state = decision["state"]
 
-            # --- 3. Same open/flip/hold logic as autotrader.py's live loop. ---
-            if state in (LONG, SHORT):
+            if self.use_hunt_lifecycle:
+                from .brain.observation_hunt import evaluate_hunt, _fresh
+                from .brain.lifecycle import position_from_fire, reevaluate, EXIT, TRAIL
+                from .brain.weather import classify, side_allowed
+                from .structure.observe import observe as obs_structure
+                from .trend.observe import observe as obs_trend
+
+                w4 = _pref(c4_all, ts)[-200:]
+                w1h = _pref(c1_all, ts)[-200:]
+                wx = classify(w4, w1h) if self.use_weather else {"flag": "CHOP"}
+                st_ev = st_dir = None
+                if len(window) >= 60:
+                    st = obs_structure(window, tf)
+                    for e in _fresh(st, ts):
+                        if e.event_type in ("CHoCH", "CHOCH"):
+                            st_ev, st_dir = e.event_type, e.direction
+                            break
+                h1_state = obs_trend(w1h, "1h").state if len(w1h) >= 60 else None
+
+                if open_pos is not None and open_pos.get("_lc") is not None:
+                    level_lost = (
+                        (open_pos["side"] == LONG and close_price < open_pos["entry_price"])
+                        or (open_pos["side"] == SHORT and close_price > open_pos["entry_price"])
+                    )
+                    m5_here = [c for c in (m5_window or []) if int(c["ts"]) >= ts and int(c["ts"]) < ts + 900]
+                    if not m5_here:
+                        m5_here = [bar]
+                    for b5 in m5_here:
+                        rec = reevaluate(
+                            open_pos["_lc"],
+                            price=float(b5["close"]),
+                            high=float(b5["high"]),
+                            low=float(b5["low"]),
+                            structure_event=st_ev,
+                            structure_dir=st_dir,
+                            trend_1h_state=h1_state,
+                            level_lost=level_lost and int(b5["ts"]) >= ts + 840,
+                            now_ts=b5.get("ts"),
+                        )
+                        if rec.get("action") == TRAIL and rec.get("sl") is not None:
+                            open_pos["sl"] = rec["sl"]
+                            try:
+                                open_pos["_lc"].sl = rec["sl"]
+                            except Exception:
+                                pass
+                        elif rec.get("action") == EXIT:
+                            px = rec.get("exit_px") or float(b5["close"])
+                            kind = rec.get("exit_kind") or rec.get("reason") or "BRAIN_EXIT"
+                            balance = self._close(open_pos, px, kind, ts, balance, trades)
+                            open_pos = None
+                            break
+
                 if open_pos is None:
-                    open_pos = self._open(state, close_price, ts, agents, decision, window, balance)
-                elif open_pos["side"] != state:
-                    balance = self._close(open_pos, close_price, "FLIP", ts, balance, trades)
-                    open_pos = self._open(state, close_price, ts, agents, decision, window, balance)
-                # else: same side, hold — nothing to do
+                    fill = bar
+                    if m5_window:
+                        near = [c for c in m5_window if int(c["ts"]) >= ts + 800]
+                        if near:
+                            fill = near[0]
+                    fire = evaluate_hunt(window, fill, candles_4h=w4)
+                    if fire.get("action") == "FIRE":
+                        side = fire.get("direction") or fire.get("side")
+                        ok = (not self.use_weather) or side_allowed(wx.get("flag"), side)
+                        if ok and side in (LONG, SHORT):
+                            atr15 = float(fire.get("atr_15m") or 0) or abs(
+                                float(fire["entry"]) - float(fire["stop"])
+                            )
+                            entry = float(fire["entry"])
+                            if side == LONG:
+                                fire["stop"] = entry - self.sl_atr_mult * atr15
+                                fire["target"] = entry + self.tp_atr_mult * atr15
+                            else:
+                                fire["stop"] = entry + self.sl_atr_mult * atr15
+                                fire["target"] = entry - self.tp_atr_mult * atr15
+                            fire["atr_15m"] = atr15
+                            dummy = {"state": side, "consensus_score": 0, "confidence": 0}
+                            open_pos = self._open(side, entry, ts, [], dummy, window, balance)
+                            open_pos["sl"] = fire["stop"]
+                            open_pos["tp"] = fire["target"]
+                            open_pos["_lc"] = position_from_fire(
+                                fire,
+                                trade_id=str(ts),
+                                equity=balance,
+                                risk_pct=max(0.005, (self.capital_pct / 100.0) * 0.2),
+                                opened_ts=ts,
+                            )
+            else:
+                market_state = build_market_state(
+                    window, symbol=SYMBOL, timeframe=tf,
+                    pivot_window_override=self.pivot_window_override,
+                )
+                apply_actionable_structure(
+                    market_state.structure, window, market_state.volatility.atr,
+                    m5_candles=m5_window, timeframe=tf,
+                )
+                agents = svc.run_agents(
+                    window, tf, market_state=market_state,
+                    pivot_window_override=self.pivot_window_override,
+                )
+                if self.use_htf_gate:
+                    htf = _htf_regime_at(
+                        ts, htf_candles, cache, self.weights_override,
+                        self.htf_gate_override, self.pivot_window_override,
+                    )
+                else:
+                    htf = {"regime": "NEUTRAL", "regime_score": 0.0, "per_timeframe": {}}
+                _w = arrays(window)
+                bar_atr = atr(_w["high"], _w["low"], _w["close"], 14) if len(window) >= 15 else 0.0
+                decision = brain_engine.decide(
+                    agents, close_price, tf, htf, self.weights_override,
+                    self.entry_override, self.conflict_override,
+                    self.htf_gate_override, atr_value=bar_atr,
+                )
+                state = decision["state"]
+                if state in (LONG, SHORT):
+                    if open_pos is None:
+                        open_pos = self._open(state, close_price, ts, agents, decision, window, balance)
+                    elif open_pos["side"] != state:
+                        balance = self._close(open_pos, close_price, "FLIP", ts, balance, trades)
+                        open_pos = self._open(state, close_price, ts, agents, decision, window, balance)
 
             equity_curve.append({"ts": ts, "equity": round(balance, 2)})
             self.progress = (i - start + 1) / max(1, n - start)
             if self.progress_callback:
                 self.progress_callback(self)
 
-        # Flatten anything still open at the end of available data.
         if open_pos is not None:
             last_close = float(candles[-1]["close"])
             balance = self._close(open_pos, last_close, "END_OF_DATA", candles[-1]["ts"], balance, trades)
 
-        # Reflect whatever settings this specific run actually used — either
-        # the custom values being tested, or (if none given) the live
-        # settings at the moment the run finished. Never mutates live
-        # settings for any of the four panels.
         from . import settings as runtime_settings
         weights_used = self.weights_override if self.weights_override is not None else runtime_settings.weights()
         entry_used = self.entry_override if self.entry_override is not None else runtime_settings.entry()
@@ -314,19 +320,14 @@ class WalkForwardBacktest:
                 "used_custom_entry": self.entry_override is not None,
                 "used_custom_conflict": self.conflict_override is not None,
                 "used_custom_htf_gate_values": self.htf_gate_override is not None,
-                "pivot_window_forced": self.pivot_window_override,  # None = used the new dynamic default
+                "pivot_window_forced": self.pivot_window_override,
                 "htf_timeframes": self.htf_timeframes,
                 "use_htf_gate": self.use_htf_gate,
+                "use_weather": self.use_weather,
+                "use_hunt_lifecycle": self.use_hunt_lifecycle,
             },
-            # Honest disclosure when the database simply doesn't have as
-            # much history as was asked for — the old behavior silently
-            # ran on whatever was available with zero indication, which
-            # made a 60-day request quietly become a 10-day test with no
-            # warning anywhere. Never again: this is always present, and
-            # the frontend should treat any meaningful gap here as a loud
-            # warning, not a footnote.
             "actual_days_tested": round(actual_days, 1),
-            "data_shortfall": actual_days < self.days * 0.9,  # >10% short
+            "data_shortfall": actual_days < self.days * 0.9,
             "weights_used": weights_used,
             "entry_used": entry_used,
             "conflict_used": conflict_used,
@@ -353,10 +354,17 @@ class WalkForwardBacktest:
         margin = balance * (self.capital_pct / 100.0)
         notional = margin * self.leverage
 
-        agent_votes = {ar.agent: {"direction": ar.direction, "confidence": round(ar.confidence, 1)}
-                       for ar in agents}
-        aligned = [ar for ar in agents if ar.valid and ar.direction == side]
-        strongest = max(aligned, key=lambda ar: ar.confidence).agent if aligned else None
+        agent_votes = {}
+        strongest = None
+        try:
+            agent_votes = {
+                ar.agent: {"direction": ar.direction, "confidence": round(ar.confidence, 1)}
+                for ar in (agents or [])
+            }
+            aligned = [ar for ar in (agents or []) if getattr(ar, "valid", False) and ar.direction == side]
+            strongest = max(aligned, key=lambda ar: ar.confidence).agent if aligned else None
+        except Exception:
+            pass
 
         return {
             "id": str(uuid.uuid4()), "side": side, "entry_price": price, "sl": sl, "tp": tp,
@@ -381,18 +389,14 @@ class WalkForwardBacktest:
             "notional_usd": round(pos["notional_usd"], 2), "opened_at": pos["opened_at"], "closed_at": ts,
             "exit_reason": reason, "outcome": "win" if pnl > 0 else "loss",
             "pnl": round(pnl, 2), "r_multiple": round(r_multiple, 3),
-            "agent_votes": pos["agent_votes"], "strongest_engine": pos["strongest_engine"],
-            "consensus_score": pos["consensus_score"], "confidence": pos["confidence"],
+            "agent_votes": pos.get("agent_votes") or {}, "strongest_engine": pos.get("strongest_engine"),
+            "consensus_score": pos.get("consensus_score"), "confidence": pos.get("confidence"),
             "status": "closed",
         })
         return balance + pnl
 
 
 class BacktestRunner:
-    """Runs walk-forward backtests in a background thread so a slow
-    multi-day simulation doesn't block the request. Keeps the last 3
-    runs in memory for polling — same approach mib-gold uses."""
-
     def __init__(self):
         self.runs: Dict[str, WalkForwardBacktest] = {}
         self.order: List[str] = []
