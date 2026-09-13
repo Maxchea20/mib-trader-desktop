@@ -1,7 +1,7 @@
 """Post-FIRE Brain: one engine owns HOLD / TRAIL / EXIT.
 
 No votes. No separate trade manager.
-First slice of the recovered Brain lifecycle spec.
+V1b: 1h alone does not exit. 15m CHoCH against does.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from ..contract import LONG, SHORT
 
-LIFECYCLE_VERSION = "BRAIN_LIFECYCLE_V1"
+LIFECYCLE_VERSION = "BRAIN_LIFECYCLE_V1B"
 HOLD, TRAIL, EXIT = "HOLD", "TRAIL", "EXIT"
 
 
@@ -56,7 +56,7 @@ class Position:
 
 
 def size_from_risk(equity: float, risk_pct: float, entry: float, sl: float) -> Dict[str, float]:
-    """Capital → risk → SL distance → qty. Never size first."""
+    """Capital -> risk -> SL distance -> qty. Never size first."""
     risk_usd = max(0.0, float(equity) * float(risk_pct))
     stop = abs(float(entry) - float(sl))
     stop_frac = stop / float(entry) if entry else 0.0
@@ -169,10 +169,7 @@ def reevaluate(
         return {**log, "action": EXIT, "reason": pos.thesis.invalid_reason, "exit_kind": "THESIS_FAILURE"}
 
     h1 = _trend_side(trend_1h_state)
-    if h1 and h1 != pos.side:
-        pos.thesis.valid = False
-        pos.thesis.invalid_reason = "1h trend flipped against thesis"
-        return {**log, "action": EXIT, "reason": pos.thesis.invalid_reason, "exit_kind": "MARKET_REVERSAL"}
+    log["h1_warning"] = bool(h1 and h1 != pos.side)
 
     if level_lost:
         pos.thesis.valid = False
