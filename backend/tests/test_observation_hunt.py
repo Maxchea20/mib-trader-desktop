@@ -8,7 +8,7 @@ BAR15_TS = 1_700_000_000
 
 
 def test_hunt_version():
-    assert HUNT_VERSION == "OBSERVATION_HUNT_M5_V1"
+    assert HUNT_VERSION == "OBSERVATION_HUNT_M5_V2"
 
 
 def test_short_history_waits():
