@@ -10,7 +10,11 @@ import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 
-_DB_PATH = os.environ.get("MARKET_DB_PATH", str(Path(__file__).resolve().parents[2] / "market_data.db"))
+_ROOT = Path(__file__).resolve().parents[2]
+_CLEAN = _ROOT / "market_data_clean.db"
+_LEGACY = _ROOT / "market_data.db"
+_DEFAULT = str(_CLEAN if _CLEAN.exists() else _LEGACY)
+_DB_PATH = os.environ.get("MARKET_DB_PATH", _DEFAULT)
 _lock = threading.RLock()
 _conn: Optional[sqlite3.Connection] = None
 
