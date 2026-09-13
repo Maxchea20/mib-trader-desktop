@@ -186,6 +186,16 @@ function App() {
               </button>
             </div>
             <div className="panel h-[420px] relative">
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
+                <button type="button" onClick={() => setStructureVisible((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${structureVisible ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
+                  STRUCTURE {structureVisible ? "ON" : "OFF"}
+                </button>
+                <button type="button" onClick={() => setFvgVisible((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${fvgVisible ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
+                  FVG {fvgVisible ? "ON" : "OFF"}
+                </button>
+              </div>
               {candles.length > 0 ? (
                 <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} />
               ) : (
@@ -204,16 +214,14 @@ function App() {
         </div>
         <div className="mt-4">
           <ObservationLayer
-            agents={analysis?.agents || []}
             observations={analysis?.observations || []}
             hunt={analysis?.hunt}
             weather={analysis?.weather}
-            price={analysis?.price}
           />
         </div>
         <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} />
       </main>
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} onChanged={() => loadAnalysis(tfRef.current)} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <BacktestHuntModal open={backtestOpen} onClose={() => setBacktestOpen(false)} timeframe={timeframe} />
     </div>
   );
