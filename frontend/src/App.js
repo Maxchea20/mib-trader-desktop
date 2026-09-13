@@ -24,19 +24,15 @@ function App() {
   const [live, setLive] = useState(null);
   const [candles, setCandles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
-
   const [structureVisible, setStructureVisible] = useState(true);
   const [fvgVisible, setFvgVisible] = useState(true);
-
   const [syncStatus, setSyncStatus] = useState(null);
   const [hoveredType, setHoveredType] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [backtestOpen, setBacktestOpen] = useState(false);
-
   const tfRef = useRef(timeframe);
   tfRef.current = timeframe;
-
   const [livePrice, setLivePrice] = useState(null);
   const wsRef = useRef(null);
 
@@ -182,7 +178,7 @@ function App() {
             <div className="flex items-center justify-between px-0.5">
               <div className="flex items-center gap-2">
                 <span className="font-head font-bold text-slate-200 tracking-wide text-lg">MARKET DATA</span>
-                <span className="widget-label">Layer 1 \u00b7 MEXC Futures \u00b7 SQLite</span>
+                <span className="widget-label">Layer 1 · MEXC Futures · SQLite</span>
               </div>
               <button data-testid="refresh-analysis-button" onClick={() => refreshAll(timeframe)}
                 className="flex items-center gap-1.5 font-mono-t text-[11px] text-slate-300 px-2.5 py-1 rounded-sm bg-[#0d121b] border border-[#1d2635]">
@@ -190,20 +186,10 @@ function App() {
               </button>
             </div>
             <div className="panel h-[420px] relative">
-              <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
-                <button type="button" onClick={() => setStructureVisible((v) => !v)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${structureVisible ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
-                  STRUCTURE {structureVisible ? "ON" : "OFF"}
-                </button>
-                <button type="button" onClick={() => setFvgVisible((v) => !v)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${fvgVisible ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
-                  FVG {fvgVisible ? "ON" : "OFF"}
-                </button>
-              </div>
               {candles.length > 0 ? (
                 <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} />
               ) : (
-                <div className="w-full h-full flex items-center justify-center widget-label">Loading local candles\u2026</div>
+                <div className="w-full h-full flex items-center justify-center widget-label">Loading local candles…</div>
               )}
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -216,7 +202,15 @@ function App() {
             <ExplainabilityPanel brain={analysis?.brain} />
           </section>
         </div>
-        <div className="mt-4"><ObservationLayer agents={analysis?.agents || []} price={analysis?.price} /></div>
+        <div className="mt-4">
+          <ObservationLayer
+            agents={analysis?.agents || []}
+            observations={analysis?.observations || []}
+            hunt={analysis?.hunt}
+            weather={analysis?.weather}
+            price={analysis?.price}
+          />
+        </div>
         <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} />
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} onChanged={() => loadAnalysis(tfRef.current)} />
