@@ -1,21 +1,7 @@
 """Observation Brain: 15m story + M5 fill at the level.
 
-Watchers (observe()) report facts. This module decides the click.
-Does not change agent detect math. Does not count votes.
-
-Rules (90d: Structure V2 + Volume tags, PF ~1.39; Breakout V2 filter removed):
-- Arm on 15m BREAKOUT_DETECTED / BOS / CHoCH only (not FVG_CREATED).
-- A stale/extended BOS (3rd+ consecutive same-direction since the
-  last CHoCH) does not arm alone. CHoCH always arms.
-- Breakout DETECTED still arms (Breakout V2 skip reverted after 90d PF drop).
-- HTF 4h Trend opposing the side blocks unless the 15m event is CHoCH.
-- Volume contradiction blocks (tags + state).
-- M5 must tag the 15m level band (0.25 * 15m ATR) and close on-side
-  no more than 0.25 ATR through the level.
-- Close through the band = late. Kill the arm. Do not chase.
-- Fill price is the 15m level, not the M5 close.
-- Stop 1.5 * 15m ATR, target 2.5 * 15m ATR.
-- FVG / S/R are location only.
+15m CHoCH/BOS arms only. 5m decides fire.
+Future-safe IFs on closed candles only — no calendar, no fitted months.
 """
 from __future__ import annotations
 
@@ -34,7 +20,7 @@ BAND = 0.25
 SL_ATR = 1.5
 TP_ATR = 2.5
 ARM_MAX_15M = 4
-HUNT_VERSION = "OBSERVATION_HUNT_M5_V1"
+HUNT_VERSION = "OBSERVATION_HUNT_M5_V2"
 
 
 def _dir(d):
@@ -102,13 +88,51 @@ def _wait(why: str, extra: Optional[Dict] = None) -> Dict:
     return out
 
 
+def _m5_fill(side, level, band, candle_5m, candles_5m):
+    """IF path on this closed 5m. Does not look at future bars."""
+    tagged = (side == LONG and float(candle_5m["low"]) <= level + band) or (
+        side == SHORT and float(candle_5m["high"]) >= level - band
+    )
+    through = (float(candle_5m["close"]) - level) if side == LONG else (level - float(candle_5m["close"]))
+    on_side = (side == LONG and float(candle_5m["close"]) >= level) or (
+        side == SHORT and float(candle_5m["close"]) <= level
+    )
+    near = abs(float(candle_5m["close"]) - level) <= band
+    pierced = (side == LONG and float(candle_5m["low"]) < level - band) or (
+        side == SHORT and float(candle_5m["high"]) > level + band
+    )
+
+    opp_choch = False
+    same_bos = False
+    if candles_5m and len(candles_5m) >= 60:
+        st5 = obs_structure(candles_5m, "5m")
+        for e in _fresh(st5, candle_5m["ts"]):
+            d = _dir(e.direction)
+            if e.event_type in ("CHoCH", "CHOCH") and d and d != side:
+                opp_choch = True
+            if e.event_type == "BOS" and d == side:
+                same_bos = True
+
+    if opp_choch:
+        return "cancel", "5m CHoCH against 15m arm — cancel"
+    if tagged and through > band:
+        return "late", "late M5 close — chased through the level"
+    if tagged and on_side and near:
+        return "clean", "M5 held 15m level"
+    if (not tagged) and through > band:
+        return "fly", "5m flew through with no pullback — skip chase"
+    if pierced and same_bos and on_side:
+        return "ugly", "5m ugly retest then same-side BOS"
+    return "wait", "M5 has not held the 15m level"
+
+
 def evaluate_hunt(
     candles_15m: List[dict],
     candle_5m: dict,
     candles_4h: Optional[List[dict]] = None,
     atr_15m: Optional[float] = None,
+    candles_5m: Optional[List[dict]] = None,
 ) -> Dict:
-    """One-shot: arm from last closed 15m, hunt on this closed 5m bar."""
     if not candles_15m or len(candles_15m) < 60 or not candle_5m:
         return _wait("not enough 15m/5m candles")
 
@@ -155,52 +179,36 @@ def evaluate_hunt(
         "low_reliability": bool(not br.valid),
         "already_failed": bool(br.flags.get("failure")),
     }
+    extra_q = {"bos_quality": bos_quality, "breakout_quality": breakout_quality}
 
     if not trigs:
         if extended_bos_skipped:
             return _wait(
                 "15m trigger was only an extended/stale continuation BOS — skipped, no fresh confirmation",
-                extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
+                extra=extra_q,
             )
-        return _wait(
-            "no fresh 15m BOS/CHoCH/breakout on this closed 15m",
-            extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality},
-        )
+        return _wait("no fresh 15m BOS/CHoCH/breakout on this closed 15m", extra=extra_q)
     sides = {t[1] for t in trigs}
     if len(sides) != 1:
-        return _wait("conflicting 15m triggers", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
+        return _wait("conflicting 15m triggers", extra=extra_q)
     side = next(iter(sides))
     primary = trigs[0]
 
     htf_side = _trend_side(htf.state) if htf else None
     choch = any(t[2].event_type in ("CHoCH", "CHOCH") for t in trigs)
     if htf_side and htf_side != side and not choch:
-        return _wait("4h trend opposes 15m trigger", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
+        return _wait("4h trend opposes 15m trigger", extra=extra_q)
     if _vol_bad(vo, side):
-        return _wait("volume contradicts 15m trigger", extra={"bos_quality": bos_quality, "breakout_quality": breakout_quality})
+        return _wait("volume contradicts 15m trigger", extra=extra_q)
 
     level = _level(sr, fv, side, p15, atr15)
     band = BAND * atr15
-    tagged = (side == LONG and candle_5m["low"] <= level + band) or (
-        side == SHORT and candle_5m["high"] >= level - band
-    )
-    through = (candle_5m["close"] - level) if side == LONG else (level - candle_5m["close"])
-    if tagged and through > band:
-        return _wait("late M5 close — chased through the level", extra={
-            "hunt": {"armed": True, "late": True, "level": level, "side": side},
-            "bos_quality": bos_quality,
-            "breakout_quality": breakout_quality,
-        })
-    on_side = (side == LONG and candle_5m["close"] >= level) or (
-        side == SHORT and candle_5m["close"] <= level
-    )
-    near = abs(candle_5m["close"] - level) <= band
-    if not (tagged and on_side and near):
-        return _wait("M5 has not held the 15m level", extra={
-            "hunt": {"armed": True, "level": level, "side": side, "atr15": atr15},
-            "bos_quality": bos_quality,
-            "breakout_quality": breakout_quality,
-        })
+    path, why = _m5_fill(side, level, band, candle_5m, candles_5m)
+    hunt = {"armed": True, "level": level, "side": side, "m5_path": path}
+
+    if path in ("cancel", "late", "fly", "wait"):
+        hunt["late"] = path == "late"
+        return _wait(why, extra={**extra_q, "hunt": hunt})
 
     entry = float(level)
     if side == LONG:
@@ -222,7 +230,7 @@ def evaluate_hunt(
         "size": size,
         "why_state": [
             f"15m {primary[0]} {primary[2].event_type}",
-            f"M5 held level {entry:.1f}",
+            why,
             "fill at 15m level, not M5 close",
         ],
         "blocking_reasons": [],
@@ -233,5 +241,5 @@ def evaluate_hunt(
         "event": primary[2].event_type,
         "htf_trend": htf.state if htf else None,
         "volume_state": vo.state,
-        "hunt": {"armed": True, "level": level, "late": False},
+        "hunt": {"armed": True, "level": level, "late": False, "m5_path": path},
     }
