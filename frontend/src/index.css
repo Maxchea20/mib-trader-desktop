@@ -93,6 +93,25 @@ body {
   animation: fadeUp 0.4s ease-out both;
 }
 
+/* breathing glow — Observation Layer cards. --glow-rgb is set per
+   card via inline style (see lib/observationStyle.js::cardGlow),
+   same real direction colors used everywhere else in the app.
+   Animates both the outer glow AND the border color itself, so the
+   border visibly pulses, not just a soft shadow floating outside it. */
+@keyframes breatheGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.02), 0 0 16px rgba(var(--glow-rgb), 0.10);
+    border-color: rgba(var(--glow-rgb), 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.02), 0 0 34px rgba(var(--glow-rgb), 0.32);
+    border-color: rgba(var(--glow-rgb), 0.65);
+  }
+}
+.breathe-glow {
+  animation: breatheGlow 3.2s ease-in-out infinite;
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #0a0e15; }
 ::-webkit-scrollbar-thumb { background: #26334a; border-radius: 4px; }
@@ -193,6 +212,7 @@ body {
   line-height: 1.4;
   padding-right: 48px;
   flex-shrink: 0;
+  text-shadow: 0 0 8px currentColor;
 }
 @keyframes agentTickerScroll {
   from { transform: translateX(0); }

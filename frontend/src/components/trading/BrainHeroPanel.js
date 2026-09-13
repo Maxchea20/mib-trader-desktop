@@ -1,6 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { dirStyle, fmt } from "../../lib/style";
+import { cardGlow } from "../../lib/observationStyle";
 
 const ConsensusBar = ({ score }) => {
   // score -100..100, zero-centered
@@ -62,8 +63,8 @@ export const BrainHeroPanel = ({ brain }) => {
   const st = dirStyle(brain.state);
   return (
     <div
-      className={`panel ${st.border} p-4 relative overflow-hidden fade-up`}
-      style={{ boxShadow: st.glow }}
+      className={`breathe-glow panel ${st.border} p-4 relative overflow-hidden fade-up`}
+      style={cardGlow(brain.state)}
       data-testid="brain-decision-hero"
     >
       <div className="flex items-center justify-between">
@@ -78,6 +79,7 @@ export const BrainHeroPanel = ({ brain }) => {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className={`font-head font-black text-5xl leading-none tracking-tight ${st.text} ${brain.state === "LONG" || brain.state === "SHORT" ? "pulse-dot" : ""}`}
+            style={{ textShadow: st.glow === "none" ? "none" : `0 0 18px ${st.raw}88` }}
             data-testid="brain-decision-badge"
           >
             {brain.state}
@@ -90,7 +92,7 @@ export const BrainHeroPanel = ({ brain }) => {
           <div className="widget-label">Consensus</div>
           <div
             className="font-mono-t font-bold text-3xl tabular-nums"
-            style={{ color: brain.consensus_score >= 0 ? "#00f59b" : "#ff3b56" }}
+            style={{ color: brain.consensus_score >= 0 ? "#00f59b" : "#ff3b56", textShadow: "0 0 12px currentColor" }}
             data-testid="brain-consensus-score"
           >
             {brain.consensus_score >= 0 ? "+" : ""}{fmt(brain.consensus_score, 0)}

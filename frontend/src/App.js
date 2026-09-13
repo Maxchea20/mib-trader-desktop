@@ -11,7 +11,7 @@ import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
 import { ExplainabilityPanel } from "@/components/trading/ExplainabilityPanel";
-import { AgentMatrix } from "@/components/trading/AgentMatrix";
+import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
@@ -487,11 +487,11 @@ function App() {
           </section>
         </div>
 
-        {/* LAYER 3 — agents */}
+        {/* LAYER 3 — observations */}
         <div className="mt-4">
-          <AgentMatrix
+          <ObservationLayer
             agents={analysis?.agents || []}
-            hoveredType={hoveredType}
+            price={analysis?.price}
           />
         </div>
 
