@@ -1,2 +1,12 @@
 """Brain — final decision engine package (NOT an 11th analysis agent)."""
 from .observation_hunt import evaluate_hunt, HUNT_VERSION
+from .lifecycle import (
+    LIFECYCLE_VERSION,
+    HOLD,
+    TRAIL,
+    EXIT,
+    reevaluate,
+    position_from_fire,
+    thesis_from_fire,
+    size_from_risk,
+)
