@@ -1,4 +1,4 @@
-"""Analysis orchestration: run the 10 agents + HTF regime + Brain + observations."""
+"""Analysis orchestration: agents + Hunt observations + chart market_state."""
 from typing import List, Dict
 import numpy as np
 
@@ -6,13 +6,11 @@ from .config import SYMBOL, HTF_TIMEFRAMES, ANALYSIS_LOOKBACK
 from .market_data.closed_candles import filter_closed
 from .market_state.actionable import apply_actionable_structure
 from . import settings
-from .contract import AgentResult
 from .market_data import data_access as dao
 from .brain import brain as brain_engine
 from .brain.mtf import regime_from_agents
 from .market_state.builder import build_market_state
 from .analysis_observations import collect_observations
-
 from . import structure, breakout, fibonacci, elliott_wave, volume
 from . import momentum, support_resistance, trend, pattern, fair_value_gap
 
@@ -50,6 +48,18 @@ def _native(obj):
     return obj
 
 
+def _swing(s):
+    return {"index": s.index, "timestamp": s.timestamp, "price": s.price, "kind": s.kind, "strength": s.strength}
+
+
+def _event(e):
+    return {
+        "event": e.event, "direction": e.direction, "price": e.price,
+        "timestamp": e.timestamp, "reference_price": e.reference_price,
+        "swing_index": e.swing_index, "distance_atr": e.distance_atr,
+    }
+
+
 def _market_state_to_dict(state) -> Dict:
     return {
         "symbol": state.symbol,
@@ -69,16 +79,12 @@ def _market_state_to_dict(state) -> Dict:
             "actionable_state": getattr(state.structure, "actionable_state", "NONE"),
             "actionable_level": getattr(state.structure, "actionable_level", None),
             "m5_confirm": getattr(state.structure, "m5_confirm", "NONE"),
-            "event": {
-                "event": state.structure.event.event,
-                "direction": state.structure.event.direction,
-                "price": state.structure.event.price,
-                "timestamp": state.structure.event.timestamp,
-            },
-            "events": [
-                {"event": e.event, "direction": e.direction, "price": e.price, "timestamp": e.timestamp}
-                for e in state.structure.events
-            ],
+            "event": _event(state.structure.event),
+            "events": [_event(e) for e in state.structure.events],
+        },
+        "swings": {
+            "highs": [_swing(s) for s in state.swing_highs],
+            "lows": [_swing(s) for s in state.swing_lows],
         },
         "location": {
             "support": state.location.support,
@@ -86,10 +92,7 @@ def _market_state_to_dict(state) -> Dict:
             "near_support": state.location.near_support,
             "near_resistance": state.location.near_resistance,
         },
-        "volatility": {
-            "atr": state.volatility.atr,
-            "atr_pct": state.volatility.atr_pct,
-        },
+        "volatility": {"atr": state.volatility.atr, "atr_pct": state.volatility.atr_pct},
         "market_phase": state.market_phase,
     }
 
@@ -128,9 +131,7 @@ def full_analysis(timeframe: str) -> Dict:
     if len(candles) < 30:
         return {"error": "insufficient_data", "timeframe": timeframe, "candles": len(candles)}
     price = float(candles[-1]["close"])
-    m5_closed = None
-    c4 = None
-    c1h = None
+    m5_closed = c4 = c1h = None
     if timeframe == "15m":
         m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m")
         c4 = dao.read_closed_candles("4h", limit=300)
@@ -145,9 +146,7 @@ def full_analysis(timeframe: str) -> Dict:
     brain = brain_engine.decide(agents, price, timeframe, htf, atr_value=market_state.volatility.atr)
     pack = collect_observations(candles, timeframe, candles_5m=m5_closed, candles_4h=c4, candles_1h=c1h)
     return _native({
-        "symbol": SYMBOL,
-        "timeframe": timeframe,
-        "price": price,
+        "symbol": SYMBOL, "timeframe": timeframe, "price": price,
         "candle_count": len(candles),
         "market_state": _market_state_to_dict(market_state),
         "agents": [a.to_dict() for a in agents],
