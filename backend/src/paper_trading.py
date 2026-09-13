@@ -1,10 +1,4 @@
-"""Paper trading engine with persistent SQLite history.
-
-Stores every paper trade (open + closed) so results can be reviewed later. Open
-positions are marked-to-market against the live price and auto-closed when price
-hits the stop-loss (SL) or take-profit (TP). This is simulated only — no real
-orders, no fees/slippage modelled.
-"""
+"""Paper trading engine with persistent SQLite history."""
 import time
 import uuid
 import sqlite3
@@ -60,7 +54,6 @@ def init_db() -> None:
             );
             """
         )
-        # migration for pre-existing DBs
         try:
             conn.execute("ALTER TABLE paper_trades ADD COLUMN source TEXT DEFAULT 'MANUAL'")
         except sqlite3.OperationalError:
@@ -109,10 +102,6 @@ def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[fl
     qty = notional_usd / entry_price
     tid = str(uuid.uuid4())
     now = int(time.time())
-    # thesis is the IMMUTABLE original Brain thesis at entry (spec
-    # section 2) — stored once here, never overwritten by later
-    # analysis. Optional and backward compatible: existing callers that
-    # don't pass one get thesis_json=NULL, exactly as before this change.
     thesis_json = json.dumps(thesis) if thesis else None
     with _lock:
         conn = _connect()
@@ -126,9 +115,6 @@ def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[fl
              float(confidence), note, source, decision_id, thesis_json),
         )
         conn.commit()
-
-    # Observational only — never affects the trade itself, which is
-    # already fully committed above by the time this runs.
     try:
         from . import decision_log
         decision_log.logger.record_trade_execution(
@@ -138,7 +124,6 @@ def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[fl
         )
     except Exception:
         pass
-
     return get_trade(tid)
 
 
@@ -150,10 +135,6 @@ def get_trade(tid: str) -> Optional[Dict]:
 
 
 def get_thesis(tid: str) -> Optional[Dict]:
-    """Deserializes the immutable original thesis stored at open_trade()
-    time, if one was provided. Returns None for trades opened without a
-    thesis (e.g. MANUAL trades, or trades opened before this feature
-    existed) — never fabricates one."""
     t = get_trade(tid)
     if not t or not t.get("thesis_json"):
         return None
@@ -164,23 +145,30 @@ def get_thesis(tid: str) -> Optional[Dict]:
 
 
 def _classify_thesis_result(exit_reason: str, pnl: float, had_thesis: bool) -> str:
-    """Trade autopsy foundation (spec section 10) — NOT the Learning
-    Brain, just a durable classification of what actually happened
-    versus what Brain believed at entry, for a FUTURE experience
-    database to consume. This does not feed back into any live
-    decision — Brain never self-modifies from this (spec section 11)."""
     if not had_thesis:
-        return "OTHER"  # no thesis was stored (e.g. a MANUAL trade) — nothing to compare against
+        return "OTHER"
     win = pnl > 0
     if exit_reason == "TP":
         return "CONFIRMED"
     if exit_reason == "BRAIN_EXIT":
-        return "INVALIDATED"  # Brain itself recognized the thesis had broken down
+        return "INVALIDATED"
     if exit_reason == "SL":
         return "INVALIDATED" if not win else "PARTIALLY_CONFIRMED"
     if exit_reason == "FLIP":
         return "PARTIALLY_CONFIRMED" if win else "INVALIDATED"
     return "OTHER"
+
+
+def update_sl(tid: str, sl_price: float) -> Optional[Dict]:
+    """Tighten SL on an OPEN trade. Used by lifecycle TRAIL."""
+    t = get_trade(tid)
+    if not t or t["status"] != "OPEN":
+        return t
+    with _lock:
+        conn = _connect()
+        conn.execute("UPDATE paper_trades SET sl_price=? WHERE id=? AND status='OPEN'", (float(sl_price), tid))
+        conn.commit()
+    return get_trade(tid)
 
 
 def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional[Dict]:
@@ -198,7 +186,6 @@ def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional
             (int(time.time()), exit_price, reason, pnl, pct, thesis_result, tid),
         )
         conn.commit()
-
     try:
         from . import decision_log
         decision_log.logger.record_trade_outcome(
@@ -207,12 +194,10 @@ def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional
         )
     except Exception:
         pass
-
     return get_trade(tid)
 
 
 def check_open_trades(price: Optional[float]) -> int:
-    """Auto-close OPEN trades whose SL/TP is hit by the live price."""
     if price is None:
         return 0
     closed = 0
