@@ -1,12 +1,31 @@
 import React from "react";
 
+function glowRgb(text) {
+  const s = String(text || "").toUpperCase();
+  if (s.includes("FIRE") && (s.includes("LONG") || s.includes("BULL"))) return "0,245,155";
+  if (s.includes("FIRE") && (s.includes("SHORT") || s.includes("BEAR"))) return "255,59,86";
+  if (s.includes("BULL") || s.includes("LONG")) return "0,245,155";
+  if (s.includes("BEAR") || s.includes("SHORT")) return "255,59,86";
+  if (s.includes("WAIT") || s.includes("CHOP") || s.includes("NEUTRAL")) return "251,191,36";
+  return "148,163,184";
+}
+
 function FactCard({ obs }) {
   if (!obs) return null;
   const ev = (obs.history || []).slice(-3);
+  const rgb = glowRgb(obs.state);
   return (
-    <div className="panel p-3">
+    <div
+      className="breathe-glow panel p-3"
+      style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.55)` }}
+    >
       <div className="widget-label">{String(obs.source || "").replace(/_/g, " ")}</div>
-      <div className="font-head font-bold text-white text-lg mt-0.5">{obs.state || "—"}</div>
+      <div
+        className="font-head font-bold text-lg mt-0.5 pulse-dot"
+        style={{ color: `rgb(${rgb})`, textShadow: `0 0 12px rgba(${rgb},0.55)` }}
+      >
+        {obs.state || "—"}
+      </div>
       <div className="font-mono-t text-[10px] text-slate-500 mt-1">{obs.observation_type}</div>
       <div className="flex flex-wrap gap-1 mt-2">
         {(obs.tags || []).slice(0, 8).map((t) => (
@@ -25,7 +44,9 @@ function FactCard({ obs }) {
 export const ObservationLayer = ({ observations = [], hunt, weather }) => {
   const path = hunt && hunt.hunt && hunt.hunt.m5_path;
   const why = hunt && (hunt.why_state || [])[0];
-  const action = hunt ? hunt.action : "—";
+  const action = hunt ? hunt.action : "WAIT";
+  const side = hunt?.direction || "";
+  const rgb = glowRgb(`${action} ${side}`);
 
   return (
     <div data-testid="observation-layer">
@@ -34,10 +55,18 @@ export const ObservationLayer = ({ observations = [], hunt, weather }) => {
         <span className="widget-label">Layer 3 · observe() facts + hunt path</span>
       </div>
 
-      <div className="panel p-3 mb-3 flex flex-wrap gap-6 items-center">
+      <div
+        className="breathe-glow panel p-3 mb-3 flex flex-wrap gap-6 items-center"
+        style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }}
+      >
         <div>
           <div className="widget-label">Hunt</div>
-          <div className="font-head font-bold text-white text-xl">{action}</div>
+          <div
+            className="font-head font-bold text-xl pulse-dot"
+            style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}
+          >
+            {action}
+          </div>
         </div>
         <div>
           <div className="widget-label">5m path</div>
