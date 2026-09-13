@@ -7,20 +7,31 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
   const level = hunt?.hunt?.level;
   const size = hunt?.size || "—";
   const flag = weather?.flag || "—";
-  const color =
-    action === "FIRE" && side === "LONG" ? "#00f59b"
-    : action === "FIRE" && side === "SHORT" ? "#ff3b56"
-    : "#94a3b8";
+
+  let rgb = "148,163,184";
+  if (action === "FIRE" && side === "LONG") rgb = "0,245,155";
+  else if (action === "FIRE" && side === "SHORT") rgb = "255,59,86";
+  else if (action === "WAIT") rgb = "251,191,36";
+
+  const color = `rgb(${rgb})`;
 
   return (
-    <div className="panel p-4" data-testid="brain-decision-hero">
+    <div
+      className="breathe-glow panel p-4 relative overflow-hidden"
+      style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }}
+      data-testid="brain-decision-hero"
+    >
       <div className="flex items-center justify-between">
         <span className="widget-label">Hunt Brain</span>
         <span className="widget-label">15m arm · 5m fill</span>
       </div>
       <div className="flex items-end justify-between mt-3">
         <div>
-          <div className="font-head font-black text-5xl leading-none" style={{ color }} data-testid="brain-decision-badge">
+          <div
+            className="font-head font-black text-5xl leading-none pulse-dot"
+            style={{ color, textShadow: `0 0 18px rgba(${rgb},0.7)` }}
+            data-testid="brain-decision-badge"
+          >
             {action}
           </div>
           <div className="font-mono-t text-[11px] text-slate-400 mt-2">
