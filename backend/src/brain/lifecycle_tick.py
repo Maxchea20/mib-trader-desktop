@@ -47,3 +47,64 @@ def tick_5m(
         level_lost=level_lost,
         now_ts=now_ts,
     )
+
+
+def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """If an AUTO trade is open and a new 5m just closed, apply V1b.
+
+    EXIT closes the paper trade. TRAIL tightens sl_price.
+    Safe to call every few seconds. Never raises.
+    """
+    if not open_trade:
+        return None
+    try:
+        from ..market_data import data_access as dao
+        from .. import paper_trading
+        from .lifecycle import EXIT, TRAIL
+        c5 = dao.read_closed_candles("5m", limit=4)
+        if not c5:
+            return None
+        ts = c5[-1]["ts"]
+        if state.get("last_5m_ts") == ts:
+            return None
+        state["last_5m_ts"] = ts
+        bar = c5[-1]
+        st_ev = st_dir = None
+        level_lost = False
+        try:
+            from ..structure.observe import observe as obs_structure
+            w15 = dao.read_closed_candles("15m", limit=320)
+            if len(w15) >= 60:
+                st = obs_structure(w15, "15m")
+                last15 = w15[-1]
+                for e in (getattr(st, "events", None) or []):
+                    et = getattr(e, "event_type", "")
+                    if et in ("CHoCH", "CHOCH") and getattr(e, "timestamp", None) == last15.get("ts"):
+                        st_ev, st_dir = et, getattr(e, "direction", None)
+                        break
+                entry = float(open_trade["entry_price"])
+                side = open_trade["side"]
+                if side == "LONG" and last15["close"] < entry:
+                    level_lost = True
+                if side == "SHORT" and last15["close"] > entry:
+                    level_lost = True
+        except Exception:
+            pass
+        rec = tick_5m(
+            open_trade,
+            price=float(bar["close"]),
+            high=float(bar["high"]),
+            low=float(bar["low"]),
+            structure_event=st_ev,
+            structure_dir=st_dir,
+            level_lost=level_lost,
+            now_ts=bar.get("ts"),
+        )
+        if rec.get("action") == EXIT:
+            px = rec.get("exit_px") or float(bar["close"])
+            paper_trading.close_trade(open_trade["id"], px, rec.get("exit_kind") or "BRAIN_EXIT")
+        elif rec.get("action") == TRAIL and rec.get("sl") is not None:
+            paper_trading.update_sl(open_trade["id"], float(rec["sl"]))
+        return rec
+    except Exception:
+        return None
