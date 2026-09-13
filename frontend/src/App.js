@@ -198,8 +198,8 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            <BrainHeroPanel brain={analysis?.brain} />
-            <ExplainabilityPanel brain={analysis?.brain} />
+            <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
+            <ExplainabilityPanel hunt={analysis?.hunt} weather={analysis?.weather} />
           </section>
         </div>
         <div className="mt-4">
