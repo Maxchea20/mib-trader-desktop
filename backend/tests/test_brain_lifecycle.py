@@ -47,11 +47,11 @@ def test_exit_on_choch_against():
     assert pos.thesis.valid is False
 
 
-def test_exit_on_1h_flip():
+def test_1h_flip_alone_is_warning_not_exit():
     pos = position_from_fire(_fire(LONG), trade_id="t3", equity=1000, risk_pct=0.02)
     out = reevaluate(pos, price=100.4, trend_1h_state="STRONG_BEAR")
-    assert out["action"] == EXIT
-    assert "1h" in out["reason"]
+    assert out["action"] == HOLD
+    assert out.get("h1_warning") is True
 
 
 def test_trail_after_one_r():
