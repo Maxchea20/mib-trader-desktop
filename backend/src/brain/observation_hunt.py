@@ -204,7 +204,15 @@ def evaluate_hunt(
     level = _level(sr, fv, side, p15, atr15)
     band = BAND * atr15
     path, why = _m5_fill(side, level, band, candle_5m, candles_5m)
-    hunt = {"armed": True, "level": level, "side": side, "m5_path": path}
+    hunt = {
+        "armed": True,
+        "level": level,
+        "side": side,
+        "m5_path": path,
+        "event": primary[2].event_type,
+        "first_bos_after_choch": bool(bos_quality.get("first_bos_after_choch")),
+        "extended_bos": bool(bos_quality.get("extended_bos")),
+    }
 
     if path in ("cancel", "late", "fly", "wait"):
         hunt["late"] = path == "late"
@@ -241,5 +249,13 @@ def evaluate_hunt(
         "event": primary[2].event_type,
         "htf_trend": htf.state if htf else None,
         "volume_state": vo.state,
-        "hunt": {"armed": True, "level": level, "late": False, "m5_path": path},
+        "hunt": {
+            "armed": True,
+            "level": level,
+            "late": False,
+            "m5_path": path,
+            "side": side,
+            "event": primary[2].event_type,
+            "first_bos_after_choch": bool(bos_quality.get("first_bos_after_choch")),
+        },
     }
