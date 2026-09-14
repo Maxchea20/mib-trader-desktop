@@ -14,24 +14,15 @@ const DIR = {
   dynamic: "#eab308",
 };
 
-// This file is intentionally kept lean: chart creation, candle/volume
-// data, the live-forming candle, and price lines only. FVG overlay
-// computation, FVG rendering, and Market Structure markers each moved
-// into their own file under ./chart/ — see useFvgOverlay.js,
-// FvgOverlayLayer.js, and useStructureMarkers.js. Nothing here changes
-// behavior versus before; it's purely relocated so each concern can be
-// read, tested, and extended independently instead of all living inside
-// one dense file.
 export const CandleChart = ({
   candles,
   levels = [],
   fvgZones = [],
-  confluenceZones, // eslint-disable-line no-unused-vars -- intentionally
-  // unused: Confluence is NOT part of the FVG/chart overlay by design,
-  // kept as a named (ignored) prop so callers don't need to know that.
+  confluenceZones, // eslint-disable-line no-unused-vars
   livePrice = null,
   timeframe,
   marketState = null,
+  hunt = null,
 }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -40,11 +31,6 @@ export const CandleChart = ({
   const priceLinesRef = useRef([]);
   const lastCandleRef = useRef(null);
 
-  /*
-   * ======================================================
-   * CREATE CHART
-   * ======================================================
-   */
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -104,11 +90,6 @@ export const CandleChart = ({
     };
   }, []);
 
-  /*
-   * ======================================================
-   * CANDLE DATA
-   * ======================================================
-   */
   useEffect(() => {
     if (!candleSeriesRef.current || !candles?.length) return;
 
@@ -126,11 +107,6 @@ export const CandleChart = ({
     lastCandleRef.current = cData.length ? { ...cData[cData.length - 1] } : null;
   }, [candles]);
 
-  /*
-   * ======================================================
-   * LIVE FORMING CANDLE
-   * ======================================================
-   */
   useEffect(() => {
     const series = candleSeriesRef.current;
     const last = lastCandleRef.current;
@@ -147,11 +123,6 @@ export const CandleChart = ({
     try { series.update(updated); } catch (e) {}
   }, [livePrice]);
 
-  /*
-   * ======================================================
-   * PRICE LEVELS
-   * ======================================================
-   */
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -173,41 +144,20 @@ export const CandleChart = ({
     });
   }, [levels]);
 
-  /*
-   * ======================================================
-   * FVG OVERLAY (computation extracted to useFvgOverlay,
-   * rendering extracted to FvgOverlayLayer)
-   * ======================================================
-   */
   const bands = useFvgOverlay({ chartRef, candleSeriesRef, containerRef, candles, fvgZones });
 
-  /*
-   * ======================================================
-   * MARKET STRUCTURE MARKERS (extracted to useStructureMarkers)
-   * ======================================================
-   */
   useStructureMarkers({ candleSeriesRef, marketState });
 
-  /*
-   * ======================================================
-   * BOS / CHoCH STRUCTURAL BREAK LINES
-   *
-   * Horizontal line at the actual broken price level, from the swing
-   * point to the break candle — not a floating arrow. See
-   * useStructureEventOverlay.js for why this replaced the earlier
-   * marker-based approach.
-   * ======================================================
-   */
+  const chartEvents = [
+    ...(marketState?.structure?.events || []),
+    ...(hunt?.structure_events_15m || []),
+  ];
+
   const structureEventLines = useStructureEventOverlay({
     chartRef, candleSeriesRef, containerRef, candles,
-    events: marketState?.structure?.events,
+    events: chartEvents,
   });
 
-  /*
-   * ======================================================
-   * RENDER
-   * ======================================================
-   */
   return (
     <div className="relative w-full h-full overflow-hidden" data-testid="trading-chart-container">
       <div ref={containerRef} className="w-full h-full" />
