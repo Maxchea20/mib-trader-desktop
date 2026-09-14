@@ -27,6 +27,7 @@ def collect_observations(
     candles_5m: Optional[List[dict]] = None,
     candles_4h: Optional[List[dict]] = None,
     candles_1h: Optional[List[dict]] = None,
+    candles_15m: Optional[List[dict]] = None,
 ) -> Dict:
     rows = []
     watchers = [
@@ -47,12 +48,13 @@ def collect_observations(
 
     hunt = None
     weather = None
-    if timeframe == "15m" and candles_5m:
+    hunt_15 = candles_15m if candles_15m else (candles if timeframe == "15m" else None)
+    if hunt_15 and candles_5m:
         fill = candles_5m[-1]
         live = _live_5ms(candles_5m)
         try:
             hunt = evaluate_hunt_c(
-                candles,
+                hunt_15,
                 fill,
                 live_5ms=live,
                 candles_4h=candles_4h,

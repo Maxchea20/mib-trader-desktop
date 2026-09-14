@@ -131,20 +131,23 @@ def full_analysis(timeframe: str) -> Dict:
     if len(candles) < 30:
         return {"error": "insufficient_data", "timeframe": timeframe, "candles": len(candles)}
     price = float(candles[-1]["close"])
-    m5_closed = c4 = c1h = None
-    if timeframe == "15m":
-        m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m")
-        c4 = dao.read_closed_candles("4h", limit=300)
-        c1h = dao.read_closed_candles("1h", limit=400)
+    # Hunt C is always 15m story + 5m fill, even if the chart TF is 5m/1h/4h.
+    c15 = candles if timeframe == "15m" else dao.read_closed_candles("15m", limit=ANALYSIS_LOOKBACK)
+    m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m")
+    c4 = dao.read_closed_candles("4h", limit=300)
+    c1h = dao.read_closed_candles("1h", limit=400)
     market_state = build_market_state(candles, symbol=SYMBOL, timeframe=timeframe)
     apply_actionable_structure(
         market_state.structure, candles, market_state.volatility.atr,
-        m5_candles=m5_closed, timeframe=timeframe,
+        m5_candles=m5_closed if timeframe == "15m" else None, timeframe=timeframe,
     )
     agents = run_agents(candles, timeframe, market_state=market_state)
     htf = _htf_regime()
     brain = brain_engine.decide(agents, price, timeframe, htf, atr_value=market_state.volatility.atr)
-    pack = collect_observations(candles, timeframe, candles_5m=m5_closed, candles_4h=c4, candles_1h=c1h)
+    pack = collect_observations(
+        candles, timeframe,
+        candles_5m=m5_closed, candles_4h=c4, candles_1h=c1h, candles_15m=c15,
+    )
     return _native({
         "symbol": SYMBOL, "timeframe": timeframe, "price": price,
         "candle_count": len(candles),
