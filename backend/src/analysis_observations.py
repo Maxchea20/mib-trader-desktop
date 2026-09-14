@@ -21,6 +21,27 @@ def _live_5ms(candles_5m: List[dict]) -> List[dict]:
     return [c for c in candles_5m if parent_open(c["ts"]) == po]
 
 
+def _events_15m(candles_15m: List[dict]) -> List[dict]:
+    try:
+        st = obs_structure(candles_15m, "15m")
+    except Exception:
+        return []
+    out = []
+    for e in st.history or []:
+        et = (e.event_type or "").upper()
+        if et not in ("BOS", "CHOCH", "CHoCH"):
+            continue
+        out.append({
+            "event": "BOS" if et == "BOS" else "CHoCH",
+            "direction": e.direction,
+            "timestamp": e.timestamp,
+            "price": e.price,
+            "reference_price": e.reference_price or e.price,
+            "distance_atr": e.distance_atr,
+        })
+    return out[-12:]
+
+
 def collect_observations(
     candles: List[dict],
     timeframe: str,
@@ -67,6 +88,8 @@ def collect_observations(
                 "why_state": [f"hunt C error: {e}"],
                 "brain_version": HUNT_VERSION_C,
             }
+        if hunt is not None:
+            hunt["structure_events_15m"] = _events_15m(hunt_15)
     if candles_4h:
         try:
             weather = classify(candles_4h, candles_1h or [])
