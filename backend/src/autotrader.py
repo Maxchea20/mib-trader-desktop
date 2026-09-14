@@ -1,6 +1,6 @@
-"""Auto-trade: Hunt C entry on each closed 5m + V1b lifecycle.
+"""Auto-trade: Hunt C-FI entry on each closed 5m + V1b lifecycle.
 Paper only. LIVE mode still does not send exchange orders.
-One AUTO position at a time. New C signal does not override.
+One AUTO position at a time. New signal does not override.
 """
 import time
 from typing import Dict, Optional
@@ -11,13 +11,13 @@ from . import analysis_service
 from . import paper_trading
 from .brain.lifecycle_tick import manage_open_on_5m
 from .brain.weather import side_allowed
-from .brain.observation_hunt_c import HUNT_VERSION_C
+from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
 
 CONFIG = {
     "enabled": True,
     "mode": "PAPER",
     "timeframe": "15m",
-    "hunt_version": HUNT_VERSION_C,
+    "hunt_version": HUNT_VERSION_C_FI,
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
@@ -75,11 +75,12 @@ def _open_from_hunt(hunt: Dict, tf: str) -> None:
     sl = float(hunt["stop"])
     tp = float(hunt["target"])
     path = (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path")
+    gate = hunt.get("gate") or ""
     paper_trading.open_trade(
         symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
         notional_usd=CONFIG["notional_usd"], timeframe=tf,
         brain_state=side, consensus=0, confidence=0,
-        note=f"Hunt C {path} {(hunt.get('event') or '')} {(hunt.get('why_state') or [''])[0]}",
+        note=f"Hunt C-FI {gate} {path} {(hunt.get('event') or '')} {(hunt.get('why_state') or [''])[0]}",
         source="AUTO",
     )
 
@@ -139,9 +140,10 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     weather = result.get("weather") or {}
     STATE["last_hunt"] = {
         "action": hunt.get("action"),
-        "version": hunt.get("brain_version") or HUNT_VERSION_C,
+        "version": hunt.get("brain_version") or HUNT_VERSION_C_FI,
         "path": (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path"),
         "event": hunt.get("event"),
+        "gate": hunt.get("gate"),
         "why": (hunt.get("why_state") or [None])[0],
     }
     STATE["last_state"] = hunt.get("action")
@@ -174,5 +176,5 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         return STATE
 
     _open_from_hunt(hunt, tf)
-    STATE["last_action"] = f"OPEN {side} Hunt C"
+    STATE["last_action"] = f"OPEN {side} Hunt C-FI {hunt.get('gate') or ''}"
     return STATE
