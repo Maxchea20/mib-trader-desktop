@@ -40,10 +40,38 @@ def _wait(why: str, extra: Optional[Dict] = None) -> Dict:
         "blocking_reasons": [why],
         "brain_version": HUNT_VERSION_C,
         "size": "FULL",
-        "hunt": {"armed": False},
+        "ok": True,
+        "hunt": {"armed": False, "m5_path": "idle"},
     }
     if extra:
+        extra_hunt = extra.get("hunt") if isinstance(extra.get("hunt"), dict) else None
         out.update(extra)
+        if extra_hunt is not None:
+            merged = dict(out.get("hunt") or {})
+            merged.update(extra_hunt)
+            if not merged.get("m5_path"):
+                merged["m5_path"] = "idle"
+            out["hunt"] = merged
+    return out
+
+
+def _pulse(out: Dict, *, slot, armed, event=None, wx=None, ts=None) -> Dict:
+    out["ok"] = True
+    out["brain_version"] = HUNT_VERSION_C
+    out["slot"] = slot
+    out["armed"] = bool(armed)
+    if event and not out.get("event"):
+        out["event"] = event
+    if isinstance(wx, dict):
+        out["weather_flag"] = wx.get("flag")
+    if ts is not None:
+        out["bar_5m_ts"] = int(ts)
+    hunt = dict(out.get("hunt") or {})
+    hunt["slot"] = slot
+    hunt["armed"] = bool(armed)
+    if not hunt.get("m5_path"):
+        hunt["m5_path"] = "idle" if out.get("action") != "FIRE" else hunt.get("m5_path")
+    out["hunt"] = hunt
     return out
 
 
@@ -68,7 +96,6 @@ def _stamp(fire: Dict, path: str, event: Optional[str]) -> Dict:
     hunt = dict(out.get("hunt") or {})
     hunt["m5_path"] = path
     out["hunt"] = hunt
-    # fill at the 15m level, never the 5m close
     level = float(hunt.get("level") or out.get("entry") or 0)
     atr_v = float(out.get("atr_15m") or 0)
     side = out.get("direction")
@@ -91,17 +118,15 @@ def evaluate_hunt_c(
     candles_1h: Optional[List[dict]] = None,
     candles_5m: Optional[List[dict]] = None,
 ) -> Dict:
-    """One closed 5m tick.
-
-    candles_15m[-1] must be the last *closed* 15m as of this 5m.
-    On 5m #3 that is the 15m that just completed.
-    live_5ms = 1..3 fives inside that parent 15m (oldest first).
-    """
     if not candles_15m or not candle_5m:
-        return _wait("missing candles")
+        return _pulse(_wait("missing candles"), slot=None, armed=False)
     live = live_5ms or [candle_5m]
     slot = len(live) if live else slot_of(candle_5m["ts"])
     wx = classify(candles_4h or [], candles_1h) if candles_4h else None
+    ts = candle_5m.get("ts")
+
+    def done(out, armed=False, event=None):
+        return _pulse(out, slot=slot, armed=armed, event=event, wx=wx, ts=ts)
 
     v2 = evaluate_hunt(
         candles_15m,
@@ -117,33 +142,32 @@ def evaluate_hunt_c(
     event = hunt.get("event") or v2.get("event")
 
     if not armed:
-        return _wait("C: 15m is not a V2 arm", extra={"v2": {"why": v2.get("why_state")}})
+        return done(_wait("C: 15m is not a V2 arm", extra={"v2": {"why": v2.get("why_state")}}), False, event)
     if not structure_ok(v2):
-        return _wait(
+        return done(_wait(
             f"C: skip {event or 'non-structure'} — only CHoCH / first BOS",
             extra={"event": event},
-        )
+        ), True, event)
     if side not in (LONG, SHORT):
-        return _wait("C: no hunt side")
+        return done(_wait("C: no hunt side"), True, event)
     if wx and not side_allowed(wx.get("flag"), side):
-        return _wait(f"C: 4h weather {wx.get('flag')} blocks {side}")
+        return done(_wait(f"C: 4h weather {wx.get('flag')} blocks {side}"), True, event)
 
     if slot == 3:
         prior = candles_15m[:-1]
         v3 = evaluate_hunt_v3(prior, live, candles_4h=candles_4h)
         if v3.get("action") == "FIRE" and v3.get("direction") == side:
             path = (v3.get("hunt") or {}).get("m5_path") or "impulse_3"
-            return _stamp(v3, path, event)
-        return _wait("C: 5m #3 did not close through prior 15m range")
+            return done(_stamp(v3, path, event), True, event)
+        return done(_wait("C: 5m #3 did not close through prior 15m range"), True, event)
 
-    # 5m #1 / #2 of the *next* 15m: V2 clean/ugly tap of the armed 15m
     v2_fill = evaluate_hunt(
         candles_15m, candle_5m, candles_4h=candles_4h, candles_5m=candles_5m,
     )
     if v2_fill.get("action") == "FIRE" and v2_fill.get("direction") == side:
         path = "v2_" + str((v2_fill.get("hunt") or {}).get("m5_path") or "clean")
-        return _stamp(v2_fill, path, event)
-    return _wait(
+        return done(_stamp(v2_fill, path, event), True, event)
+    return done(_wait(
         "C: no V2 tap on this 5m",
         extra={"hunt": v2_fill.get("hunt") or {"armed": True}},
-    )
+    ), True, event)
