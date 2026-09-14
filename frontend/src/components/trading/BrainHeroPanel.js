@@ -12,6 +12,7 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
   const slot = hunt?.slot ?? hunt?.hunt?.slot;
   const armed = hunt?.armed ?? hunt?.hunt?.armed;
   const event = hunt?.event;
+  const gate = hunt?.gate;
 
   let rgb = "148,163,184";
   if (!alive) rgb = "71,85,105";
@@ -29,14 +30,14 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
     >
       <div className="flex items-center justify-between">
         <span className="widget-label">Hunt Brain</span>
-        <span className="widget-label">15m setup · 5m entry</span>
+        <span className="widget-label">C-fast + Internal</span>
       </div>
 
       <div className="flex items-center justify-between mt-2 font-mono-t text-[10px]">
         <span className={alive ? "text-emerald-400" : "text-slate-500"}>
-          {alive ? "● Hunt C is on" : "○ Brain not answering"}
+          {alive ? "● Hunt C-FI is on" : "○ Brain not answering"}
         </span>
-        <span className="text-slate-400">Hunt C</span>
+        <span className="text-slate-400">{gate ? `gate ${gate}` : "Hunt C-FI"}</span>
       </div>
 
       <div className="flex items-end justify-between mt-3">
