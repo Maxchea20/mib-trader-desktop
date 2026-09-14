@@ -1,4 +1,4 @@
-"""Collect AnalysisObservation adapters + Hunt C snapshot for the API/UI."""
+"""Collect AnalysisObservation adapters + Hunt C-FI snapshot for the API/UI."""
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -10,7 +10,8 @@ from .structure.observe import observe as obs_structure
 from .support_resistance.observe import observe as obs_sr
 from .trend.observe import observe as obs_trend
 from .volume.observe import observe as obs_vol
-from .brain.observation_hunt_c import evaluate_hunt_c, parent_open, HUNT_VERSION_C
+from .brain.observation_hunt_c import parent_open
+from .brain.observation_hunt_c_fi import evaluate_hunt_c_fi, HUNT_VERSION_C_FI
 from .brain.weather import classify
 
 
@@ -22,24 +23,30 @@ def _live_5ms(candles_5m: List[dict]) -> List[dict]:
 
 
 def _events_15m(candles_15m: List[dict]) -> List[dict]:
-    try:
-        st = obs_structure(candles_15m, "15m")
-    except Exception:
-        return []
     out = []
-    for e in st.history or []:
-        et = (e.event_type or "").upper()
-        if et not in ("BOS", "CHOCH", "CHoCH"):
+    seen = set()
+    for override in (None, 2):
+        try:
+            st = obs_structure(candles_15m, "15m", pivot_window_override=override) if override else obs_structure(candles_15m, "15m")
+        except Exception:
             continue
-        out.append({
-            "event": "BOS" if et == "BOS" else "CHoCH",
-            "direction": e.direction,
-            "timestamp": e.timestamp,
-            "price": e.price,
-            "reference_price": e.reference_price or e.price,
-            "distance_atr": e.distance_atr,
-        })
-    return out[-12:]
+        for e in st.history or []:
+            et = (e.event_type or "").upper()
+            if et not in ("BOS", "CHOCH", "CHoCH"):
+                continue
+            key = (et, e.timestamp, round(float(e.price or 0), 1))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "event": "BOS" if et == "BOS" else "CHoCH",
+                "direction": e.direction,
+                "timestamp": e.timestamp,
+                "price": e.price,
+                "reference_price": e.reference_price or e.price,
+                "distance_atr": e.distance_atr,
+            })
+    return out[-16:]
 
 
 def collect_observations(
@@ -74,7 +81,7 @@ def collect_observations(
         fill = candles_5m[-1]
         live = _live_5ms(candles_5m)
         try:
-            hunt = evaluate_hunt_c(
+            hunt = evaluate_hunt_c_fi(
                 hunt_15,
                 fill,
                 live_5ms=live,
@@ -85,8 +92,9 @@ def collect_observations(
         except Exception as e:
             hunt = {
                 "action": "WAIT",
-                "why_state": [f"hunt C error: {e}"],
-                "brain_version": HUNT_VERSION_C,
+                "why_state": [f"hunt C-FI error: {e}"],
+                "brain_version": HUNT_VERSION_C_FI,
+                "ok": True,
             }
         if hunt is not None:
             hunt["structure_events_15m"] = _events_15m(hunt_15)
