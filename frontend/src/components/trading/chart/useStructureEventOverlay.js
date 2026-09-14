@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { buildCandleIndexByTime, getXForTimestamp } from "./timeToX";
 
-const MIN_DISTANCE_ATR = 0.15;
-const MAX_VISIBLE_EVENTS = 8;
+const MAX_VISIBLE_EVENTS = 16;
 
 export function useStructureEventOverlay({ chartRef, candleSeriesRef, containerRef, candles, events }) {
   const [lines, setLines] = useState([]);
@@ -32,8 +31,7 @@ export function useStructureEventOverlay({ chartRef, candleSeriesRef, containerR
 
       const significant = events.filter((evt) => {
         const name = String(evt?.event || "").toUpperCase();
-        return evt && (name === "BOS" || name === "CHOCH") && evt.timestamp != null
-          && (evt.distance_atr == null || evt.distance_atr >= MIN_DISTANCE_ATR);
+        return evt && (name === "BOS" || name === "CHOCH" || name === "CHoCH") && evt.timestamp != null;
       });
       const recentEvents = significant.slice(-MAX_VISIBLE_EVENTS);
 
@@ -42,22 +40,32 @@ export function useStructureEventOverlay({ chartRef, candleSeriesRef, containerR
         if (price == null) return;
 
         const endTs = evt.timestamp;
-        const startTs = evt.swing_timestamp != null ? evt.swing_timestamp : endTs;
+        let startTs = evt.swing_timestamp;
+        if (startTs == null && evt.swing_index != null && candles[evt.swing_index]) {
+          startTs = candles[evt.swing_index].ts;
+        }
+        if (startTs == null) startTs = endTs;
 
-        const xStart = getXForTimestamp(timeScale, candleIndexByTime, startTs);
-        const xEnd = getXForTimestamp(timeScale, candleIndexByTime, endTs);
-        if (xStart == null || xEnd == null) return;
+        let xStart = getXForTimestamp(timeScale, candleIndexByTime, startTs);
+        let xEnd = getXForTimestamp(timeScale, candleIndexByTime, endTs);
+        if (xEnd == null && xStart == null) return;
+        if (xEnd == null) xEnd = xStart;
+        if (xStart == null) xStart = xEnd;
 
-        const left = Math.max(0, Math.min(xStart, xEnd));
-        const right = Math.min(plotRight, Math.max(xStart, xEnd));
-        if (right <= left) return;
+        let left = Math.max(0, Math.min(xStart, xEnd));
+        let right = Math.min(plotRight, Math.max(xStart, xEnd));
+        if (right - left < 16) {
+          right = Math.min(plotRight, left + 36);
+          left = Math.max(0, right - 36);
+        }
 
         const y = series.priceToCoordinate(price);
         if (y == null) return;
         const h = cont.clientHeight;
         if (y < 16 || y > h) return;
 
-        const name = String(evt.event).toUpperCase() === "BOS" ? "BOS" : "CHoCH";
+        const raw = String(evt.event || "").toUpperCase();
+        const name = raw === "BOS" ? "BOS" : "CHoCH";
         const color = name === "BOS" ? "#38bdf8" : "#eab308";
         const dir = String(evt.direction || "").toUpperCase();
         const bullish = dir === "LONG" || dir === "BULLISH" || dir === "UP";
@@ -65,10 +73,10 @@ export function useStructureEventOverlay({ chartRef, candleSeriesRef, containerR
         out.push({
           key: `structevt-${index}-${evt.timestamp}`,
           left,
-          width: Math.max(2, right - left),
+          width: Math.max(16, right - left),
           top: y,
           color,
-          label: `${name} ${bullish ? "▲" : "▼"} ${Number(price).toFixed(2)}`,
+          label: `${name} ${bullish ? "▲" : "▼"} ${Number(price).toFixed(0)}`,
           price,
         });
       });
