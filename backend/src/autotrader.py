@@ -1,5 +1,6 @@
-"""Auto-trade: Hunt entry on 15m + V1b lifecycle on each closed 5m.
+"""Auto-trade: Hunt C entry on each closed 5m + V1b lifecycle.
 Paper only. LIVE mode still does not send exchange orders.
+One AUTO position at a time. New C signal does not override.
 """
 import time
 from typing import Dict, Optional
@@ -10,11 +11,13 @@ from . import analysis_service
 from . import paper_trading
 from .brain.lifecycle_tick import manage_open_on_5m
 from .brain.weather import side_allowed
+from .brain.observation_hunt_c import HUNT_VERSION_C
 
 CONFIG = {
     "enabled": True,
     "mode": "PAPER",
     "timeframe": "15m",
+    "hunt_version": HUNT_VERSION_C,
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
@@ -24,6 +27,7 @@ CONFIG = {
 
 STATE = {
     "last_candle_ts": None,
+    "last_hunt_5m_ts": None,
     "last_state": None,
     "last_action": None,
     "last_reason": None,
@@ -70,11 +74,12 @@ def _open_from_hunt(hunt: Dict, tf: str) -> None:
     entry = float(hunt["entry"])
     sl = float(hunt["stop"])
     tp = float(hunt["target"])
+    path = (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path")
     paper_trading.open_trade(
         symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
         notional_usd=CONFIG["notional_usd"], timeframe=tf,
         brain_state=side, consensus=0, confidence=0,
-        note=f"hunt {hunt.get('hunt', {}).get('m5_path')} {(hunt.get('why_state') or [''])[0]}",
+        note=f"Hunt C {path} {(hunt.get('event') or '')} {(hunt.get('why_state') or [''])[0]}",
         source="AUTO",
     )
 
@@ -83,7 +88,7 @@ def _in_cooldown(tf_seconds: int) -> bool:
     if STATE["last_close_ts"] is None:
         return False
     bars = CONFIG["cooldown_bars_after_failure"] if STATE["last_close_reason"] in (
-        "SL", "BRAIN_EXIT", "FLY", "cancel"
+        "SL", "BRAIN_EXIT", "FLY", "cancel", "STRUCTURAL_INVALIDATION"
     ) else CONFIG["cooldown_bars_normal"]
     return (time.time() - STATE["last_close_ts"]) < bars * tf_seconds
 
@@ -115,10 +120,18 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     candles = dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK)
     if len(candles) < 30:
         return STATE
+    c5 = dao.read_closed_candles("5m", limit=6)
+    hunt_5m_ts = c5[-1]["ts"] if c5 else None
     last_ts = candles[-1]["ts"]
-    if not force and STATE["last_candle_ts"] == last_ts:
+    if (
+        not force
+        and hunt_5m_ts is not None
+        and STATE.get("last_hunt_5m_ts") == hunt_5m_ts
+    ):
+        STATE["last_candle_ts"] = last_ts
         return STATE
     STATE["last_candle_ts"] = last_ts
+    STATE["last_hunt_5m_ts"] = hunt_5m_ts
     STATE["last_eval_at"] = int(time.time())
 
     result = analysis_service.full_analysis(tf)
@@ -126,7 +139,9 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     weather = result.get("weather") or {}
     STATE["last_hunt"] = {
         "action": hunt.get("action"),
-        "path": (hunt.get("hunt") or {}).get("m5_path"),
+        "version": hunt.get("brain_version") or HUNT_VERSION_C,
+        "path": (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path"),
+        "event": hunt.get("event"),
         "why": (hunt.get("why_state") or [None])[0],
     }
     STATE["last_state"] = hunt.get("action")
@@ -153,11 +168,11 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_reason"] = f"{flag} blocks {side}"
         return STATE
 
-    tf_seconds = TF_SECONDS.get(tf, 900)
+    tf_seconds = 300
     if _in_cooldown(tf_seconds):
         STATE["last_action"] = "COOLDOWN"
         return STATE
 
     _open_from_hunt(hunt, tf)
-    STATE["last_action"] = f"OPEN {side} hunt"
+    STATE["last_action"] = f"OPEN {side} Hunt C"
     return STATE

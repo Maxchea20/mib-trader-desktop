@@ -1,4 +1,4 @@
-"""Collect AnalysisObservation adapters + Hunt snapshot for the API/UI."""
+"""Collect AnalysisObservation adapters + Hunt C snapshot for the API/UI."""
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -10,8 +10,15 @@ from .structure.observe import observe as obs_structure
 from .support_resistance.observe import observe as obs_sr
 from .trend.observe import observe as obs_trend
 from .volume.observe import observe as obs_vol
-from .brain.observation_hunt import evaluate_hunt
+from .brain.observation_hunt_c import evaluate_hunt_c, parent_open, HUNT_VERSION_C
 from .brain.weather import classify
+
+
+def _live_5ms(candles_5m: List[dict]) -> List[dict]:
+    if not candles_5m:
+        return []
+    po = parent_open(candles_5m[-1]["ts"])
+    return [c for c in candles_5m if parent_open(c["ts"]) == po]
 
 
 def collect_observations(
@@ -42,14 +49,22 @@ def collect_observations(
     weather = None
     if timeframe == "15m" and candles_5m:
         fill = candles_5m[-1]
+        live = _live_5ms(candles_5m)
         try:
-            hunt = evaluate_hunt(
-                candles, fill,
+            hunt = evaluate_hunt_c(
+                candles,
+                fill,
+                live_5ms=live,
                 candles_4h=candles_4h,
+                candles_1h=candles_1h,
                 candles_5m=candles_5m,
             )
         except Exception as e:
-            hunt = {"action": "WAIT", "why_state": [f"hunt error: {e}"]}
+            hunt = {
+                "action": "WAIT",
+                "why_state": [f"hunt C error: {e}"],
+                "brain_version": HUNT_VERSION_C,
+            }
     if candles_4h:
         try:
             weather = classify(candles_4h, candles_1h or [])

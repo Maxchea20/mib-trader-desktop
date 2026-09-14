@@ -14,6 +14,14 @@ Locked book from the Jul–Sep 2026 tests. **Do not retune per month.**
 - SL 1.5 × 15m ATR / TP 2.5 × 15m ATR
 - Size FULL (caller uses 2% equity risk)
 - After FIRE: existing V1b lifecycle
+- One open AUTO trade. New C signal does not override.
+
+## Live wire
+
+- `collect_observations()` on 15m uses `evaluate_hunt_c`
+- Autotrader evaluates Hunt C on **each closed 5m** (not only on 15m close)
+- Paper only. LIVE mode still does not send exchange orders
+- `CONFIG["hunt_version"]` = `OBSERVATION_HUNT_M5_C`
 
 ## Call
 
@@ -29,4 +37,4 @@ fire = evaluate_hunt_c(
 )
 ```
 
-V2 `evaluate_hunt` on main is unchanged.
+V2 `evaluate_hunt` remains available. Autotrader no longer calls it.
