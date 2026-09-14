@@ -41,7 +41,7 @@ def _wait(why: str, extra: Optional[Dict] = None) -> Dict:
         "brain_version": HUNT_VERSION_C,
         "size": "FULL",
         "ok": True,
-        "hunt": {"armed": False, "m5_path": "idle"},
+        "hunt": {"armed": False, "m5_path": "waiting"},
     }
     if extra:
         extra_hunt = extra.get("hunt") if isinstance(extra.get("hunt"), dict) else None
@@ -50,7 +50,7 @@ def _wait(why: str, extra: Optional[Dict] = None) -> Dict:
             merged = dict(out.get("hunt") or {})
             merged.update(extra_hunt)
             if not merged.get("m5_path"):
-                merged["m5_path"] = "idle"
+                merged["m5_path"] = "waiting"
             out["hunt"] = merged
     return out
 
@@ -70,7 +70,7 @@ def _pulse(out: Dict, *, slot, armed, event=None, wx=None, ts=None) -> Dict:
     hunt["slot"] = slot
     hunt["armed"] = bool(armed)
     if not hunt.get("m5_path"):
-        hunt["m5_path"] = "idle" if out.get("action") != "FIRE" else hunt.get("m5_path")
+        hunt["m5_path"] = "waiting" if out.get("action") != "FIRE" else hunt.get("m5_path")
     out["hunt"] = hunt
     return out
 
@@ -119,7 +119,7 @@ def evaluate_hunt_c(
     candles_5m: Optional[List[dict]] = None,
 ) -> Dict:
     if not candles_15m or not candle_5m:
-        return _pulse(_wait("missing candles"), slot=None, armed=False)
+        return _pulse(_wait("Need more candles before Hunt C can look."), slot=None, armed=False)
     live = live_5ms or [candle_5m]
     slot = len(live) if live else slot_of(candle_5m["ts"])
     wx = classify(candles_4h or [], candles_1h) if candles_4h else None
@@ -142,16 +142,21 @@ def evaluate_hunt_c(
     event = hunt.get("event") or v2.get("event")
 
     if not armed:
-        return done(_wait("C: 15m is not a V2 arm", extra={"v2": {"why": v2.get("why_state")}}), False, event)
+        return done(_wait(
+            "This 15-minute candle has no CHoCH and no first break of structure. Nothing to hunt. Sitting out."
+        ), False, event)
     if not structure_ok(v2):
         return done(_wait(
-            f"C: skip {event or 'non-structure'} — only CHoCH / first BOS",
+            f"This 15-minute move is only a {event or 'poke'}, not a CHoCH or first break of structure. Skip.",
             extra={"event": event},
         ), True, event)
     if side not in (LONG, SHORT):
-        return done(_wait("C: no hunt side"), True, event)
+        return done(_wait("Setup has no long or short side. Sitting out."), True, event)
     if wx and not side_allowed(wx.get("flag"), side):
-        return done(_wait(f"C: 4h weather {wx.get('flag')} blocks {side}"), True, event)
+        way = "long" if side == LONG else "short"
+        return done(_wait(
+            f"4-hour weather is {wx.get('flag')}, so no {way} trade now."
+        ), True, event)
 
     if slot == 3:
         prior = candles_15m[:-1]
@@ -159,7 +164,9 @@ def evaluate_hunt_c(
         if v3.get("action") == "FIRE" and v3.get("direction") == side:
             path = (v3.get("hunt") or {}).get("m5_path") or "impulse_3"
             return done(_stamp(v3, path, event), True, event)
-        return done(_wait("C: 5m #3 did not close through prior 15m range"), True, event)
+        return done(_wait(
+            "The third 5-minute candle did not close through the last 15-minute high or low. No entry."
+        ), True, event)
 
     v2_fill = evaluate_hunt(
         candles_15m, candle_5m, candles_4h=candles_4h, candles_5m=candles_5m,
@@ -168,6 +175,6 @@ def evaluate_hunt_c(
         path = "v2_" + str((v2_fill.get("hunt") or {}).get("m5_path") or "clean")
         return done(_stamp(v2_fill, path, event), True, event)
     return done(_wait(
-        "C: no V2 tap on this 5m",
+        "This 5-minute candle did not tap the 15-minute level. Waiting.",
         extra={"hunt": v2_fill.get("hunt") or {"armed": True}},
     ), True, event)

@@ -4,11 +4,11 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
   const alive = Boolean(hunt && (hunt.ok || hunt.brain_version || hunt.action));
   const action = hunt?.action || (alive ? "WAIT" : "—");
   const side = hunt?.direction || "—";
-  const path = hunt?.hunt?.m5_path || hunt?.v3a_path || (alive ? "idle" : "—");
+  const rawPath = hunt?.hunt?.m5_path || hunt?.v3a_path;
+  const path = !rawPath || rawPath === "idle" ? (alive ? "waiting" : "—") : rawPath;
   const level = hunt?.hunt?.level;
   const size = hunt?.size || "—";
   const flag = weather?.flag || hunt?.weather_flag || "—";
-  const version = hunt?.brain_version || "—";
   const slot = hunt?.slot ?? hunt?.hunt?.slot;
   const armed = hunt?.armed ?? hunt?.hunt?.armed;
   const event = hunt?.event;
@@ -29,14 +29,14 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
     >
       <div className="flex items-center justify-between">
         <span className="widget-label">Hunt Brain</span>
-        <span className="widget-label">15m arm · 5m fill</span>
+        <span className="widget-label">15m setup · 5m entry</span>
       </div>
 
       <div className="flex items-center justify-between mt-2 font-mono-t text-[10px]">
         <span className={alive ? "text-emerald-400" : "text-slate-500"}>
-          {alive ? "● C LIVE" : "○ no snapshot"}
+          {alive ? "● Hunt C is on" : "○ Brain not answering"}
         </span>
-        <span className="text-slate-400">{version}</span>
+        <span className="text-slate-400">Hunt C</span>
       </div>
 
       <div className="flex items-end justify-between mt-3">
@@ -46,25 +46,25 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
             style={{ color, textShadow: `0 0 18px rgba(${rgb},0.7)` }}
             data-testid="brain-decision-badge"
           >
-            {action}
+            {action === "WAIT" ? "WAIT" : action === "FIRE" ? "FIRE" : action}
           </div>
           <div className="font-mono-t text-[11px] text-slate-400 mt-2">
-            {action === "FIRE" ? side : alive ? "watching · no click" : "no snapshot"}
+            {action === "FIRE" ? `Take the ${side}` : alive ? "Watching. No trade." : "Brain not answering"}
           </div>
         </div>
         <div className="text-right">
-          <div className="widget-label">5m path</div>
-          <div className="font-mono-t font-bold text-2xl text-cyan-400">{path}</div>
+          <div className="widget-label">What the 5m is doing</div>
+          <div className="font-mono-t font-bold text-xl text-cyan-400">{path}</div>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-[#1d2635] font-mono-t text-[11px]">
         <div>
-          <div className="widget-label">Weather</div>
+          <div className="widget-label">4h weather</div>
           <div className="text-slate-200 mt-0.5">{flag}</div>
         </div>
         <div>
-          <div className="widget-label">Level</div>
+          <div className="widget-label">Entry level</div>
           <div className="text-slate-200 mt-0.5">{level != null ? Number(level).toFixed(1) : "—"}</div>
         </div>
         <div>
@@ -74,9 +74,9 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mt-2 font-mono-t text-[10px] text-slate-400">
-        <div>5m slot {slot != null ? slot : "—"}/3</div>
-        <div>arm {armed ? "YES" : "no"}</div>
-        <div>{event || "no event"}</div>
+        <div>5m candle {slot != null ? slot : "—"} of 3</div>
+        <div>{armed ? "15m setup: ready" : "15m setup: none"}</div>
+        <div>{event || "no CHoCH / BOS"}</div>
       </div>
     </div>
   );
