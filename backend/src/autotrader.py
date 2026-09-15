@@ -6,6 +6,7 @@ The env var is a second, deliberate switch independent of the UI — a stray
 click or a UI bug can't send real orders on its own. Both must be true.
 One AUTO position at a time. New signal does not override.
 Live fills also open a local AUTO shadow so lifecycle / one-position work.
+If LIVE is on but the env flag is off, Hunt still papers the fill.
 """
 import json
 import logging
@@ -25,6 +26,12 @@ from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
 logger = logging.getLogger(__name__)
 
 SAFETY_BUFFER_PCT = 0.02
+MIN_LIVE_LEVERAGE = 10.0
+PERSIST_KEYS = (
+    "enabled", "mode", "timeframe", "notional_usd", "sl_atr_mult", "tp_atr_mult",
+    "cooldown_bars_normal", "cooldown_bars_after_failure", "sizing_mode",
+    "allocation_pct", "leverage", "max_live_notional_usd", "margin_mode",
+)
 
 AUDIT_LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "live_sizing_log.jsonl"
 
@@ -60,6 +67,45 @@ STATE = {
     "normal_base": None,
     "normal_base_captured_at": None,
 }
+
+
+def _config_path() -> Path:
+    db = os.environ.get("MARKET_DB_PATH")
+    if db:
+        return Path(db).resolve().parent / "autotrade_config.json"
+    return Path(__file__).resolve().parent.parent / "data" / "autotrade_config.json"
+
+
+def _load_persisted() -> None:
+    path = _config_path()
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        for k in PERSIST_KEYS:
+            if k in data and data[k] is not None:
+                CONFIG[k] = data[k]
+        CONFIG["hunt_version"] = HUNT_VERSION_C_FI
+        CONFIG["margin_mode"] = "ISOLATED"
+        if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:
+            CONFIG["leverage"] = MIN_LIVE_LEVERAGE
+    except Exception:
+        logger.exception("could not load persisted autotrade config")
+
+
+def _persist() -> None:
+    path = _config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob = {k: CONFIG.get(k) for k in PERSIST_KEYS}
+        path.write_text(json.dumps(blob, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("could not persist autotrade config")
+
+
+_load_persisted()
 
 
 def _live_armed() -> bool:
@@ -100,6 +146,7 @@ def _hunt_pnl_preview(sizing: Dict) -> Dict:
 
 
 def status() -> Dict:
+    from .market_data import mexc_private
     sizing = compute_sizing()
     pnl = _hunt_pnl_preview(sizing)
     return {
@@ -108,6 +155,7 @@ def status() -> Dict:
         "open_auto_trade": _open_auto(),
         "sizing_preview": sizing,
         "live_armed": _live_armed(),
+        "keys_present": mexc_private.keys_present(),
         "sl_price": pnl["sl_price"],
         "tp_price": pnl["tp_price"],
         "sl_pnl_usd": pnl["sl_pnl_usd"],
@@ -174,14 +222,16 @@ def update(payload: Dict) -> Dict:
             if k == "allocation_pct" and not (0 < v <= 100):
                 warnings.append(f"allocation_pct: must be between 0 and 100, got {v} — kept at {CONFIG['allocation_pct']}")
                 continue
-            if k == "leverage" and v <= 0:
-                warnings.append(f"leverage: must be positive, got {v} — kept at {CONFIG['leverage']}")
+            if k == "leverage" and v < MIN_LIVE_LEVERAGE:
+                warnings.append(f"leverage: must be at least {MIN_LIVE_LEVERAGE:g}x, got {v} — kept at {CONFIG['leverage']}")
                 continue
             if k == "max_live_notional_usd" and v <= 0:
                 warnings.append(f"max_live_notional_usd: must be positive, got {v} — kept at {CONFIG['max_live_notional_usd']}")
                 continue
             CONFIG[k] = v
 
+    CONFIG["margin_mode"] = "ISOLATED"
+    _persist()
     result = status()
     result["warnings"] = warnings
     return result
@@ -413,18 +463,14 @@ def _fresh_price() -> Optional[float]:
     return None
 
 
-def _mexc_has_open_position() -> bool:
-    try:
-        from .market_data import mexc_private
-        pos = mexc_private.get_open_positions(SYMBOL) or []
-        for p in pos:
-            hold = float(p.get("holdVol") or p.get("hold_vol") or 0)
-            if hold > 0:
-                return True
-        return False
-    except Exception:
-        logger.exception("could not read MEXC open positions")
-        return False
+def _mexc_open_position_vol() -> float:
+    """Return holdVol if a MEXC position is open. Raise if the account cannot be read."""
+    from .market_data import mexc_private
+    pos = mexc_private.get_open_positions(SYMBOL) or []
+    total = 0.0
+    for p in pos:
+        total += float(p.get("holdVol") or p.get("hold_vol") or 0)
+    return total
 
 
 def _live_meta(trade: Optional[Dict]) -> Optional[Dict]:
@@ -460,6 +506,12 @@ def _close_live_if_needed(trade: Optional[Dict], exit_px: Optional[float]) -> No
         logger.exception("live MEXC close failed — close it by hand on MEXC if still open")
 
 
+def _sl_tp_valid(side: str, price: float, sl: float, tp: float) -> bool:
+    if str(side).upper() == "LONG":
+        return sl < price < tp
+    return tp < price < sl
+
+
 def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Dict:
     side = hunt.get("direction")
     entry = float(hunt["entry"])
@@ -473,7 +525,13 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         _log_sizing_attempt(sizing, result="REJECTED", reason=sizing["error"])
         raise RuntimeError(f"sizing failed: {sizing['error']}")
 
-    if _mexc_has_open_position():
+    try:
+        hold = _mexc_open_position_vol()
+    except Exception as e:
+        reason = f"cannot confirm MEXC is flat — no live order ({e})"
+        _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        raise RuntimeError(reason)
+    if hold > 0:
         reason = "MEXC already has an open position — one trade only"
         _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
         raise RuntimeError(reason)
@@ -490,8 +548,30 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
     submit_sl = _snap_to_tick(sl, price_unit, price_scale)
     submit_tp = _snap_to_tick(tp, price_unit, price_scale)
 
+    if not _sl_tp_valid(side, submit_price, submit_sl, submit_tp):
+        reason = (
+            f"Hunt SL/TP no longer valid vs live price {submit_price} "
+            f"(sl={submit_sl} tp={submit_tp} side={side}) — skipped live fill"
+        )
+        _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        raise RuntimeError(reason)
+
     from .market_data import mexc_private
     vol = sizing["final_quantity"]
+    lev = int(sizing["leverage"])
+    pos_type = mexc_private.POSITION_TYPE_LONG if side == "LONG" else mexc_private.POSITION_TYPE_SHORT
+    try:
+        mexc_private.change_leverage(
+            symbol=SYMBOL,
+            leverage=lev,
+            position_type=pos_type,
+            open_type=mexc_private.OPEN_TYPE_ISOLATED,
+        )
+    except Exception as e:
+        reason = f"Isolated leverage {lev}x could not be set: {e}"
+        _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        raise RuntimeError(reason)
+
     mexc_side = mexc_private.SIDE_OPEN_LONG if side == "LONG" else mexc_private.SIDE_OPEN_SHORT
     order_result = mexc_private.submit_order(
         symbol=SYMBOL,
@@ -500,7 +580,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         price=submit_price,
         order_type=mexc_private.ORDER_TYPE_MARKET,
         open_type=mexc_private.OPEN_TYPE_ISOLATED,
-        leverage=int(sizing["leverage"]),
+        leverage=lev,
         stop_loss_price=submit_sl,
         take_profit_price=submit_tp,
         external_oid=f"mib{int(time.time() * 1000)}",
@@ -508,14 +588,14 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
     _log_sizing_attempt(
         sizing, result="SUBMITTED", order_result=order_result,
         submitted={"price": submit_price, "stop_loss_price": submit_sl, "take_profit_price": submit_tp,
-                   "vol": vol, "leverage": int(sizing["leverage"]), "open_type": "ISOLATED"},
+                   "vol": vol, "leverage": lev, "open_type": "ISOLATED"},
     )
     _open_from_hunt(hunt, tf, thesis={
         "venue": "MEXC",
         "order_id": order_result.get("data"),
         "vol": vol,
         "notional": sizing.get("final_notional"),
-        "leverage": int(sizing["leverage"]),
+        "leverage": lev,
         "side": side,
         "margin_mode": "ISOLATED",
     })
@@ -595,11 +675,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     live_mode = CONFIG.get("mode") == "LIVE"
     live_armed = _live_armed()
 
-    if live_mode and not live_armed:
-        STATE["last_action"] = "LIVE MODE - NO ORDER"
-        STATE["last_reason"] = "Add MEXC_LIVE_TRADING_ENABLED=true to backend/.env and restart. Hunt is watching; no real order."
-        return STATE
-
     open_auto = _open_auto()
     if open_auto is not None:
         STATE["last_action"] = f"HOLD {open_auto.get('side')}"
@@ -629,6 +704,12 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             STATE["last_reason"] = str(e)
             logger.exception("live order failed")
         return STATE
+
+    if live_mode and not live_armed:
+        STATE["last_reason"] = (
+            "LIVE toggle is on but MEXC_LIVE_TRADING_ENABLED is not true — paper fill only. "
+            "Desktop: tray → Show Data Folder → add that line to .env → Restart Trading Engine."
+        )
 
     _open_from_hunt(hunt, tf)
     STATE["last_action"] = f"OPEN {side} Hunt C-FI {hunt.get('gate') or ''}"
