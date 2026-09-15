@@ -38,7 +38,6 @@ body {
   font-family: "JetBrains Mono", monospace;
 }
 
-/* tactical scanline overlay */
 .scanlines::before {
   content: "";
   position: fixed;
@@ -76,7 +75,6 @@ body {
   color: #5b6b82;
 }
 
-/* pulse for live/decision */
 @keyframes pulseGlow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
@@ -93,11 +91,6 @@ body {
   animation: fadeUp 0.4s ease-out both;
 }
 
-/* breathing glow — Observation Layer cards. --glow-rgb is set per
-   card via inline style (see lib/observationStyle.js::cardGlow),
-   same real direction colors used everywhere else in the app.
-   Animates both the outer glow AND the border color itself, so the
-   border visibly pulses, not just a soft shadow floating outside it. */
 @keyframes breatheGlow {
   0%, 100% {
     box-shadow: 0 0 0 1px rgba(255,255,255,0.02), 0 0 16px rgba(var(--glow-rgb), 0.10);
@@ -112,11 +105,45 @@ body {
   animation: breatheGlow 3.2s ease-in-out infinite;
 }
 
-/* AI Thesis orb — idle: slow breathing glow in a fixed color (cyan, matches
-   the terminal's existing accent). Processing: faster pulse + a full hue
-   sweep, so it visibly reads as "thinking" without any JS animation loop —
-   pure CSS, same GPU-friendly transform/opacity/filter approach as the
-   agent-viz animations below. */
+@keyframes preyBreathe {
+  0%, 100% {
+    border-color: rgba(255, 184, 0, 0.35);
+    box-shadow: 0 0 8px rgba(255, 184, 0, 0.18), 0 0 18px rgba(255, 184, 0, 0.06);
+    background: rgba(255, 184, 0, 0.04);
+  }
+  50% {
+    border-color: rgba(255, 210, 80, 0.95);
+    box-shadow: 0 0 16px rgba(255, 184, 0, 0.55), 0 0 36px rgba(255, 184, 0, 0.22);
+    background: rgba(255, 184, 0, 0.12);
+  }
+}
+@keyframes preyTextBreathe {
+  0%, 100% { color: #ffb800; text-shadow: 0 0 8px rgba(255, 184, 0, 0.45); }
+  50% { color: #ffe08a; text-shadow: 0 0 16px rgba(255, 210, 80, 0.9), 0 0 28px rgba(255, 184, 0, 0.45); }
+}
+
+/* Compounding wait is not an error. Hide the red copy, print gold PENDING PREY. */
+[data-testid="sizing-error"] {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  border-color: rgba(255, 184, 0, 0.45) !important;
+  background: rgba(255, 184, 0, 0.06) !important;
+  animation: preyBreathe 2.4s ease-in-out infinite;
+  text-align: center;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+[data-testid="sizing-error"]::before {
+  content: "PENDING PREY";
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  line-height: 1.2;
+  animation: preyTextBreathe 2.4s ease-in-out infinite;
+}
+
 @keyframes orbBreatheIdle {
   0%, 100% {
     box-shadow: 0 0 12px 2px rgba(34, 211, 238, 0.25), 0 0 28px 6px rgba(34, 211, 238, 0.08);
@@ -152,13 +179,6 @@ body {
   border-radius: 2px;
   overflow: hidden;
 }
-
-/* ============================================================
-   Agent card visualizations + message ticker
-   Added for the 10-Agent GUI redesign. Pure CSS keyframe
-   animation only — no JS animation loops, GPU-friendly
-   (transform/opacity only), per the performance requirements.
-   ============================================================ */
 
 .agent-viz-wrap {
   display: flex;
@@ -216,9 +236,6 @@ body {
   animation: agentVizNeedle 2.6s ease-in-out infinite;
 }
 
-/* Message ticker — seamless right-to-left marquee.
-   Two identical text copies back-to-back, track animated exactly
-   -50% of its own width so the loop is invisible. */
 .agent-ticker-mask {
   position: relative;
   overflow: hidden;
