@@ -8,11 +8,9 @@ One AUTO position at a time. New signal does not override.
 Live fills also open a local AUTO shadow so lifecycle / one-position work.
 If LIVE is on but the env flag is off, Hunt still papers the fill.
 
-Sizing (matches the 90d compounded tape):
-  risk_usd = wallet * risk_pct / 100     (default 2%)
-  quantity = risk_usd / (|entry - Hunt SL| * contract_size)
-NORMAL freezes wallet at Refresh. COMPOUNDING uses live Available every fire.
-Leverage is Isolated margin only. It does not change dollar risk.
+Sizing:
+  NORMAL      — old notional: locked Available x allocation% x leverage.
+  COMPOUNDING — 2% of live Available as dollar risk at the Hunt stop.
 """
 import json
 import logging
@@ -263,6 +261,35 @@ def update(payload: Dict) -> Dict:
     return result
 
 
+def _finish_qty(result, raw_qty, vol_unit, min_vol, max_vol, contract_size, price, leverage, max_notional):
+    result["raw_quantity"] = raw_qty
+    steps = round(raw_qty / vol_unit)
+    final_qty = steps * vol_unit
+    result["final_quantity"] = final_qty
+    position_notional = final_qty * contract_size * price if (final_qty and contract_size and price) else 0.0
+    if result.get("calculated_notional") is None:
+        result["calculated_notional"] = position_notional
+    if position_notional > max_notional and price > 0 and contract_size > 0:
+        cap_qty = max_notional / (contract_size * price)
+        cap_steps = max(vol_unit, (cap_qty // vol_unit) * vol_unit)
+        final_qty = cap_steps
+        result["final_quantity"] = final_qty
+        result["capped"] = True
+        position_notional = final_qty * contract_size * price
+    result["final_notional"] = position_notional
+    if final_qty <= 0:
+        result["error"] = "calculated quantity is zero"
+        return result
+    if final_qty < min_vol:
+        result["error"] = f"calculated quantity {final_qty} is below MEXC minVol {min_vol} for {SYMBOL}"
+        return result
+    if final_qty > max_vol:
+        result["error"] = f"calculated quantity {final_qty} exceeds MEXC maxVol {max_vol} for {SYMBOL}"
+        return result
+    result["required_margin"] = position_notional / leverage if leverage else position_notional
+    return result
+
+
 def compute_sizing(
     override_price: Optional[float] = None,
     entry: Optional[float] = None,
@@ -322,9 +349,7 @@ def compute_sizing(
         balance_used = STATE["normal_base"]
 
     result["balance_used"] = balance_used
-    risk_usd = balance_used * risk_pct / 100.0
-    result["risk_usd"] = risk_usd
-    result["calculated_capital"] = risk_usd
+    result["risk_usd"] = balance_used * risk_pct / 100.0
 
     try:
         from .market_data import mexc_market_data as mkt
@@ -383,48 +408,32 @@ def compute_sizing(
         result["error"] = "no price available for sizing"
         return result
 
-    entry_f, stop_f = _hunt_levels(entry, stop)
-    if not entry_f or not stop_f:
-        result["error"] = "waiting for Hunt stop to size 2% risk"
-        return result
-    stop_distance = abs(entry_f - stop_f)
-    result["stop_distance"] = stop_distance
-    if stop_distance <= 0:
-        result["error"] = "Hunt stop distance is zero — cannot size risk"
-        return result
+    if mode == "COMPOUNDING":
+        entry_f, stop_f = _hunt_levels(entry, stop)
+        if not entry_f or not stop_f:
+            result["error"] = "waiting for Hunt stop to size 2% risk"
+            return result
+        stop_distance = abs(entry_f - stop_f)
+        result["stop_distance"] = stop_distance
+        if stop_distance <= 0:
+            result["error"] = "Hunt stop distance is zero — cannot size risk"
+            return result
+        risk_usd = result["risk_usd"]
+        result["calculated_capital"] = risk_usd
+        raw_qty = risk_usd / (stop_distance * contract_size)
+        return _finish_qty(result, raw_qty, vol_unit, min_vol, max_vol, contract_size, price, leverage, max_notional)
 
-    # qty such that (qty * contract_size * stop_distance) == risk_usd
-    raw_qty = risk_usd / (stop_distance * contract_size)
-    result["raw_quantity"] = raw_qty
-    steps = round(raw_qty / vol_unit)
-    final_qty = steps * vol_unit
-    result["final_quantity"] = final_qty
-
-    position_notional = final_qty * contract_size * price
+    capital_margin = balance_used * allocation_pct / 100.0
+    position_notional = capital_margin * leverage
+    result["calculated_capital"] = capital_margin
     result["calculated_notional"] = position_notional
-
-    if position_notional > max_notional and price > 0 and contract_size > 0:
-        cap_qty = max_notional / (contract_size * price)
-        cap_steps = max(vol_unit, (cap_qty // vol_unit) * vol_unit)
-        final_qty = cap_steps
-        result["final_quantity"] = final_qty
-        result["capped"] = True
-        position_notional = final_qty * contract_size * price
-
-    result["final_notional"] = position_notional
-
-    if final_qty <= 0:
-        result["error"] = "calculated quantity is zero — risk dollars too small for this stop"
+    final_notional = min(position_notional, max_notional)
+    result["capped"] = final_notional < position_notional
+    if final_notional <= 0:
+        result["error"] = "calculated notional is zero or negative"
         return result
-    if final_qty < min_vol:
-        result["error"] = f"calculated quantity {final_qty} is below MEXC minVol {min_vol} for {SYMBOL}"
-        return result
-    if final_qty > max_vol:
-        result["error"] = f"calculated quantity {final_qty} exceeds MEXC maxVol {max_vol} for {SYMBOL}"
-        return result
-
-    result["required_margin"] = position_notional / leverage if leverage else position_notional
-    return result
+    raw_qty = final_notional / (contract_size * price)
+    return _finish_qty(result, raw_qty, vol_unit, min_vol, max_vol, contract_size, price, leverage, max_notional)
 
 
 def _snap_to_tick(value: float, price_unit: float, price_scale: int) -> float:
@@ -518,7 +527,6 @@ def _fresh_price() -> Optional[float]:
 
 
 def _mexc_open_position_vol() -> float:
-    """Return holdVol if a MEXC position is open. Raise if the account cannot be read."""
     from .market_data import mexc_private
     pos = mexc_private.get_open_positions(SYMBOL) or []
     total = 0.0
@@ -655,6 +663,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         "margin_mode": "ISOLATED",
         "risk_pct": sizing.get("risk_pct"),
         "risk_usd": sizing.get("risk_usd"),
+        "sizing_mode": sizing.get("sizing_mode"),
     })
     return order_result
 
