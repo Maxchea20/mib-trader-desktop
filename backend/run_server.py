@@ -23,20 +23,29 @@ def _pick_db(folder: Path) -> Path:
     return clean if clean.exists() else legacy
 
 
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+    except Exception:
+        pass
+
+
 def _ensure_defaults() -> None:
+    backend_dir = Path(__file__).resolve().parent
+    data_dir = _default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Desktop data folder first (packaged app), then backend/.env (dev).
+    # override=False so the first file that set a key wins.
+    _load_env_file(data_dir / ".env")
+    _load_env_file(backend_dir / ".env")
+
     if _is_frozen():
-        data_dir = _default_data_dir()
-        data_dir.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("MARKET_DB_PATH", str(_pick_db(data_dir)))
-        env_file = data_dir / ".env"
-        if env_file.exists():
-            try:
-                from dotenv import load_dotenv
-                load_dotenv(env_file)
-            except Exception:
-                pass
     else:
-        backend_dir = Path(__file__).resolve().parent
         os.environ.setdefault("MARKET_DB_PATH", str(_pick_db(backend_dir)))
 
     os.environ.setdefault("CORS_ORIGINS", "tauri://localhost,http://localhost:1420,http://localhost:3000")

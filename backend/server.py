@@ -2,13 +2,28 @@ from fastapi import FastAPI, APIRouter, Query, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import sys
 import asyncio
 import logging
 import uuid
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+
+
+def _desktop_data_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA", str(Path.home()))
+        return Path(base) / "mib-trader"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "mib-trader"
+    return Path.home() / ".local" / "share" / "mib-trader"
+
+
+# Dev: backend/.env. Packaged desktop: data-folder .env (tray → Show Data Folder).
+# First file to set a key wins (override=False).
+load_dotenv(_desktop_data_dir() / ".env", override=False)
+load_dotenv(ROOT_DIR / ".env", override=False)
 
 from src.config import (SYMBOL, TIMEFRAMES, AGENT_WEIGHTS, HTF_GATE, CONFLUENCE,
                         CONFLICT, ENTRY, CONFIG_VERSION, ASSUMPTIONS, HTF_TIMEFRAMES,
@@ -354,47 +369,60 @@ class AutoTradeReq(BaseModel):
     notional_usd: Optional[float] = None
     sl_atr_mult: Optional[float] = None
     tp_atr_mult: Optional[float] = None
-    # --- position sizing (NORMAL / COMPOUNDING) ---
-    sizing_mode: Optional[str] = None          # "NORMAL" | "COMPOUNDING"
+    sizing_mode: Optional[str] = None
     allocation_pct: Optional[float] = None
     leverage: Optional[float] = None
-    refresh_normal_base: Optional[bool] = None  # True -> re-capture STATE["normal_base"] from MEXC now
+    refresh_normal_base: Optional[bool] = None
     max_live_notional_usd: Optional[float] = None
 
 
 @api_router.get("/autotrade")
 async def autotrade_status():
-    # autotrader.status() now computes a live sizing_preview, which does
-    # blocking network I/O (contract detail always; MEXC balance too when
-    # sizing_mode is COMPOUNDING). Running that on the event loop directly
-    # would stall every other request for the duration of the call — offload
-    # to a thread, same pattern as the /mexc/account route.
     return await asyncio.to_thread(autotrader.status)
 
 
 @api_router.get("/ai/thesis")
 async def ai_thesis_status():
-    # Purely read-only — returns whatever ai_thesis.loop() last produced in
-    # the background. Never triggers a new OpenAI call itself; the 15-min
-    # cadence is entirely backend-owned by the loop, not by this route being hit.
     return ai_thesis.status()
 
 
 @api_router.get("/mexc/account")
 async def mexc_account():
-    """Real MEXC futures USDT balance/PnL — powers LiveTradingControls. Returns
-    connected:false with a reason instead of a 500 when keys are missing/invalid/
-    lack trading permission, so the frontend can show a clear state either way."""
+    """Real MEXC futures USDT balance/PnL — powers LiveTradingControls."""
+    live_armed = os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true"
+    keys_present = mexc_private.keys_present()
     try:
         assets = await asyncio.to_thread(mexc_private.get_assets)
     except mexc_private.MexcPrivateError as e:
-        return {"connected": False, "error": str(e)}
+        hint = (
+            "Desktop app: tray → Show Data Folder → put MEXC_API_KEY, MEXC_API_SECRET "
+            "and MEXC_LIVE_TRADING_ENABLED=true in that .env → Restart Trading Engine. "
+            "Dev: same three lines in backend/.env."
+        )
+        return {
+            "connected": False,
+            "error": str(e),
+            "hint": hint,
+            "live_armed": live_armed,
+            "keys_present": keys_present,
+        }
     except Exception as e:
-        return {"connected": False, "error": f"unexpected error: {e}"}
+        return {
+            "connected": False,
+            "error": f"unexpected error: {e}",
+            "live_armed": live_armed,
+            "keys_present": keys_present,
+        }
 
     usdt = next((a for a in assets if a.get("currency") == "USDT"), None)
     if not usdt:
-        return {"connected": True, "error": "No USDT asset entry in account", "assets": assets}
+        return {
+            "connected": True,
+            "error": "No USDT asset entry in account",
+            "assets": assets,
+            "live_armed": live_armed,
+            "keys_present": keys_present,
+        }
 
     return {
         "connected": True,
@@ -404,13 +432,13 @@ async def mexc_account():
         "cash_balance": float(usdt.get("cashBalance") or 0),
         "position_margin": float(usdt.get("positionMargin") or 0),
         "unrealized_pnl": float(usdt.get("unrealized") or 0),
+        "live_armed": live_armed,
+        "keys_present": keys_present,
     }
 
 
 @api_router.put("/autotrade")
 async def autotrade_update(req: AutoTradeReq):
-    # update() calls status() internally, which now computes sizing_preview
-    # (blocking network I/O) — same reasoning as autotrade_status() above.
     return await asyncio.to_thread(autotrader.update, req.model_dump(exclude_none=True))
 
 
@@ -500,5 +528,10 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     logger.info("MIB-Trader starting — live-first market data")
+    logger.info(
+        "MEXC keys=%s live_armed=%s",
+        bool(os.environ.get("MEXC_API_KEY")) and bool(os.environ.get("MEXC_API_SECRET")),
+        os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true",
+    )
     await manager.initial_load()
     asyncio.create_task(ai_thesis.loop())
