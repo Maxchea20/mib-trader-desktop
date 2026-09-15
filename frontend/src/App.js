@@ -10,7 +10,7 @@ import {
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
-import { ExplainabilityPanel } from "@/components/trading/ExplainabilityPanel";
+import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
@@ -209,7 +209,7 @@ function App() {
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
             <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
-            <ExplainabilityPanel hunt={analysis?.hunt} weather={analysis?.weather} />
+            <AiThesisPanel />
           </section>
         </div>
         <div className="mt-4">

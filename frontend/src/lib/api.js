@@ -50,6 +50,8 @@ export const getPaperBalance = async () => (await client.get("/paper/balance")).
 export const setPaperBalance = async (amount) => (await client.post("/paper/balance", { amount })).data;
 export const getAutotrade = async () => (await client.get("/autotrade")).data;
 export const updateAutotrade = async (payload) => (await client.put("/autotrade", payload)).data;
+export const getMexcAccount = async () => (await client.get("/mexc/account")).data;
+export const getAiThesis = async () => (await client.get("/ai/thesis")).data;
 
 export const AGENT_META = {
   market_structure: { name: "Market Structure", focus: "HH / HL / LH / LL · BOS · CHoCH", num: "01" },

@@ -277,6 +277,21 @@ def _parse_kline(data: Dict) -> List[Dict]:
     return out
 
 
+async def get_contract_detail(symbol: str) -> Optional[Dict]:
+    """GET /api/v1/contract/detail?symbol=... — needed to size orders: MEXC order
+    `vol` is a count of CONTRACTS, not USD. notional_usd = vol * contractSize * price."""
+    try:
+        data = rest_get(f"/api/v1/contract/detail?symbol={symbol}")
+        if not data.get("success"):
+            return None
+        d = data["data"]
+        if isinstance(d, list):
+            d = d[0] if d else None
+        return d
+    except Exception:
+        raise MexcError("contract detail lookup failed")
+
+
 async def get_klines(
     symbol: str,
     timeframe: str,

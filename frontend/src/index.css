@@ -112,6 +112,36 @@ body {
   animation: breatheGlow 3.2s ease-in-out infinite;
 }
 
+/* AI Thesis orb — idle: slow breathing glow in a fixed color (cyan, matches
+   the terminal's existing accent). Processing: faster pulse + a full hue
+   sweep, so it visibly reads as "thinking" without any JS animation loop —
+   pure CSS, same GPU-friendly transform/opacity/filter approach as the
+   agent-viz animations below. */
+@keyframes orbBreatheIdle {
+  0%, 100% {
+    box-shadow: 0 0 12px 2px rgba(34, 211, 238, 0.25), 0 0 28px 6px rgba(34, 211, 238, 0.08);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgba(34, 211, 238, 0.5), 0 0 44px 10px rgba(34, 211, 238, 0.18);
+    transform: scale(1.04);
+  }
+}
+@keyframes orbHueSweep {
+  0%   { filter: hue-rotate(0deg) saturate(1.6); }
+  100% { filter: hue-rotate(360deg) saturate(1.6); }
+}
+@keyframes orbPulseFast {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+.ai-orb-idle {
+  animation: orbBreatheIdle 3.6s ease-in-out infinite;
+}
+.ai-orb-processing {
+  animation: orbHueSweep 2.2s linear infinite, orbPulseFast 0.9s ease-in-out infinite;
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #0a0e15; }
 ::-webkit-scrollbar-thumb { background: #26334a; border-radius: 4px; }

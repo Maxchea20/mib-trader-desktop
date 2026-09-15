@@ -2,18 +2,99 @@ import React, { useEffect, useState, useCallback } from "react";
 import { TrendingUp, TrendingDown, Wallet, Bot, Plus } from "lucide-react";
 import {
   openPaperTrade, closePaperTrade, getPaperTrades, getPaperStats,
-  getAutotrade, updateAutotrade,
+  getAutotrade, updateAutotrade, getMexcAccount,
 } from "../../lib/api";
 import { dirStyle, fmt } from "../../lib/style";
 
 const fmtTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
 
-const LiveTradingControls = () => {
-  const [allocation, setAllocation] = useState(10);
-  const [leverage, setLeverage] = useState(10);
+// Position sizing is entirely backend-driven: every number shown here except
+// the raw text the user is currently typing comes from `auto.sizing_preview`
+// (GET /autotrade), computed by the SAME autotrader.compute_sizing() function
+// the live order path calls. There is no sizing math duplicated in React —
+// this component only reflects the backend's authoritative result and sends
+// edits back via onSave (PUT /autotrade). SL/TP % fields below are display
+// only, unchanged from before — actual SL/TP still come from Hunt C-FI, not
+// from this panel.
+const LiveTradingControls = ({ auto, onSave }) => {
   const [slPct, setSlPct] = useState(1.0);
   const [tpPct, setTpPct] = useState(2.0);
+  const [acct, setAcct] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    let timeoutId = null;
+    const tick = async () => {
+      if (!active) return;
+      try {
+        const a = await getMexcAccount();
+        if (active) setAcct(a);
+      } catch (e) {
+        if (active) setAcct({ connected: false, error: "request failed" });
+      }
+      if (active) timeoutId = setTimeout(tick, 5000);
+    };
+    tick();
+    return () => {
+      active = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, []);
+
+  const cfg = auto?.config || {};
+  const sizing = auto?.sizing_preview || {};
+  const sizingMode = cfg.sizing_mode || "NORMAL";
+
+  // Local editable copies so typing doesn't fight the ~3s poll; each commits
+  // to the backend on blur, and the poll then reconciles the displayed
+  // outputs (capital/notional/quantity) from the backend's own recompute —
+  // never from a local formula. There is NO local balance input anymore —
+  // balance_used always comes from the backend (normal_base or live
+  // availableBalance), never typed by the user.
+  const [allocationInput, setAllocationInput] = useState(cfg.allocation_pct ?? 10);
+  const [maxNotionalInput, setMaxNotionalInput] = useState(cfg.max_live_notional_usd ?? 1000);
+  const [refreshing, setRefreshing] = useState(false);
+  // Per-field warning text, shown right under the field and cleared the next
+  // time that field is edited. Populated from update()'s "warnings" array —
+  // a rejected value now says WHY and the input snaps back to the real
+  // value immediately, instead of silently keeping the rejected number on
+  // screen (see fieldWarning() below for the snap-back logic).
+  const [fieldWarnings, setFieldWarnings] = useState({});
+  const [refreshFailed, setRefreshFailed] = useState(null);
+
+  useEffect(() => { if (cfg.allocation_pct != null) setAllocationInput(cfg.allocation_pct); }, [cfg.allocation_pct]);
+  useEffect(() => { if (cfg.max_live_notional_usd != null) setMaxNotionalInput(cfg.max_live_notional_usd); }, [cfg.max_live_notional_usd]);
+
+  const connected = acct?.connected;
+  const leverage = cfg.leverage ?? 10;
+  const minLev = sizing.min_leverage;
+  const maxLev = sizing.max_leverage;
+
+  // Generic field-save helper: commits to the backend, then ALWAYS snaps the
+  // local input to whatever the backend actually has (whether it changed or
+  // not) and shows the warning if the backend rejected it. This is the fix
+  // for the bug where a rejected value used to sit in the input box looking
+  // saved, because the reconciling useEffect only fires when the value
+  // actually changes.
+  const saveField = async (field, value, setLocal) => {
+    const a = await onSave({ [field]: value });
+    const warn = (a?.warnings || []).find((w) => w.startsWith(field + ":"));
+    setFieldWarnings((prev) => ({ ...prev, [field]: warn || null }));
+    if (a?.config && a.config[field] != null) setLocal(a.config[field]);
+  };
+
+  const doRefresh = async () => {
+    setRefreshing(true);
+    setRefreshFailed(null);
+    try {
+      const a = await onSave({ refresh_normal_base: true });
+      const warn = (a?.warnings || []).find((w) => w.startsWith("refresh_normal_base:"));
+      if (warn) setRefreshFailed(warn);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <div className="panel mb-3 p-3" data-testid="live-trading-controls">
@@ -26,20 +107,38 @@ const LiveTradingControls = () => {
         </span>
       </div>
 
+      {acct && !connected && (
+        <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300" data-testid="mexc-account-error">
+          MEXC account not connected: {acct.error || "unknown error"}
+        </div>
+      )}
+
+      {sizing.error && (
+        <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300" data-testid="sizing-error">
+          Sizing not currently valid: {sizing.error}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
         <div className="border border-[#1d2635] bg-[#0d121b] p-2">
           <div className="widget-label">ACCOUNT BALANCE</div>
-          <div className="font-mono-t text-lg text-slate-100">? USDT</div>
+          <div className="font-mono-t text-lg text-slate-100">
+            {connected ? `${fmt(acct.equity, 2)} USDT` : "? USDT"}
+          </div>
         </div>
 
         <div className="border border-[#1d2635] bg-[#0d121b] p-2">
           <div className="widget-label">AVAILABLE</div>
-          <div className="font-mono-t text-lg text-slate-100">? USDT</div>
+          <div className="font-mono-t text-lg text-slate-100">
+            {connected ? `${fmt(acct.available_balance, 2)} USDT` : "? USDT"}
+          </div>
         </div>
 
         <div className="border border-[#1d2635] bg-[#0d121b] p-2">
           <div className="widget-label">UNREALIZED PNL</div>
-          <div className="font-mono-t text-lg text-slate-400">?</div>
+          <div className="font-mono-t text-lg">
+            {connected ? <Pnl v={acct.unrealized_pnl} /> : <span className="text-slate-400">?</span>}
+          </div>
         </div>
 
         <div className="border border-[#1d2635] bg-[#0d121b] p-2">
@@ -48,57 +147,163 @@ const LiveTradingControls = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="font-head font-bold text-slate-200 tracking-wide text-sm mb-2">
+        POSITION SIZING
+      </div>
+
+      <div className="flex gap-1 mb-3" data-testid="sizing-mode-tabs">
+        {["NORMAL", "COMPOUNDING"].map((m) => (
+          <button
+            key={m}
+            onClick={() => onSave({ sizing_mode: m })}
+            data-testid={`sizing-mode-${m.toLowerCase()}`}
+            className={`px-3 py-1.5 border font-mono-t text-[11px] rounded-sm transition-colors ${
+              sizingMode === m
+                ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                : "border-[#1d2635] bg-[#0d121b] text-slate-400"
+            }`}
+          >
+            {m === "NORMAL" ? "NORMAL TRADE" : "COMPOUNDING"}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        {sizingMode === "NORMAL" ? (
+          <div>
+            <div className="widget-label mb-1">NORMAL BASE</div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] font-mono-t text-xs text-slate-300 rounded-sm" data-testid="normal-base-value">
+                {sizing.normal_base != null ? `$${fmt(sizing.normal_base, 2)}` : "—"}
+              </div>
+              <button
+                onClick={doRefresh}
+                disabled={refreshing}
+                data-testid="refresh-normal-base"
+                className="px-2 py-1.5 border border-[#1d2635] bg-[#0d121b] text-slate-300 hover:border-amber-500/60 hover:text-amber-300 font-mono-t text-[11px] rounded-sm disabled:opacity-50"
+              >
+                {refreshing ? "…" : "Refresh"}
+              </button>
+            </div>
+            {refreshFailed && (
+              <div className="mt-1 font-mono-t text-[10px] text-rose-300" data-testid="refresh-failed-warning">
+                Refresh failed — {refreshFailed.replace(/^refresh_normal_base:\s*/, "")}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div className="widget-label mb-1">ACCOUNT BALANCE (LIVE)</div>
+            <div className="px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] font-mono-t text-xs text-slate-300 rounded-sm">
+              {sizing.balance_used != null ? `$${fmt(sizing.balance_used, 2)}` : "?"}
+            </div>
+          </div>
+        )}
+
         <div>
-          <div className="widget-label mb-1">AUTO-TRADE CAPITAL</div>
+          <div className="widget-label mb-1">ALLOCATION</div>
           <div className="flex items-center gap-2">
             <input
               type="number"
-              min="1"
+              min="0.1"
               max="100"
-              value={allocation}
-              onChange={(e) => setAllocation(e.target.value)}
+              step="0.1"
+              value={allocationInput}
+              onChange={(e) => setAllocationInput(e.target.value)}
+              onBlur={() => saveField("allocation_pct", Number(allocationInput), setAllocationInput)}
+              data-testid="allocation-input"
               className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
             />
             <span className="font-mono-t text-xs text-slate-400">%</span>
           </div>
+          {fieldWarnings.allocation_pct && (
+            <div className="mt-1 font-mono-t text-[10px] text-rose-300" data-testid="allocation-warning">
+              {fieldWarnings.allocation_pct}
+            </div>
+          )}
         </div>
 
         <div>
-          <div className="widget-label mb-1">LEVERAGE</div>
+          <div className="widget-label mb-1">
+            LEVERAGE{minLev != null && maxLev != null ? ` (max ${fmt(maxLev, 0)}x for this contract)` : ""}
+          </div>
           <div className="flex gap-1">
-            {[10, 20, 50, 100].map((x) => (
-              <button
-                key={x}
-                onClick={() => setLeverage(x)}
-                className={`flex-1 px-2 py-1.5 border font-mono-t text-[10px] rounded-sm transition-colors ${
-                  leverage === x
-                    ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
-                    : "border-[#1d2635] bg-[#0d121b] text-slate-400"
-                }`}
-              >
-                {x}x
-              </button>
-            ))}
+            {[10, 20, 50, 100].map((x) => {
+              const outOfBounds = (minLev != null && x < minLev) || (maxLev != null && x > maxLev);
+              return (
+                <button
+                  key={x}
+                  onClick={() => !outOfBounds && saveField("leverage", x, () => {})}
+                  disabled={outOfBounds}
+                  title={outOfBounds ? `Exceeds this contract's allowed leverage range` : undefined}
+                  data-testid={`leverage-${x}`}
+                  className={`flex-1 px-2 py-1.5 border font-mono-t text-[10px] rounded-sm transition-colors ${
+                    outOfBounds
+                      ? "border-[#1d2635] bg-[#0d121b] text-slate-600 cursor-not-allowed opacity-50"
+                      : Number(leverage) === x
+                      ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                      : "border-[#1d2635] bg-[#0d121b] text-slate-400"
+                  }`}
+                >
+                  {x}x
+                </button>
+              );
+            })}
           </div>
+          {fieldWarnings.leverage && (
+            <div className="mt-1 font-mono-t text-[10px] text-rose-300" data-testid="leverage-warning">
+              {fieldWarnings.leverage}
+            </div>
+          )}
         </div>
 
         <div>
-          <div className="widget-label mb-1">POSITION NOTIONAL</div>
-          <div className="px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] font-mono-t text-xs text-slate-400 rounded-sm">
-            ? USDT
+          <div className="widget-label mb-1">MAX NOTIONAL (SAFETY CAP)</div>
+          <input
+            type="number"
+            min="1"
+            value={maxNotionalInput}
+            onChange={(e) => setMaxNotionalInput(e.target.value)}
+            onBlur={() => saveField("max_live_notional_usd", Number(maxNotionalInput), setMaxNotionalInput)}
+            data-testid="max-notional-input"
+            className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
+          />
+          {fieldWarnings.max_live_notional_usd && (
+            <div className="mt-1 font-mono-t text-[10px] text-rose-300" data-testid="max-notional-warning">
+              {fieldWarnings.max_live_notional_usd}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3" data-testid="sizing-preview">
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">CALCULATED CAPITAL</div>
+          <div className="font-mono-t text-base text-slate-100">
+            {sizing.calculated_capital != null ? `$${fmt(sizing.calculated_capital, 2)}` : "—"}
           </div>
         </div>
-
-        <div>
-          <div className="widget-label mb-1">EXECUTION</div>
-          <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">
-            AI CONTROLLED
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">CALCULATED NOTIONAL</div>
+          <div className="font-mono-t text-base text-slate-100">
+            {sizing.calculated_notional != null ? `$${fmt(sizing.calculated_notional, 2)}` : "—"}
+          </div>
+        </div>
+        <div className={`border p-2 ${sizing.capped ? "border-amber-500/50 bg-amber-500/5" : "border-[#1d2635] bg-[#0d121b]"}`}>
+          <div className="widget-label">FINAL NOTIONAL — CAPPED: {sizing.capped ? "YES" : "NO"}</div>
+          <div className={`font-mono-t text-base ${sizing.capped ? "text-amber-300" : "text-slate-100"}`}>
+            {sizing.final_notional != null ? `$${fmt(sizing.final_notional, 2)}` : "—"}
+          </div>
+        </div>
+        <div className="border border-[#1d2635] bg-[#0d121b] p-2">
+          <div className="widget-label">CONTRACT QUANTITY</div>
+          <div className="font-mono-t text-base text-slate-100">
+            {sizing.final_quantity != null ? fmt(sizing.final_quantity, 0) : "—"}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-1">
         <div>
           <div className="widget-label mb-1">STOP LOSS</div>
           <div className="flex items-center gap-2">
@@ -126,15 +331,19 @@ const LiveTradingControls = () => {
         </div>
 
         <div>
-          <div className="widget-label mb-1">MODE</div>
+          <div className="widget-label mb-1">EXECUTION</div>
           <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">
-            LIVE AUTO-TRADE
+            AI CONTROLLED
           </div>
         </div>
       </div>
 
       <div className="mt-3 font-mono-t text-[10px] text-slate-500">
-        AI determines LONG / SHORT, entry and exit. Live execution is not enabled yet.
+        AI determines LONG / SHORT, entry and exit — sizing above does not change that. SL/TP fields
+        are unchanged and still come from Hunt C-FI, not from this panel. Normal Base is captured
+        from MEXC automatically (first use, or switching from Compounding) and only changes again
+        when you press Refresh. Requires MEXC_API_KEY/SECRET and MEXC_LIVE_TRADING_ENABLED=true set
+        on the backend to actually place orders.
       </div>
     </div>
   );
@@ -356,7 +565,20 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
         </div>
       )}
 
-      {mode === "LIVE" && <LiveTradingControls />}
+      {mode === "LIVE" && (
+        <LiveTradingControls
+          auto={auto}
+          onSave={async (payload) => {
+            try {
+              const a = await updateAutotrade(payload);
+              setAuto(a);
+              return a; // caller needs this to snap inputs back + show warnings
+            } catch (e) {
+              return null;
+            }
+          }}
+        />
+      )}
 
       {/* stats */}
       {stats && (

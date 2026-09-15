@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, Query, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import asyncio
 import logging
 import uuid
 from pathlib import Path
@@ -24,6 +25,8 @@ from src import decision_log
 from src import walkforward_log
 from src import paper_trading
 from src import autotrader
+from src import ai_thesis
+from src.market_data import mexc_private
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 
@@ -346,20 +349,69 @@ async def set_paper_balance(req: SetPaperBalanceReq):
 
 class AutoTradeReq(BaseModel):
     enabled: Optional[bool] = None
+    mode: Optional[str] = None
     timeframe: Optional[str] = None
     notional_usd: Optional[float] = None
     sl_atr_mult: Optional[float] = None
     tp_atr_mult: Optional[float] = None
+    # --- position sizing (NORMAL / COMPOUNDING) ---
+    sizing_mode: Optional[str] = None          # "NORMAL" | "COMPOUNDING"
+    allocation_pct: Optional[float] = None
+    leverage: Optional[float] = None
+    refresh_normal_base: Optional[bool] = None  # True -> re-capture STATE["normal_base"] from MEXC now
+    max_live_notional_usd: Optional[float] = None
 
 
 @api_router.get("/autotrade")
 async def autotrade_status():
-    return autotrader.status()
+    # autotrader.status() now computes a live sizing_preview, which does
+    # blocking network I/O (contract detail always; MEXC balance too when
+    # sizing_mode is COMPOUNDING). Running that on the event loop directly
+    # would stall every other request for the duration of the call — offload
+    # to a thread, same pattern as the /mexc/account route.
+    return await asyncio.to_thread(autotrader.status)
+
+
+@api_router.get("/ai/thesis")
+async def ai_thesis_status():
+    # Purely read-only — returns whatever ai_thesis.loop() last produced in
+    # the background. Never triggers a new OpenAI call itself; the 15-min
+    # cadence is entirely backend-owned by the loop, not by this route being hit.
+    return ai_thesis.status()
+
+
+@api_router.get("/mexc/account")
+async def mexc_account():
+    """Real MEXC futures USDT balance/PnL — powers LiveTradingControls. Returns
+    connected:false with a reason instead of a 500 when keys are missing/invalid/
+    lack trading permission, so the frontend can show a clear state either way."""
+    try:
+        assets = await asyncio.to_thread(mexc_private.get_assets)
+    except mexc_private.MexcPrivateError as e:
+        return {"connected": False, "error": str(e)}
+    except Exception as e:
+        return {"connected": False, "error": f"unexpected error: {e}"}
+
+    usdt = next((a for a in assets if a.get("currency") == "USDT"), None)
+    if not usdt:
+        return {"connected": True, "error": "No USDT asset entry in account", "assets": assets}
+
+    return {
+        "connected": True,
+        "currency": "USDT",
+        "equity": float(usdt.get("equity") or 0),
+        "available_balance": float(usdt.get("availableBalance") or 0),
+        "cash_balance": float(usdt.get("cashBalance") or 0),
+        "position_margin": float(usdt.get("positionMargin") or 0),
+        "unrealized_pnl": float(usdt.get("unrealized") or 0),
+    }
 
 
 @api_router.put("/autotrade")
 async def autotrade_update(req: AutoTradeReq):
-    return autotrader.update(req.model_dump(exclude_none=True))
+    # update() calls status() internally, which now computes sizing_preview
+    # (blocking network I/O) — same reasoning as autotrade_status() above.
+    return await asyncio.to_thread(autotrader.update, req.model_dump(exclude_none=True))
 
 
 @api_router.get("/decisions/stats")
@@ -449,3 +501,4 @@ app.add_middleware(
 async def startup():
     logger.info("MIB-Trader starting — live-first market data")
     await manager.initial_load()
+    asyncio.create_task(ai_thesis.loop())
