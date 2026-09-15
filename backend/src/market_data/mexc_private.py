@@ -169,7 +169,8 @@ def get_asset(currency: str = "USDT") -> Dict:
 def get_open_positions(symbol: Optional[str] = None) -> List[Dict]:
     """GET /api/v1/private/position/open_positions"""
     params = {"symbol": symbol} if symbol else {}
-    return _request("GET", "/position/open_positions", params=params).get("data", [])
+    data = _request("GET", "/position/open_positions", params=params).get("data", [])
+    return data or []
 
 
 def get_open_orders(symbol: str, page_num: int = 1, page_size: int = 20) -> List[Dict]:
@@ -203,7 +204,7 @@ def submit_order(
     vol: float,
     price: Optional[float] = None,
     order_type: int = ORDER_TYPE_MARKET,
-    open_type: int = OPEN_TYPE_CROSS,
+    open_type: int = OPEN_TYPE_ISOLATED,
     leverage: Optional[int] = None,
     stop_loss_price: Optional[float] = None,
     take_profit_price: Optional[float] = None,
@@ -212,7 +213,8 @@ def submit_order(
     """POST /api/v1/private/order/submit — places a real order. vol is in CONTRACTS
     (not USD notional) — check contractSize on /api/v1/contract/detail before sizing.
     Market orders (order_type=5) still require a `price` field for slippage protection
-    on MEXC's side; pass the current mark price."""
+    on MEXC's side; pass the current mark price.
+    Isolated is the default (openType=1). Leverage is required on Isolated."""
     body = {
         "symbol": symbol,
         "vol": vol,
@@ -231,6 +233,25 @@ def submit_order(
     if external_oid is not None:
         body["externalOid"] = external_oid
     return _request("POST", "/order/submit", body=body)
+
+
+def close_position(
+    symbol: str,
+    opened_side: str,
+    vol: float,
+    price: Optional[float] = None,
+    open_type: int = OPEN_TYPE_ISOLATED,
+) -> Dict:
+    """Market-close an open Isolated position. opened_side is LONG or SHORT."""
+    close_side = SIDE_CLOSE_LONG if str(opened_side).upper() == "LONG" else SIDE_CLOSE_SHORT
+    return submit_order(
+        symbol=symbol,
+        side=close_side,
+        vol=vol,
+        price=price,
+        order_type=ORDER_TYPE_MARKET,
+        open_type=open_type,
+    )
 
 
 def cancel_orders(order_ids: List[str]) -> Dict:
