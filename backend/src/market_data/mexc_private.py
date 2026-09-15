@@ -89,10 +89,29 @@ def _get_keys() -> tuple:
     if not api_key or not secret_key:
         raise MexcPrivateError(
             "MEXC_API_KEY / MEXC_API_SECRET not set in environment. "
-            "Create a futures API key at https://www.mexc.com/ucenter/openapi "
-            "and set both env vars before calling any private endpoint."
+            "Packaged desktop: tray → Show Data Folder → create .env there. "
+            "Dev: put them in backend/.env. Then Restart Trading Engine."
         )
     return api_key, secret_key
+
+
+def keys_present() -> bool:
+    return bool(os.environ.get("MEXC_API_KEY")) and bool(os.environ.get("MEXC_API_SECRET"))
+
+
+def _json_num(v):
+    """Avoid 10.0 / scientific notation in the signed JSON body (MEXC 2015)."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        if v.is_integer():
+            return int(v)
+        return float(f"{v:.10f}".rstrip("0").rstrip(".") or "0")
+    return v
 
 
 def _request(method: str, path: str, params: Optional[Dict] = None, body: Optional[Dict] = None) -> dict:
@@ -107,7 +126,12 @@ def _request(method: str, path: str, params: Optional[Dict] = None, body: Option
         signature = _sign(secret_key, api_key, req_time, param_str)
         body_bytes = None
     else:  # POST
-        body_json = json.dumps(body or {}, separators=(",", ":"))
+        clean = {}
+        for k, v in (body or {}).items():
+            if v is None:
+                continue
+            clean[k] = _json_num(v) if isinstance(v, (int, float)) else v
+        body_json = json.dumps(clean, separators=(",", ":"))
         signature = _sign(secret_key, api_key, req_time, body_json)
         body_bytes = body_json.encode("utf-8")
 
@@ -185,6 +209,7 @@ def get_open_orders(symbol: str, page_num: int = 1, page_size: int = 20) -> List
 # side: 1 open long, 2 close short, 3 open short, 4 close long
 # openType: 1 isolated, 2 cross
 # orderType: 1 limit, 5 market
+# positionType: 1 long, 2 short
 
 SIDE_OPEN_LONG = 1
 SIDE_CLOSE_SHORT = 2
@@ -196,6 +221,24 @@ OPEN_TYPE_CROSS = 2
 
 ORDER_TYPE_LIMIT = 1
 ORDER_TYPE_MARKET = 5
+
+POSITION_TYPE_LONG = 1
+POSITION_TYPE_SHORT = 2
+
+
+def change_leverage(
+    symbol: str,
+    leverage: int,
+    position_type: int,
+    open_type: int = OPEN_TYPE_ISOLATED,
+) -> Dict:
+    """POST /api/v1/private/position/change_leverage — required for Isolated before first fill."""
+    return _request("POST", "/position/change_leverage", body={
+        "symbol": symbol,
+        "leverage": int(leverage),
+        "openType": int(open_type),
+        "positionType": int(position_type),
+    })
 
 
 def submit_order(
@@ -225,7 +268,7 @@ def submit_order(
     if price is not None:
         body["price"] = price
     if leverage is not None:
-        body["leverage"] = leverage
+        body["leverage"] = int(leverage)
     if stop_loss_price is not None:
         body["stopLossPrice"] = stop_loss_price
     if take_profit_price is not None:
