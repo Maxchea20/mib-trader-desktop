@@ -9,17 +9,7 @@ import { dirStyle, fmt } from "../../lib/style";
 const fmtTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
 
-// Position sizing is entirely backend-driven: every number shown here except
-// the raw text the user is currently typing comes from `auto.sizing_preview`
-// (GET /autotrade), computed by the SAME autotrader.compute_sizing() function
-// the live order path calls. There is no sizing math duplicated in React —
-// this component only reflects the backend's authoritative result and sends
-// edits back via onSave (PUT /autotrade). SL/TP % fields below are display
-// only, unchanged from before — actual SL/TP still come from Hunt C-FI, not
-// from this panel.
 const LiveTradingControls = ({ auto, onSave }) => {
-  const [slPct, setSlPct] = useState(1.0);
-  const [tpPct, setTpPct] = useState(2.0);
   const [acct, setAcct] = useState(null);
 
   useEffect(() => {
@@ -45,21 +35,11 @@ const LiveTradingControls = ({ auto, onSave }) => {
   const cfg = auto?.config || {};
   const sizing = auto?.sizing_preview || {};
   const sizingMode = cfg.sizing_mode || "NORMAL";
+  const armed = !!auto?.live_armed;
 
-  // Local editable copies so typing doesn't fight the ~3s poll; each commits
-  // to the backend on blur, and the poll then reconciles the displayed
-  // outputs (capital/notional/quantity) from the backend's own recompute —
-  // never from a local formula. There is NO local balance input anymore —
-  // balance_used always comes from the backend (normal_base or live
-  // availableBalance), never typed by the user.
-  const [allocationInput, setAllocationInput] = useState(cfg.allocation_pct ?? 10);
+  const [allocationInput, setAllocationInput] = useState(cfg.allocation_pct ?? 20);
   const [maxNotionalInput, setMaxNotionalInput] = useState(cfg.max_live_notional_usd ?? 1000);
   const [refreshing, setRefreshing] = useState(false);
-  // Per-field warning text, shown right under the field and cleared the next
-  // time that field is edited. Populated from update()'s "warnings" array —
-  // a rejected value now says WHY and the input snaps back to the real
-  // value immediately, instead of silently keeping the rejected number on
-  // screen (see fieldWarning() below for the snap-back logic).
   const [fieldWarnings, setFieldWarnings] = useState({});
   const [refreshFailed, setRefreshFailed] = useState(null);
 
@@ -71,12 +51,6 @@ const LiveTradingControls = ({ auto, onSave }) => {
   const minLev = sizing.min_leverage;
   const maxLev = sizing.max_leverage;
 
-  // Generic field-save helper: commits to the backend, then ALWAYS snaps the
-  // local input to whatever the backend actually has (whether it changed or
-  // not) and shows the warning if the backend rejected it. This is the fix
-  // for the bug where a rejected value used to sit in the input box looking
-  // saved, because the reconciling useEffect only fires when the value
-  // actually changes.
   const saveField = async (field, value, setLocal) => {
     const a = await onSave({ [field]: value });
     const warn = (a?.warnings || []).find((w) => w.startsWith(field + ":"));
@@ -102,10 +76,20 @@ const LiveTradingControls = ({ auto, onSave }) => {
         <div className="font-head font-bold text-slate-200 tracking-wide">
           LIVE AUTO-TRADE CONTROLS
         </div>
-        <span className="font-mono-t text-[10px] text-amber-400 border border-amber-500/40 bg-amber-500/5 px-2 py-1 rounded-sm">
-          REAL ACCOUNT
+        <span className={`font-mono-t text-[10px] px-2 py-1 rounded-sm border ${
+          armed
+            ? "text-amber-400 border-amber-500/40 bg-amber-500/5"
+            : "text-slate-400 border-[#1d2635] bg-[#0d121b]"
+        }`}>
+          {armed ? "REAL ACCOUNT · ARMED" : "REAL ACCOUNT · NOT ARMED"}
         </span>
       </div>
+
+      {!armed && (
+        <div className="mb-3 px-2 py-1.5 border border-amber-500/40 bg-amber-500/5 font-mono-t text-[11px] text-amber-300" data-testid="live-not-armed">
+          Hunt is watching. No real order until backend/.env has MEXC_LIVE_TRADING_ENABLED=true and you restart.
+        </div>
+      )}
 
       {acct && !connected && (
         <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300" data-testid="mexc-account-error">
@@ -142,8 +126,8 @@ const LiveTradingControls = ({ auto, onSave }) => {
         </div>
 
         <div className="border border-[#1d2635] bg-[#0d121b] p-2">
-          <div className="widget-label">REALIZED PNL</div>
-          <div className="font-mono-t text-lg text-slate-400">?</div>
+          <div className="widget-label">MARGIN</div>
+          <div className="font-mono-t text-lg text-slate-100">Isolated</div>
         </div>
       </div>
 
@@ -305,45 +289,33 @@ const LiveTradingControls = ({ auto, onSave }) => {
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-1">
         <div>
-          <div className="widget-label mb-1">STOP LOSS</div>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={slPct}
-              onChange={(e) => setSlPct(e.target.value)}
-              className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
-            />
-            <span className="font-mono-t text-xs text-slate-400">%</span>
+          <div className="widget-label mb-1">STOP LOSS (HUNT · PNL)</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-rose-500/30 font-mono-t text-xs text-rose-300 rounded-sm" data-testid="hunt-sl-pnl">
+            {auto?.sl_pnl_usd != null ? `${auto.sl_pnl_usd >= 0 ? "+" : ""}${fmt(auto.sl_pnl_usd, 2)} USDT` : "waiting for Hunt levels"}
+            {auto?.sl_price != null ? `  @ ${fmt(auto.sl_price, 1)}` : ""}
           </div>
         </div>
 
         <div>
-          <div className="widget-label mb-1">TAKE PROFIT</div>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={tpPct}
-              onChange={(e) => setTpPct(e.target.value)}
-              className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm"
-            />
-            <span className="font-mono-t text-xs text-slate-400">%</span>
+          <div className="widget-label mb-1">TAKE PROFIT (HUNT · PNL)</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-emerald-500/30 font-mono-t text-xs text-emerald-300 rounded-sm" data-testid="hunt-tp-pnl">
+            {auto?.tp_pnl_usd != null ? `${auto.tp_pnl_usd >= 0 ? "+" : ""}${fmt(auto.tp_pnl_usd, 2)} USDT` : "waiting for Hunt levels"}
+            {auto?.tp_price != null ? `  @ ${fmt(auto.tp_price, 1)}` : ""}
           </div>
         </div>
 
         <div>
           <div className="widget-label mb-1">EXECUTION</div>
           <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">
-            AI CONTROLLED
+            HUNT C-FI · ISOLATED {fmt(leverage, 0)}x
           </div>
         </div>
       </div>
 
       <div className="mt-3 font-mono-t text-[10px] text-slate-500">
-        AI determines LONG / SHORT, entry and exit — sizing above does not change that. SL/TP fields
-        are unchanged and still come from Hunt C-FI, not from this panel. Normal Base is captured
-        from MEXC automatically (first use, or switching from Compounding) and only changes again
-        when you press Refresh. Requires MEXC_API_KEY/SECRET and MEXC_LIVE_TRADING_ENABLED=true set
-        on the backend to actually place orders.
+        Allocation % is margin, not risk. 20% at 10x on a 500 account ≈ 1000 USDT notional (capped).
+        SL/TP dollar PNL is computed from Hunt 1.5 / 2.5 ATR prices — you do not type them.
+        Needs MEXC_API_KEY, MEXC_API_SECRET and MEXC_LIVE_TRADING_ENABLED=true on the backend.
       </div>
     </div>
   );
@@ -352,7 +324,7 @@ const LiveTradingControls = ({ auto, onSave }) => {
 const Pnl = ({ v, pct }) => {
   if (v === null || v === undefined) return <span className="text-slate-500">—</span>;
   const c = v >= 0 ? "text-emerald-400" : "text-rose-400";
-  return <span className={`font-mono-t ${c}`}>{v >= 0 ? "+" : ""}${fmt(v, 2)} <span className="text-[10px] opacity-70">({v >= 0 ? "+" : ""}{fmt(pct, 2)}%)</span></span>;
+  return <span className={`font-mono-t ${c}`}>{v >= 0 ? "+" : ""}${fmt(v, 2)} {pct != null && <span className="text-[10px] opacity-70">({v >= 0 ? "+" : ""}{fmt(pct, 2)}%)</span>}</span>;
 };
 
 const TradeTable = ({ rows, onClose, testid }) => (
@@ -443,14 +415,6 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
   }, []);
 
   useEffect(() => {
-    // Self-scheduling poll — same fix as App.js's dashboard pollers and
-    // BacktestModal's own status polling. A naive setInterval(refresh,
-    // 3000) fires every 3s regardless of whether the previous refresh()
-    // (which itself fires 3 requests via Promise.all) has finished —
-    // if the backend is briefly slow, that overlaps triplets of requests
-    // on top of each other, exhausting the browser's connection pool and
-    // starving unrelated requests (like a running backtest's status
-    // polls) out entirely.
     let active = true;
     let timeoutId = null;
     const tick = async () => {
@@ -511,11 +475,10 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-emerald-400" />
           <span className="font-head font-bold text-slate-200 tracking-wide text-lg">{mode === "LIVE" ? "LIVE TRADING" : "PAPER TRADING"}</span>
-          <span className="widget-label">Persistent · Simulated · Auto SL/TP</span>
+          <span className="widget-label">Persistent · Isolated · Auto SL/TP</span>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Auto-trade toggle */}
           <button
             onClick={toggleAuto}
             data-testid="autotrade-toggle"
@@ -554,12 +517,16 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
         </div>
       </div>
 
-      {/* auto-trade status line */}
       {auto && (
         <div className="font-mono-t text-[10px] text-slate-500 mb-2 px-0.5" data-testid="autotrade-status">
           Engine: <span className={autoOn ? "text-cyan-400" : "text-slate-500"}>{autoOn ? "running" : "paused"}</span>
+          {" · "}mode <span className={mode === "LIVE" ? "text-amber-300" : "text-slate-300"}>{mode}</span>
+          {mode === "LIVE" && (
+            <>
+              {" · "}armed <span className={auto.live_armed ? "text-amber-300" : "text-rose-300"}>{auto.live_armed ? "yes" : "no"}</span>
+            </>
+          )}
           {" · "}TF <span className="text-slate-300">{auto.config?.timeframe}</span>
-          {" · "}size <span className="text-slate-300">${fmt(auto.config?.notional_usd, 0)}</span>
           {" · "}last: <span className="text-slate-300">{auto.state?.last_action || "—"}</span>
           {auto.state?.last_reason ? ` (${auto.state.last_reason})` : ""}
         </div>
@@ -572,7 +539,7 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
             try {
               const a = await updateAutotrade(payload);
               setAuto(a);
-              return a; // caller needs this to snap inputs back + show warnings
+              return a;
             } catch (e) {
               return null;
             }
@@ -580,7 +547,6 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
         />
       )}
 
-      {/* stats */}
       {stats && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3" data-testid="paper-stats">
           <div className="panel p-2"><div className="widget-label">Trades</div><div className="font-mono-t text-lg text-slate-100">{stats.total_trades}</div></div>
@@ -592,7 +558,6 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
         </div>
       )}
 
-      {/* manual new-trade form */}
       {showForm && (
         <div className="panel p-4 mb-3" data-testid="paper-new-form">
           <div className="flex flex-wrap items-end gap-3">
