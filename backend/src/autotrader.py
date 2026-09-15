@@ -1,40 +1,18 @@
-﻿"""Auto-trade: Hunt C-FI entry on each closed 5m + V1b lifecycle.
-Paper always works. LIVE mode places real MEXC orders ONLY if both:
+"""Auto-trade: Hunt C-FI entry on each closed 5m + V1b lifecycle.
+Paper always works. LIVE mode places real MEXC Isolated orders ONLY if both:
   1) CONFIG["mode"] == "LIVE" (the UI toggle), AND
   2) env var MEXC_LIVE_TRADING_ENABLED=true is set.
 The env var is a second, deliberate switch independent of the UI — a stray
 click or a UI bug can't send real orders on its own. Both must be true.
 One AUTO position at a time. New signal does not override.
-
-POSITION SIZING (NORMAL / COMPOUNDING):
-  compute_sizing() is the single authoritative formula. Both the UI preview
-  (via status()/GET /autotrade) and the live order path (_open_live_from_hunt)
-  call this same function — never two independent calculations.
-
-    NORMAL:      balance_used = STATE["normal_base"]        (fixed for the session — captured
-                                                               from MEXC, never user-typed; see
-                                                               capture triggers below)
-    COMPOUNDING: balance_used = fresh MEXC availableBalance   (fetched live, every call)
-
-    capital_margin    = balance_used * allocation_pct / 100
-    position_notional = capital_margin * leverage        <- leverage applied ONCE, here
-    final_notional     = min(position_notional, max_live_notional_usd)   <- safety cap
-    raw_quantity        = final_notional / (contract_size * price)
-    final_quantity      = raw_quantity rounded to MEXC volUnit, validated against minVol/maxVol
-
-  `leverage` is then also passed to MEXC's own order `leverage` field — that
-  tells the EXCHANGE how much margin to reserve for the notional above; it
-  does not multiply anything a second time on our side.
-
-  Trading logic (Hunt C-FI, weather gate, SL/TP, lifecycle/trailing) is
-  UNCHANGED by any of this — sizing only decides how big the order is.
+Live fills also open a local AUTO shadow so lifecycle / one-position work.
 """
 import json
 import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from .config import SYMBOL, ANALYSIS_LOOKBACK, TF_SECONDS
 from .market_data import data_access as dao
@@ -46,8 +24,6 @@ from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
 
 logger = logging.getLogger(__name__)
 
-# Safety-only buffer applied to the pre-submit margin check (NOT a strategy
-# parameter — do not expose this as something the trading logic can tune).
 SAFETY_BUFFER_PCT = 0.02
 
 AUDIT_LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "live_sizing_log.jsonl"
@@ -57,19 +33,16 @@ CONFIG = {
     "mode": "PAPER",
     "timeframe": "15m",
     "hunt_version": HUNT_VERSION_C_FI,
-    # notional_usd: kept ONLY for the existing PAPER manual-entry path
-    # (paper_trading.open_trade's notional_usd argument). It is NOT used for
-    # live sizing anymore — see sizing_mode / compute_sizing() below.
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
     "cooldown_bars_normal": 1,
     "cooldown_bars_after_failure": 3,
-    # --- live position sizing ---
-    "sizing_mode": "NORMAL",          # "NORMAL" | "COMPOUNDING"
-    "allocation_pct": 10.0,           # % of balance_used -> capital/margin
-    "leverage": 10.0,                 # existing preset buttons only: 10/20/50/100
-    "max_live_notional_usd": 1000.0,  # configurable safety cap (was a hardcoded 50)
+    "sizing_mode": "NORMAL",
+    "allocation_pct": 20.0,
+    "leverage": 10.0,
+    "max_live_notional_usd": 1000.0,
+    "margin_mode": "ISOLATED",
 }
 
 STATE = {
@@ -84,13 +57,13 @@ STATE = {
     "last_5m_ts": None,
     "last_lifecycle": None,
     "last_hunt": None,
-    # NORMAL mode's fixed sizing base — NOT a user setting. Captured from
-    # MEXC on: (a) lazy first use of NORMAL, (b) a COMPOUNDING->NORMAL
-    # transition, (c) the user pressing Refresh. Untouched by account P&L
-    # in between. See compute_sizing() / update().
     "normal_base": None,
     "normal_base_captured_at": None,
 }
+
+
+def _live_armed() -> bool:
+    return os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true"
 
 
 def _open_auto() -> Optional[Dict]:
@@ -100,19 +73,49 @@ def _open_auto() -> Optional[Dict]:
     return None
 
 
+def _hunt_pnl_preview(sizing: Dict) -> Dict:
+    hunt = STATE.get("last_hunt") or {}
+    out = {
+        "sl_price": hunt.get("stop"),
+        "tp_price": hunt.get("target"),
+        "entry_price": hunt.get("entry"),
+        "direction": hunt.get("direction"),
+        "sl_pnl_usd": None,
+        "tp_pnl_usd": None,
+    }
+    try:
+        entry = float(hunt["entry"]) if hunt.get("entry") is not None else None
+        sl = float(hunt["stop"]) if hunt.get("stop") is not None else None
+        tp = float(hunt["target"]) if hunt.get("target") is not None else None
+        side = hunt.get("direction")
+        vol = sizing.get("final_quantity")
+        cs = sizing.get("contract_size")
+        if entry and sl and tp and vol and cs and side:
+            sign = 1.0 if str(side).upper() == "LONG" else -1.0
+            out["sl_pnl_usd"] = round((sl - entry) * sign * float(vol) * float(cs), 2)
+            out["tp_pnl_usd"] = round((tp - entry) * sign * float(vol) * float(cs), 2)
+    except Exception:
+        pass
+    return out
+
+
 def status() -> Dict:
+    sizing = compute_sizing()
+    pnl = _hunt_pnl_preview(sizing)
     return {
         "config": CONFIG,
         "state": STATE,
         "open_auto_trade": _open_auto(),
-        "sizing_preview": compute_sizing(),
+        "sizing_preview": sizing,
+        "live_armed": _live_armed(),
+        "sl_price": pnl["sl_price"],
+        "tp_price": pnl["tp_price"],
+        "sl_pnl_usd": pnl["sl_pnl_usd"],
+        "tp_pnl_usd": pnl["tp_pnl_usd"],
     }
 
 
 def _fetch_available_balance() -> float:
-    """The one place USDT availableBalance is read from MEXC — used by
-    COMPOUNDING sizing, NORMAL base capture, and the margin safety check.
-    Raises on failure; callers decide how to handle it."""
     from .market_data import mexc_private
     assets = mexc_private.get_assets()
     usdt = next((a for a in assets if a.get("currency") == "USDT"), None)
@@ -122,9 +125,6 @@ def _fetch_available_balance() -> float:
 
 
 def _capture_normal_base() -> float:
-    """Fetches a fresh availableBalance and stores it as the NORMAL session's
-    fixed sizing base. Raises on failure (caller surfaces it via
-    compute_sizing()'s error field, or update()'s return)."""
     bal = _fetch_available_balance()
     STATE["normal_base"] = bal
     STATE["normal_base_captured_at"] = time.time()
@@ -150,7 +150,6 @@ def update(payload: Dict) -> Dict:
         if sm in ("NORMAL", "COMPOUNDING"):
             prev = CONFIG.get("sizing_mode")
             CONFIG["sizing_mode"] = sm
-            # Trigger B: COMPOUNDING -> NORMAL transition re-captures the base.
             if prev == "COMPOUNDING" and sm == "NORMAL":
                 try:
                     _capture_normal_base()
@@ -159,7 +158,6 @@ def update(payload: Dict) -> Dict:
         else:
             warnings.append(f"sizing_mode: '{payload['sizing_mode']}' is not NORMAL or COMPOUNDING — unchanged")
 
-    # Trigger C: manual Refresh.
     if payload.get("refresh_normal_base"):
         try:
             _capture_normal_base()
@@ -189,20 +187,10 @@ def update(payload: Dict) -> Dict:
     return result
 
 
-
-# ---------------------------------------------------------------------------
-# Position sizing — the one authoritative function.
-# ---------------------------------------------------------------------------
-
 def compute_sizing(override_price: Optional[float] = None) -> Dict:
-    """Returns the full sizing breakdown for the CURRENT CONFIG/STATE. Never
-    raises — on any failure (no price yet, MEXC unreachable, bad contract
-    data) it returns a dict with a non-None "error" and whatever fields it
-    managed to fill in. Callers (both the status()/preview path and the live
-    order path) must check result["error"] before trusting final_quantity."""
     cfg = CONFIG
     mode = cfg.get("sizing_mode", "NORMAL")
-    allocation_pct = float(cfg.get("allocation_pct", 10.0))
+    allocation_pct = float(cfg.get("allocation_pct", 20.0))
     leverage = float(cfg.get("leverage", 10.0))
     max_notional = float(cfg.get("max_live_notional_usd", 1000.0))
 
@@ -211,6 +199,7 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         "allocation_pct": allocation_pct,
         "leverage": leverage,
         "max_live_notional_usd": max_notional,
+        "margin_mode": "ISOLATED",
         "balance_used": None,
         "normal_base": STATE.get("normal_base"),
         "normal_base_captured_at": STATE.get("normal_base_captured_at"),
@@ -231,7 +220,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         "error": None,
     }
 
-    # --- balance_used: the one place sizing_mode actually branches ---
     if mode == "COMPOUNDING":
         try:
             balance_used = _fetch_available_balance()
@@ -239,7 +227,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
             result["error"] = f"could not fetch MEXC balance for COMPOUNDING sizing: {e}"
             return result
     else:
-        # Trigger A: lazy first-use capture — NORMAL active, no base yet.
         if STATE.get("normal_base") is None:
             try:
                 _capture_normal_base()
@@ -252,8 +239,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
 
     result["balance_used"] = balance_used
 
-
-    # --- leverage applied EXACTLY ONCE, right here ---
     capital_margin = balance_used * allocation_pct / 100.0
     position_notional = capital_margin * leverage
     result["calculated_capital"] = capital_margin
@@ -267,7 +252,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         result["error"] = "calculated notional is zero or negative"
         return result
 
-    # --- contract detail (public endpoint, no auth needed) ---
     try:
         from .market_data import mexc_market_data as mkt
         detail = mkt.rest_get(f"/api/v1/contract/detail?symbol={SYMBOL}")
@@ -299,8 +283,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
     result["min_leverage"] = min_leverage
     result["max_leverage"] = max_leverage
 
-    # state==0 is "enabled" per MEXC docs; missing field (None) is treated as
-    # unknown, not blocked — only an EXPLICIT non-zero state stops sizing.
     if contract_state not in (0, None):
         result["error"] = f"{SYMBOL} is not currently tradable on MEXC (state={contract_state})"
         return result
@@ -314,7 +296,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         )
         return result
 
-    # --- price ---
     price = override_price
     if price is None:
         try:
@@ -328,10 +309,8 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         result["error"] = "no price available for sizing"
         return result
 
-    # --- quantity ---
     raw_qty = final_notional / (contract_size * price)
     result["raw_quantity"] = raw_qty
-
     steps = round(raw_qty / vol_unit)
     final_qty = steps * vol_unit
     result["final_quantity"] = final_qty
@@ -348,10 +327,6 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
 
 
 def _snap_to_tick(value: float, price_unit: float, price_scale: int) -> float:
-    """Rounds a price to the nearest valid MEXC tick (a multiple of
-    price_unit) then to price_scale decimal places. MEXC rejects (error
-    2007/2015) any price/SL/TP that doesn't land exactly on a valid tick —
-    this is applied to every price field right before submission."""
     if price_unit and price_unit > 0:
         steps = round(value / price_unit)
         value = steps * price_unit
@@ -359,10 +334,6 @@ def _snap_to_tick(value: float, price_unit: float, price_scale: int) -> float:
 
 
 def _check_available_margin(required_margin: float) -> Dict:
-    """Fresh balance check run immediately before EVERY live submit, regardless
-    of sizing_mode — independent of compute_sizing()'s balance_used (the sizing
-    INPUT); this is the final go/no-go GATE. Includes the 2% safety buffer
-    (fees/slippage headroom, not a strategy parameter)."""
     try:
         avail = _fetch_available_balance()
     except Exception as e:
@@ -380,7 +351,6 @@ def _check_available_margin(required_margin: float) -> Dict:
 def _log_sizing_attempt(sizing: Dict, result: str, reason: Optional[str] = None,
                          order_result: Optional[Dict] = None,
                          submitted: Optional[Dict] = None) -> None:
-    """Audit trail for every live sizing attempt — computed, rejected, or submitted."""
     try:
         AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         entry = {
@@ -400,10 +370,6 @@ def _log_sizing_attempt(sizing: Dict, result: str, reason: Optional[str] = None,
             "raw_quantity": sizing.get("raw_quantity"),
             "final_quantity": sizing.get("final_quantity"),
             "required_margin": sizing.get("required_margin"),
-            "min_leverage": sizing.get("min_leverage"),
-            "max_leverage": sizing.get("max_leverage"),
-            "price_unit": sizing.get("price_unit"),
-            "price_scale": sizing.get("price_scale"),
             "submitted": submitted,
             "safety_buffer_pct": SAFETY_BUFFER_PCT,
             "available_balance": (sizing.get("_margin_check") or {}).get("available_balance"),
@@ -417,30 +383,26 @@ def _log_sizing_attempt(sizing: Dict, result: str, reason: Optional[str] = None,
         logger.exception("failed to write live sizing audit log")
 
 
-def _open_from_hunt(hunt: Dict, tf: str) -> None:
-    """PAPER path — unchanged, still uses CONFIG['notional_usd'] directly."""
+def _open_from_hunt(hunt: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
     side = hunt.get("direction")
     entry = float(hunt["entry"])
     sl = float(hunt["stop"])
     tp = float(hunt["target"])
     path = (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path")
     gate = hunt.get("gate") or ""
+    why0 = (hunt.get("why_state") or [""])[0] if isinstance(hunt.get("why_state"), list) else (hunt.get("why_state") or "")
     paper_trading.open_trade(
         symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
-        notional_usd=CONFIG["notional_usd"], timeframe=tf,
+        notional_usd=float((thesis or {}).get("notional") or CONFIG["notional_usd"]),
+        timeframe=tf,
         brain_state=side, consensus=0, confidence=0,
-        note=f"Hunt C-FI {gate} {path} {(hunt.get('event') or '')} {(hunt.get('why_state') or [''])[0]}",
+        note=f"Hunt C-FI {gate} {path} {(hunt.get('event') or '')} {why0}",
         source="AUTO",
+        thesis=thesis,
     )
 
 
 def _fresh_price() -> Optional[float]:
-    """Fetches ONE current ticker price directly from MEXC, right now — not
-    the polling loop's cached live_price, which can be seconds to tens of
-    seconds stale by the time an order actually reaches submit_order(). A
-    market order priced outside MEXC's slippage band gets rejected, so this
-    is the fix for that specific failure mode. Returns None on any failure —
-    caller falls back to the cached price rather than blocking entirely."""
     try:
         from .market_data import mexc_market_data as mkt
         ticker = mkt.rest_get(f"/api/v1/contract/ticker?symbol={SYMBOL}")
@@ -451,26 +413,70 @@ def _fresh_price() -> Optional[float]:
     return None
 
 
+def _mexc_has_open_position() -> bool:
+    try:
+        from .market_data import mexc_private
+        pos = mexc_private.get_open_positions(SYMBOL) or []
+        for p in pos:
+            hold = float(p.get("holdVol") or p.get("hold_vol") or 0)
+            if hold > 0:
+                return True
+        return False
+    except Exception:
+        logger.exception("could not read MEXC open positions")
+        return False
+
+
+def _live_meta(trade: Optional[Dict]) -> Optional[Dict]:
+    if not trade:
+        return None
+    raw = trade.get("thesis_json") or trade.get("thesis")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(data, dict) or data.get("venue") != "MEXC":
+        return None
+    return data
+
+
+def _close_live_if_needed(trade: Optional[Dict], exit_px: Optional[float]) -> None:
+    meta = _live_meta(trade)
+    if not meta:
+        return
+    try:
+        from .market_data import mexc_private
+        price = _fresh_price() or exit_px
+        mexc_private.close_position(
+            symbol=SYMBOL,
+            opened_side=trade.get("side") or meta.get("side"),
+            vol=float(meta.get("vol") or 0),
+            price=price,
+            open_type=mexc_private.OPEN_TYPE_ISOLATED,
+        )
+    except Exception:
+        logger.exception("live MEXC close failed — close it by hand on MEXC if still open")
+
+
 def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Dict:
-    """LIVE path. Sizing comes entirely from compute_sizing() — the same
-    function the UI preview uses — so what's shown and what fires can never
-    diverge. Raises on any failure; caller (evaluate()) logs STATE and returns."""
     side = hunt.get("direction")
     entry = float(hunt["entry"])
     sl = float(hunt["stop"])
     tp = float(hunt["target"])
 
-    # Fresh price fetched right here, immediately before sizing AND
-    # submission both use it — so there is no gap between "what we sized
-    # the order against" and "what we actually submit". Falls back to the
-    # loop's cached live_price only if this fetch itself fails.
     price = _fresh_price() or float(live_price or entry)
-
     sizing = compute_sizing(override_price=price)
 
     if sizing.get("error"):
         _log_sizing_attempt(sizing, result="REJECTED", reason=sizing["error"])
         raise RuntimeError(f"sizing failed: {sizing['error']}")
+
+    if _mexc_has_open_position():
+        reason = "MEXC already has an open position — one trade only"
+        _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        raise RuntimeError(reason)
 
     margin_check = _check_available_margin(sizing["required_margin"])
     sizing["_margin_check"] = margin_check
@@ -478,9 +484,6 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         _log_sizing_attempt(sizing, result="REJECTED", reason=margin_check["reason"])
         raise RuntimeError(margin_check["reason"])
 
-    # Every price field MEXC sees must land on a valid tick, or the order
-    # gets rejected (error 2007/2015) regardless of everything else above
-    # being correct.
     price_unit = sizing.get("price_unit") or 0
     price_scale = sizing.get("price_scale") if sizing.get("price_scale") is not None else 2
     submit_price = _snap_to_tick(price, price_unit, price_scale)
@@ -496,7 +499,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         vol=vol,
         price=submit_price,
         order_type=mexc_private.ORDER_TYPE_MARKET,
-        open_type=mexc_private.OPEN_TYPE_CROSS,
+        open_type=mexc_private.OPEN_TYPE_ISOLATED,
         leverage=int(sizing["leverage"]),
         stop_loss_price=submit_sl,
         take_profit_price=submit_tp,
@@ -505,8 +508,17 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
     _log_sizing_attempt(
         sizing, result="SUBMITTED", order_result=order_result,
         submitted={"price": submit_price, "stop_loss_price": submit_sl, "take_profit_price": submit_tp,
-                   "vol": vol, "leverage": int(sizing["leverage"])},
+                   "vol": vol, "leverage": int(sizing["leverage"]), "open_type": "ISOLATED"},
     )
+    _open_from_hunt(hunt, tf, thesis={
+        "venue": "MEXC",
+        "order_id": order_result.get("data"),
+        "vol": vol,
+        "notional": sizing.get("final_notional"),
+        "leverage": int(sizing["leverage"]),
+        "side": side,
+        "margin_mode": "ISOLATED",
+    })
     return order_result
 
 
@@ -529,10 +541,12 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = "DISABLED"
         return STATE
     try:
-        rec = manage_open_on_5m(STATE, _open_auto())
+        open_before = _open_auto()
+        rec = manage_open_on_5m(STATE, open_before)
         if rec:
             STATE["last_lifecycle"] = {k: rec.get(k) for k in ("action", "reason", "exit_kind", "sl")}
             if rec.get("action") == "EXIT":
+                _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
                 _record_close(rec.get("exit_kind") or "BRAIN_EXIT")
                 STATE["last_action"] = f"LIFECYCLE_EXIT {rec.get('exit_kind')}"
                 STATE["last_reason"] = rec.get("reason")
@@ -570,16 +584,20 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         "event": hunt.get("event"),
         "gate": hunt.get("gate"),
         "why": (hunt.get("why_state") or [None])[0],
+        "direction": hunt.get("direction"),
+        "entry": hunt.get("entry"),
+        "stop": hunt.get("stop"),
+        "target": hunt.get("target"),
     }
     STATE["last_state"] = hunt.get("action")
     STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
 
     live_mode = CONFIG.get("mode") == "LIVE"
-    live_armed = os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true"
+    live_armed = _live_armed()
 
     if live_mode and not live_armed:
         STATE["last_action"] = "LIVE MODE - NO ORDER"
-        STATE["last_reason"] = "MEXC_LIVE_TRADING_ENABLED is not set to true — set it deliberately when ready"
+        STATE["last_reason"] = "Add MEXC_LIVE_TRADING_ENABLED=true to backend/.env and restart. Hunt is watching; no real order."
         return STATE
 
     open_auto = _open_auto()
@@ -598,15 +616,14 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_reason"] = f"{flag} blocks {side}"
         return STATE
 
-    tf_seconds = 300
-    if _in_cooldown(tf_seconds):
+    if _in_cooldown(300):
         STATE["last_action"] = "COOLDOWN"
         return STATE
 
     if live_mode and live_armed:
         try:
             order_result = _open_live_from_hunt(hunt, tf, live_price)
-            STATE["last_action"] = f"LIVE OPEN {side} order {order_result.get('data')}"
+            STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')}"
         except Exception as e:
             STATE["last_action"] = "LIVE ORDER FAILED"
             STATE["last_reason"] = str(e)
