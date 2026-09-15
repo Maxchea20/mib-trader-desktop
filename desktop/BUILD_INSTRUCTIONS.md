@@ -169,25 +169,34 @@ reconnects on its own.
 
 ---
 
-## Setting your MEXC API keys for the desktop build
+## Setting your MEXC API keys for live auto-trade
 
-The packaged app doesn't read a `.env` file next to your code anymore
-(there is no "next to the code" once it's frozen into an executable).
-Instead:
+The packaged app does **not** read `backend/.env`. It reads a `.env` in
+the data folder.
 
-1. From the tray menu, click **"Show Data Folder"** — this opens the
-   folder where the app stores its database and looks for config.
+1. From the tray menu, click **"Show Data Folder"**.
 2. Create a plain text file there named `.env` (exactly that, with the
-   dot) containing:
+   leading dot) containing:
    ```
    MEXC_API_KEY=your_key_here
    MEXC_API_SECRET=your_secret_here
+   MEXC_LIVE_TRADING_ENABLED=true
    ```
-3. Use **"Restart Trading Engine"** from the tray menu to pick it up.
+3. The API key on MEXC must have **futures trading** permission, not
+   read-only.
+4. Use **"Restart Trading Engine"** from the tray menu.
+5. LIVE panel should show **REAL ACCOUNT · ARMED** and a real USDT
+   balance. Then set Allocation 20, Leverage 10x, Max notional as a cap.
 
-(A proper in-app Settings screen for this — instead of hand-editing a
-text file — is a reasonable next step once you're comfortable the basic
-packaging works. Say the word and I'll build that next.)
+If the panel says account not connected, the keys are in the wrong file
+or the engine was not restarted after editing `.env`.
+
+Dev (not packaged): put the same three lines in `backend/.env` and restart
+the Python backend.
+
+Settings (allocation / leverage / max notional / PAPER|LIVE) now persist
+in `autotrade_config.json` next to the market database, so a restart does
+not wipe them.
 
 ---
 
