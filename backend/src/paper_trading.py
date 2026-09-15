@@ -1,4 +1,8 @@
-"""Paper trading engine with persistent SQLite history."""
+"""Paper trading engine with persistent SQLite history.
+
+Live AUTO shadows (thesis.venue == MEXC) show MEXC's real fill / mark / uPnL
+instead of Hunt's planned 15m level. Hunt SL/TP prices stay Hunt's.
+"""
 import time
 import uuid
 import sqlite3
@@ -80,11 +84,136 @@ def _row_to_dict(r: sqlite3.Row) -> Dict:
 def _pnl(side: str, entry: float, exit_price: float, qty: float):
     if side == LONG:
         pnl = (exit_price - entry) * qty
-        pct = (exit_price - entry) / entry * 100.0
+        pct = (exit_price - entry) / entry * 100.0 if entry else 0.0
     else:
         pnl = (entry - exit_price) * qty
-        pct = (entry - exit_price) / entry * 100.0
+        pct = (entry - exit_price) / entry * 100.0 if entry else 0.0
     return round(pnl, 2), round(pct, 3)
+
+
+def _thesis(t: Dict) -> Dict:
+    raw = t.get("thesis_json") or t.get("thesis")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _mexc_open_snapshot(symbol: str) -> Optional[Dict]:
+    try:
+        from .market_data import mexc_private
+        rows = mexc_private.get_open_positions(symbol) or []
+    except Exception:
+        return None
+    if not rows:
+        return None
+    p = rows[0]
+    def f(*keys):
+        for k in keys:
+            if p.get(k) is not None and p.get(k) != "":
+                try:
+                    return float(p.get(k))
+                except (TypeError, ValueError):
+                    continue
+        return None
+    avg = f("holdAvgPrice", "openAvgPrice", "avgEntryPrice", "openPrice")
+    mark = f("fairPrice", "markPrice", "newOpenAvgPrice")
+    upnl = f("unrealised", "unrealisedPnl", "unrealizedPnl", "unrealisedProfit")
+    vol = f("holdVol", "hold_vol", "volume")
+    margin = f("im", "oim", "positionMargin", "holdMargin")
+    if not avg:
+        return None
+    return {
+        "entry": avg,
+        "mark": mark,
+        "upnl": upnl,
+        "vol": vol,
+        "margin": margin,
+        "raw": p,
+    }
+
+
+def update_open_fill(tid: str, entry_price: float, qty: Optional[float] = None,
+                     notional_usd: Optional[float] = None) -> Optional[Dict]:
+    t = get_trade(tid)
+    if not t or t["status"] != "OPEN":
+        return t
+    fields = ["entry_price=?"]
+    args = [float(entry_price)]
+    if qty is not None:
+        fields.append("qty=?")
+        args.append(float(qty))
+    if notional_usd is not None:
+        fields.append("notional_usd=?")
+        args.append(float(notional_usd))
+    args.append(tid)
+    with _lock:
+        conn = _connect()
+        conn.execute(
+            f"UPDATE paper_trades SET {', '.join(fields)} WHERE id=? AND status='OPEN'",
+            args,
+        )
+        conn.commit()
+    return get_trade(tid)
+
+
+def _overlay_mexc_live(t: Dict) -> Dict:
+    """Replace Hunt planned entry / local mark PnL with MEXC's live ticket."""
+    if t.get("status") != "OPEN" or t.get("source") != "AUTO":
+        return t
+    th = _thesis(t)
+    if th.get("venue") and th.get("venue") != "MEXC":
+        return t
+    snap = _mexc_open_snapshot(t.get("symbol") or "BTC_USDT")
+    if not snap:
+        return t
+    avg = snap["entry"]
+    mark = snap["mark"]
+    upnl = snap["upnl"]
+    vol = snap["vol"]
+    margin = snap["margin"]
+    t["entry_price"] = avg
+    if mark:
+        t["mark_price"] = round(mark, 1)
+    if upnl is not None:
+        t["unrealized_pnl"] = round(upnl, 4)
+        if margin and margin > 0:
+            t["unrealized_pnl_pct"] = round(upnl / margin * 100.0, 2)
+        elif avg and mark and t.get("qty"):
+            _, pct = _pnl(t["side"], avg, mark, t["qty"])
+            t["unrealized_pnl_pct"] = pct
+    elif mark:
+        upnl2, pct = _pnl(t["side"], avg, mark, t.get("qty") or 0)
+        t["unrealized_pnl"] = upnl2
+        t["unrealized_pnl_pct"] = pct
+    try:
+        stored = float(t.get("entry_price") or 0)
+        if abs(stored - avg) > 0.05:
+            qty = t.get("qty")
+            notion = t.get("notional_usd")
+            cs = None
+            try:
+                from .config import SYMBOL as _sym  # noqa: F401
+                from .market_data import mexc_market_data as mkt
+                detail = mkt.rest_get(f"/api/v1/contract/detail?symbol={t.get('symbol') or 'BTC_USDT'}")
+                d = (detail or {}).get("data") or {}
+                if isinstance(d, list):
+                    d = d[0] if d else {}
+                cs = float(d.get("contractSize") or 0) or None
+            except Exception:
+                cs = None
+            if vol and cs:
+                qty = vol * cs
+                notion = vol * cs * avg
+            update_open_fill(t["id"], avg, qty=qty, notional_usd=notion)
+            t["qty"] = qty if qty is not None else t.get("qty")
+            t["notional_usd"] = notion if notion is not None else t.get("notional_usd")
+    except Exception:
+        pass
+    return t
 
 
 def open_trade(symbol: str, side: str, entry_price: float, sl_price: Optional[float],
@@ -160,7 +289,6 @@ def _classify_thesis_result(exit_reason: str, pnl: float, had_thesis: bool) -> s
 
 
 def update_sl(tid: str, sl_price: float) -> Optional[Dict]:
-    """Tighten SL on an OPEN trade. Used by lifecycle TRAIL."""
     t = get_trade(tid)
     if not t or t["status"] != "OPEN":
         return t
@@ -239,6 +367,7 @@ def list_trades(status: Optional[str] = None, live_price: Optional[float] = None
             t["unrealized_pnl"] = upnl
             t["unrealized_pnl_pct"] = upct
             t["mark_price"] = round(float(live_price), 2)
+        t = _overlay_mexc_live(t)
         out.append(t)
     return out
 
