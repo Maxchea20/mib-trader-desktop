@@ -7,6 +7,12 @@ click or a UI bug can't send real orders on its own. Both must be true.
 One AUTO position at a time. New signal does not override.
 Live fills also open a local AUTO shadow so lifecycle / one-position work.
 If LIVE is on but the env flag is off, Hunt still papers the fill.
+
+Sizing (matches the 90d compounded tape):
+  risk_usd = wallet * risk_pct / 100     (default 2%)
+  quantity = risk_usd / (|entry - Hunt SL| * contract_size)
+NORMAL freezes wallet at Refresh. COMPOUNDING uses live Available every fire.
+Leverage is Isolated margin only. It does not change dollar risk.
 """
 import json
 import logging
@@ -30,7 +36,7 @@ MIN_LIVE_LEVERAGE = 10.0
 PERSIST_KEYS = (
     "enabled", "mode", "timeframe", "notional_usd", "sl_atr_mult", "tp_atr_mult",
     "cooldown_bars_normal", "cooldown_bars_after_failure", "sizing_mode",
-    "allocation_pct", "leverage", "max_live_notional_usd", "margin_mode",
+    "allocation_pct", "risk_pct", "leverage", "max_live_notional_usd", "margin_mode",
 )
 
 AUDIT_LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "live_sizing_log.jsonl"
@@ -47,6 +53,7 @@ CONFIG = {
     "cooldown_bars_after_failure": 3,
     "sizing_mode": "NORMAL",
     "allocation_pct": 20.0,
+    "risk_pct": 2.0,
     "leverage": 10.0,
     "max_live_notional_usd": 1000.0,
     "margin_mode": "ISOLATED",
@@ -91,6 +98,8 @@ def _load_persisted() -> None:
         CONFIG["margin_mode"] = "ISOLATED"
         if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:
             CONFIG["leverage"] = MIN_LIVE_LEVERAGE
+        if CONFIG.get("risk_pct") is None:
+            CONFIG["risk_pct"] = 2.0
     except Exception:
         logger.exception("could not load persisted autotrade config")
 
@@ -117,6 +126,20 @@ def _open_auto() -> Optional[Dict]:
         if t.get("source") == "AUTO":
             return t
     return None
+
+
+def _hunt_levels(entry: Optional[float] = None, stop: Optional[float] = None):
+    hunt = STATE.get("last_hunt") or {}
+    if entry is None:
+        entry = hunt.get("entry")
+    if stop is None:
+        stop = hunt.get("stop")
+    try:
+        entry_f = float(entry) if entry is not None else None
+        stop_f = float(stop) if stop is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    return entry_f, stop_f
 
 
 def _hunt_pnl_preview(sizing: Dict) -> Dict:
@@ -212,7 +235,7 @@ def update(payload: Dict) -> Dict:
         except Exception as e:
             warnings.append(f"refresh_normal_base: failed to fetch balance from MEXC ({e}) — normal_base unchanged")
 
-    for k in ("notional_usd", "sl_atr_mult", "tp_atr_mult", "allocation_pct", "leverage", "max_live_notional_usd"):
+    for k in ("notional_usd", "sl_atr_mult", "tp_atr_mult", "allocation_pct", "risk_pct", "leverage", "max_live_notional_usd"):
         if k in payload and payload[k] is not None:
             try:
                 v = float(payload[k])
@@ -221,6 +244,9 @@ def update(payload: Dict) -> Dict:
                 continue
             if k == "allocation_pct" and not (0 < v <= 100):
                 warnings.append(f"allocation_pct: must be between 0 and 100, got {v} — kept at {CONFIG['allocation_pct']}")
+                continue
+            if k == "risk_pct" and not (0 < v <= 20):
+                warnings.append(f"risk_pct: must be between 0 and 20, got {v} — kept at {CONFIG.get('risk_pct')}")
                 continue
             if k == "leverage" and v < MIN_LIVE_LEVERAGE:
                 warnings.append(f"leverage: must be at least {MIN_LIVE_LEVERAGE:g}x, got {v} — kept at {CONFIG['leverage']}")
@@ -237,22 +263,30 @@ def update(payload: Dict) -> Dict:
     return result
 
 
-def compute_sizing(override_price: Optional[float] = None) -> Dict:
+def compute_sizing(
+    override_price: Optional[float] = None,
+    entry: Optional[float] = None,
+    stop: Optional[float] = None,
+) -> Dict:
     cfg = CONFIG
     mode = cfg.get("sizing_mode", "NORMAL")
     allocation_pct = float(cfg.get("allocation_pct", 20.0))
+    risk_pct = float(cfg.get("risk_pct", 2.0))
     leverage = float(cfg.get("leverage", 10.0))
     max_notional = float(cfg.get("max_live_notional_usd", 1000.0))
 
     result: Dict = {
         "sizing_mode": mode,
         "allocation_pct": allocation_pct,
+        "risk_pct": risk_pct,
         "leverage": leverage,
         "max_live_notional_usd": max_notional,
         "margin_mode": "ISOLATED",
         "balance_used": None,
         "normal_base": STATE.get("normal_base"),
         "normal_base_captured_at": STATE.get("normal_base_captured_at"),
+        "risk_usd": None,
+        "stop_distance": None,
         "calculated_capital": None,
         "calculated_notional": None,
         "final_notional": None,
@@ -288,19 +322,9 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         balance_used = STATE["normal_base"]
 
     result["balance_used"] = balance_used
-
-    capital_margin = balance_used * allocation_pct / 100.0
-    position_notional = capital_margin * leverage
-    result["calculated_capital"] = capital_margin
-    result["calculated_notional"] = position_notional
-
-    final_notional = min(position_notional, max_notional)
-    result["final_notional"] = final_notional
-    result["capped"] = final_notional < position_notional
-
-    if final_notional <= 0:
-        result["error"] = "calculated notional is zero or negative"
-        return result
+    risk_usd = balance_used * risk_pct / 100.0
+    result["risk_usd"] = risk_usd
+    result["calculated_capital"] = risk_usd
 
     try:
         from .market_data import mexc_market_data as mkt
@@ -359,12 +383,39 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         result["error"] = "no price available for sizing"
         return result
 
-    raw_qty = final_notional / (contract_size * price)
+    entry_f, stop_f = _hunt_levels(entry, stop)
+    if not entry_f or not stop_f:
+        result["error"] = "waiting for Hunt stop to size 2% risk"
+        return result
+    stop_distance = abs(entry_f - stop_f)
+    result["stop_distance"] = stop_distance
+    if stop_distance <= 0:
+        result["error"] = "Hunt stop distance is zero — cannot size risk"
+        return result
+
+    # qty such that (qty * contract_size * stop_distance) == risk_usd
+    raw_qty = risk_usd / (stop_distance * contract_size)
     result["raw_quantity"] = raw_qty
     steps = round(raw_qty / vol_unit)
     final_qty = steps * vol_unit
     result["final_quantity"] = final_qty
 
+    position_notional = final_qty * contract_size * price
+    result["calculated_notional"] = position_notional
+
+    if position_notional > max_notional and price > 0 and contract_size > 0:
+        cap_qty = max_notional / (contract_size * price)
+        cap_steps = max(vol_unit, (cap_qty // vol_unit) * vol_unit)
+        final_qty = cap_steps
+        result["final_quantity"] = final_qty
+        result["capped"] = True
+        position_notional = final_qty * contract_size * price
+
+    result["final_notional"] = position_notional
+
+    if final_qty <= 0:
+        result["error"] = "calculated quantity is zero — risk dollars too small for this stop"
+        return result
     if final_qty < min_vol:
         result["error"] = f"calculated quantity {final_qty} is below MEXC minVol {min_vol} for {SYMBOL}"
         return result
@@ -372,7 +423,7 @@ def compute_sizing(override_price: Optional[float] = None) -> Dict:
         result["error"] = f"calculated quantity {final_qty} exceeds MEXC maxVol {max_vol} for {SYMBOL}"
         return result
 
-    result["required_margin"] = final_notional / leverage if leverage else final_notional
+    result["required_margin"] = position_notional / leverage if leverage else position_notional
     return result
 
 
@@ -408,6 +459,9 @@ def _log_sizing_attempt(sizing: Dict, result: str, reason: Optional[str] = None,
             "sizing_mode": sizing.get("sizing_mode"),
             "balance_used": sizing.get("balance_used"),
             "normal_base": sizing.get("normal_base"),
+            "risk_pct": sizing.get("risk_pct"),
+            "risk_usd": sizing.get("risk_usd"),
+            "stop_distance": sizing.get("stop_distance"),
             "allocation_pct": sizing.get("allocation_pct"),
             "calculated_capital": sizing.get("calculated_capital"),
             "leverage": sizing.get("leverage"),
@@ -519,7 +573,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
     tp = float(hunt["target"])
 
     price = _fresh_price() or float(live_price or entry)
-    sizing = compute_sizing(override_price=price)
+    sizing = compute_sizing(override_price=price, entry=entry, stop=sl)
 
     if sizing.get("error"):
         _log_sizing_attempt(sizing, result="REJECTED", reason=sizing["error"])
@@ -588,7 +642,8 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
     _log_sizing_attempt(
         sizing, result="SUBMITTED", order_result=order_result,
         submitted={"price": submit_price, "stop_loss_price": submit_sl, "take_profit_price": submit_tp,
-                   "vol": vol, "leverage": lev, "open_type": "ISOLATED"},
+                   "vol": vol, "leverage": lev, "open_type": "ISOLATED",
+                   "risk_pct": sizing.get("risk_pct"), "risk_usd": sizing.get("risk_usd")},
     )
     _open_from_hunt(hunt, tf, thesis={
         "venue": "MEXC",
@@ -598,6 +653,8 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         "leverage": lev,
         "side": side,
         "margin_mode": "ISOLATED",
+        "risk_pct": sizing.get("risk_pct"),
+        "risk_usd": sizing.get("risk_usd"),
     })
     return order_result
 
