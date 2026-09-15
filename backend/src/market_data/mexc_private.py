@@ -3,25 +3,10 @@
 Mirrors the DNS-forced HTTPS pattern in mexc_market_data.py (normal DNS to
 contract.mexc.com times out on this machine).
 
-Auth (per https://mexcdevelop.github.io/apidocs/contract_v1_en/#authentication-method):
-  Headers: ApiKey, Request-Time (ms), Signature, Content-Type: application/json
-  signStr = accessKey + requestTimeMs + paramString
-    - GET/DELETE: paramString = sorted "key=value&key2=value2" (dict order, url-encoded values)
-    - POST:       paramString = the exact JSON string sent as the body
-  Signature = HMAC-SHA256(secretKey, signStr) as lowercase hex (NOT base64).
-
-IMPORTANT — read before relying on this:
-  MEXC's own contract-v1 docs list the order submit/cancel endpoints under a
-  section titled "(Under maintenance)". In practice this usually means order
-  placement needs futures-trading permission explicitly enabled on the API
-  key (separate from read permission), not that the endpoint is dead. The
-  first call you make should be `get_assets()` (read-only, always safe) to
-  confirm the signature is correct, THEN a tiny `submit_order` to confirm
-  trading permission is actually granted before trusting anything bigger.
-  Error codes 701-704 in the response mean a permission problem, not a bug
-  in this signing code.
+Read calls cache briefly and fall back to the last good payload for ~30s so a
+single timeout does not flip the Live panel to disconnected.
+Writes (submit/cancel/leverage) are never served from cache.
 """
-
 import hashlib
 import hmac
 import http.client
@@ -35,7 +20,16 @@ import dns.resolver
 
 MEXC_HOST = "contract.mexc.com"
 DNS_SERVERS = ["8.8.8.8", "8.8.4.4"]
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 12
+DNS_TTL = 120.0
+ASSETS_TTL = 4.0
+ASSETS_STALE_TTL = 30.0
+POSITIONS_TTL = 3.0
+POSITIONS_STALE_TTL = 20.0
+
+_IP_CACHE = {"ips": [], "at": 0.0}
+_ASSETS_CACHE = {"data": None, "at": 0.0}
+_POS_CACHE = {}
 
 
 class MexcPrivateError(Exception):
@@ -48,9 +42,25 @@ class MexcPermissionError(MexcPrivateError):
 
 
 def _resolve_ips() -> List[str]:
+    now = time.time()
+    if _IP_CACHE["ips"] and (now - _IP_CACHE["at"]) < DNS_TTL:
+        return list(_IP_CACHE["ips"])
     resolver = dns.resolver.Resolver()
     resolver.nameservers = DNS_SERVERS
-    return [str(a) for a in resolver.resolve(MEXC_HOST, "A")]
+    resolver.lifetime = 3.0
+    try:
+        ips = [str(a) for a in resolver.resolve(MEXC_HOST, "A")]
+        if ips:
+            _IP_CACHE["ips"] = ips
+            _IP_CACHE["at"] = now
+            return ips
+    except Exception:
+        if _IP_CACHE["ips"]:
+            return list(_IP_CACHE["ips"])
+        raise
+    if _IP_CACHE["ips"]:
+        return list(_IP_CACHE["ips"])
+    raise MexcPrivateError("no IPs for contract.mexc.com")
 
 
 class _MexcHTTPSConnection(http.client.HTTPSConnection):
@@ -65,7 +75,6 @@ class _MexcHTTPSConnection(http.client.HTTPSConnection):
 
 
 def _sorted_param_string(params: Dict) -> str:
-    """GET/DELETE signing string: dict-order key=value&... with url-encoded values."""
     from urllib.parse import quote
     if not params:
         return ""
@@ -100,7 +109,6 @@ def keys_present() -> bool:
 
 
 def _json_num(v):
-    """Avoid 10.0 / scientific notation in the signed JSON body (MEXC 2015)."""
     if v is None:
         return None
     if isinstance(v, bool):
@@ -115,7 +123,6 @@ def _json_num(v):
 
 
 def _request(method: str, path: str, params: Optional[Dict] = None, body: Optional[Dict] = None) -> dict:
-    """method: GET, POST, or DELETE. params -> query string (GET/DELETE). body -> JSON (POST)."""
     api_key, secret_key = _get_keys()
     req_time = str(int(time.time() * 1000))
 
@@ -125,7 +132,7 @@ def _request(method: str, path: str, params: Optional[Dict] = None, body: Option
         query = f"?{param_str}" if param_str else ""
         signature = _sign(secret_key, api_key, req_time, param_str)
         body_bytes = None
-    else:  # POST
+    else:
         clean = {}
         for k, v in (body or {}).items():
             if v is None:
@@ -179,11 +186,20 @@ def _request(method: str, path: str, params: Optional[Dict] = None, body: Option
     raise MexcPrivateError(f"Unable to reach MEXC private API: {last_error}")
 
 
-# ---- Account / positions (read-only — safe to call anytime) ----
-
 def get_assets() -> List[Dict]:
-    """GET /api/v1/private/account/assets — all currencies, balances, equity."""
-    return _request("GET", "/account/assets").get("data", [])
+    """GET /api/v1/private/account/assets — cached; stale OK for ~30s."""
+    now = time.time()
+    if _ASSETS_CACHE["data"] is not None and (now - _ASSETS_CACHE["at"]) < ASSETS_TTL:
+        return _ASSETS_CACHE["data"]
+    try:
+        data = _request("GET", "/account/assets").get("data", []) or []
+        _ASSETS_CACHE["data"] = data
+        _ASSETS_CACHE["at"] = now
+        return data
+    except Exception:
+        if _ASSETS_CACHE["data"] is not None and (now - _ASSETS_CACHE["at"]) < ASSETS_STALE_TTL:
+            return _ASSETS_CACHE["data"]
+        raise
 
 
 def get_asset(currency: str = "USDT") -> Dict:
@@ -191,10 +207,20 @@ def get_asset(currency: str = "USDT") -> Dict:
 
 
 def get_open_positions(symbol: Optional[str] = None) -> List[Dict]:
-    """GET /api/v1/private/position/open_positions"""
+    key = symbol or "*"
+    now = time.time()
+    hit = _POS_CACHE.get(key)
+    if hit and (now - hit["at"]) < POSITIONS_TTL:
+        return hit["data"]
     params = {"symbol": symbol} if symbol else {}
-    data = _request("GET", "/position/open_positions", params=params).get("data", [])
-    return data or []
+    try:
+        data = _request("GET", "/position/open_positions", params=params).get("data", []) or []
+        _POS_CACHE[key] = {"data": data, "at": now}
+        return data
+    except Exception:
+        if hit and (now - hit["at"]) < POSITIONS_STALE_TTL:
+            return hit["data"]
+        raise
 
 
 def get_open_orders(symbol: str, page_num: int = 1, page_size: int = 20) -> List[Dict]:
@@ -203,13 +229,6 @@ def get_open_orders(symbol: str, page_num: int = 1, page_size: int = 20) -> List
         params={"page_num": page_num, "page_size": page_size},
     ).get("data", [])
 
-
-# ---- Order submit / cancel (real money — treat every call as live) ----
-
-# side: 1 open long, 2 close short, 3 open short, 4 close long
-# openType: 1 isolated, 2 cross
-# orderType: 1 limit, 5 market
-# positionType: 1 long, 2 short
 
 SIDE_OPEN_LONG = 1
 SIDE_CLOSE_SHORT = 2
@@ -232,7 +251,6 @@ def change_leverage(
     position_type: int,
     open_type: int = OPEN_TYPE_ISOLATED,
 ) -> Dict:
-    """POST /api/v1/private/position/change_leverage — required for Isolated before first fill."""
     return _request("POST", "/position/change_leverage", body={
         "symbol": symbol,
         "leverage": int(leverage),
@@ -253,11 +271,6 @@ def submit_order(
     take_profit_price: Optional[float] = None,
     external_oid: Optional[str] = None,
 ) -> Dict:
-    """POST /api/v1/private/order/submit — places a real order. vol is in CONTRACTS
-    (not USD notional) — check contractSize on /api/v1/contract/detail before sizing.
-    Market orders (order_type=5) still require a `price` field for slippage protection
-    on MEXC's side; pass the current mark price.
-    Isolated is the default (openType=1). Leverage is required on Isolated."""
     body = {
         "symbol": symbol,
         "vol": vol,
@@ -285,7 +298,6 @@ def close_position(
     price: Optional[float] = None,
     open_type: int = OPEN_TYPE_ISOLATED,
 ) -> Dict:
-    """Market-close an open Isolated position. opened_side is LONG or SHORT."""
     close_side = SIDE_CLOSE_LONG if str(opened_side).upper() == "LONG" else SIDE_CLOSE_SHORT
     return submit_order(
         symbol=symbol,
@@ -298,7 +310,6 @@ def close_position(
 
 
 def cancel_orders(order_ids: List[str]) -> Dict:
-    """POST /api/v1/private/order/cancel — body is a JSON array of order id strings."""
     api_key, secret_key = _get_keys()
     req_time = str(int(time.time() * 1000))
     body_json = json.dumps(order_ids, separators=(",", ":"))
