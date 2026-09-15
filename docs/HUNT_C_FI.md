@@ -10,18 +10,23 @@ Live book on main. Paper or Isolated MEXC. One position.
 Fill: 5m #3 close through prior 15m high/low, or V2 tap on 5m #1/#2.
 Level fill. 4h weather must allow. SL 1.5 / TP 2.5. One position.
 
-## Live sizing (matches the 90d compounded tape)
+## Live sizing
 
-Risk is **2% of wallet at the Hunt stop**, not 20% margin × leverage.
+**NORMAL TRADE** — old notional size, frozen base.
 
-- NORMAL — 2% of the locked Available (Refresh to recapture).
-- COMPOUNDING — 2% of live Available every new fire.
-- Quantity = risk $ ÷ (distance to Hunt 1.5 ATR stop × contract size).
-- Leverage 10x Isolated is margin only. It does not change dollar risk.
-- Max notional is a safety cap.
-- You do not type SL / TP.
+- Wallet locked at Refresh (Available).
+- Size = Available × Allocation% × Leverage.
+- Default: 20% × 10x. On $14.86 that is about $29.72 notional.
+- Dollar risk at SL depends on how far Hunt’s 1.5 ATR stop is.
 
-On ~$15 Available, 2% risk is about **$0.30** if SL hits. Not $10. $10 was 2% of the $500 backtest book.
+**COMPOUNDING** — 2% of live wallet as stop-risk (the 90d tape rule).
+
+- Every new fire uses current Available.
+- Quantity = (Available × 2%) ÷ (distance to Hunt stop × contract size).
+- Leverage is Isolated margin only. It does not change dollar risk.
+- On ~$15 Available, SL risk is about $0.30, not $10.
+
+Max notional is a safety cap on both. You do not type SL / TP.
 
 ## 90d tape (flat 10 USD risk on 500)
 
