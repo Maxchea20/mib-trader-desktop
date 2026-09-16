@@ -103,7 +103,6 @@ def _is_mexc_live(t: Dict) -> bool:
     th = _thesis(t)
     if th.get("venue") == "MEXC":
         return True
-    # live Isolated tickets are small; old paper was ~1000 notional
     try:
         return float(t.get("notional_usd") or 0) < 200
     except (TypeError, ValueError):
@@ -290,7 +289,13 @@ def _overlay_mexc_closed(t: Dict, rows: List[Dict]) -> Dict:
         return t
     entry = _f(p, "openAvgPrice", "newOpenAvgPrice", "holdAvgPrice")
     exit_px = _f(p, "closeAvgPrice", "newCloseAvgPrice")
-    pnl = _f(p, "realised", "closeProfitLoss")
+    gross = _f(p, "closeProfitLoss")
+    fee = _f(p, "fee", "totalFee")
+    if fee is not None:
+        fee = abs(fee)
+    pnl = _f(p, "realised")
+    if pnl is None and gross is not None:
+        pnl = gross - (fee or 0)
     ratio = _f(p, "profitRatio")
     pct = (ratio * 100.0) if ratio is not None else None
     if pct is None and entry and exit_px:
@@ -299,15 +304,16 @@ def _overlay_mexc_closed(t: Dict, rows: List[Dict]) -> Dict:
         t["entry_price"] = entry
     if exit_px:
         t["exit_price"] = exit_px
+    if gross is not None:
+        t["gross_pnl"] = round(gross, 4)
+    if fee is not None:
+        t["fee"] = round(fee, 4)
     if pnl is not None:
         t["pnl"] = round(pnl, 4)
     if pct is not None:
         t["pnl_pct"] = round(pct, 3)
     try:
-        stored_pnl = t.get("pnl")
         apply_mexc_close(t["id"], entry, exit_px, pnl, pct)
-        if stored_pnl is not None:
-            pass
     except Exception:
         pass
     return t
