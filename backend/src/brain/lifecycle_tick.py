@@ -4,6 +4,9 @@ from typing import Any, Dict, Optional
 
 from .lifecycle import position_from_fire, reevaluate, Position
 
+# MEXC swap taker ~0.02% each side. Round-trip to get flat.
+MEXC_TAKER = 0.0002
+
 
 def position_from_open_trade(trade: Dict[str, Any], *, equity: float = 1000.0, risk_pct: float = 0.02) -> Position:
     fire = {
@@ -49,10 +52,46 @@ def tick_5m(
     )
 
 
+def _round_trip_fee(trade: Dict[str, Any]) -> float:
+    entry = float(trade.get("entry_price") or 0)
+    qty = float(trade.get("qty") or 0)
+    notion = float(trade.get("notional_usd") or 0)
+    if notion <= 0 and entry and qty:
+        notion = entry * qty
+    return abs(notion) * MEXC_TAKER * 2.0
+
+
+def _gross_at(trade: Dict[str, Any], px: float) -> float:
+    upnl = trade.get("unrealized_pnl")
+    if upnl is not None:
+        try:
+            return float(upnl)
+        except (TypeError, ValueError):
+            pass
+    entry = float(trade.get("entry_price") or 0)
+    qty = float(trade.get("qty") or 0)
+    if not entry or not qty:
+        return 0.0
+    if str(trade.get("side")).upper() == "LONG":
+        return (float(px) - entry) * qty
+    return (entry - float(px)) * qty
+
+
+def _soft_structure_exit(rec: Dict[str, Any]) -> bool:
+    if rec.get("action") != "EXIT":
+        return False
+    if rec.get("reason") == "hard SL":
+        return False
+    kind = rec.get("exit_kind") or ""
+    return kind in ("STRUCTURAL_INVALIDATION", "THESIS_FAILURE")
+
+
 def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """If an AUTO trade is open and a new 5m just closed, apply V1b.
 
     EXIT closes the paper trade. TRAIL tightens sl_price.
+    Soft structure-cancel only cuts when gross profit covers round-trip fee.
+    Hard SL always cuts.
     Safe to call every few seconds. Never raises.
     """
     if not open_trade:
@@ -100,6 +139,19 @@ def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]
             level_lost=level_lost,
             now_ts=bar.get("ts"),
         )
+        if _soft_structure_exit(rec):
+            px = rec.get("exit_px") or float(bar["close"])
+            gross = _gross_at(open_trade, px)
+            fee = _round_trip_fee(open_trade)
+            if gross <= fee:
+                rec["action"] = "HOLD"
+                rec["reason"] = (
+                    f"SI parked — profit {gross:.4f} USDT does not cover fee {fee:.4f}"
+                )
+                rec["parked"] = True
+                rec["gross_pnl"] = round(gross, 4)
+                rec["fee_est"] = round(fee, 4)
+                return rec
         if rec.get("action") == EXIT:
             px = rec.get("exit_px") or float(bar["close"])
             paper_trading.close_trade(open_trade["id"], px, rec.get("exit_kind") or "BRAIN_EXIT")
