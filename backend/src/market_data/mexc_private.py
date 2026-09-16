@@ -26,10 +26,12 @@ ASSETS_TTL = 4.0
 ASSETS_STALE_TTL = 30.0
 POSITIONS_TTL = 3.0
 POSITIONS_STALE_TTL = 20.0
+HISTORY_TTL = 8.0
 
 _IP_CACHE = {"ips": [], "at": 0.0}
 _ASSETS_CACHE = {"data": None, "at": 0.0}
 _POS_CACHE = {}
+_HIST_CACHE = {"data": None, "at": 0.0, "key": None}
 
 
 class MexcPrivateError(Exception):
@@ -187,7 +189,6 @@ def _request(method: str, path: str, params: Optional[Dict] = None, body: Option
 
 
 def get_assets() -> List[Dict]:
-    """GET /api/v1/private/account/assets — cached; stale OK for ~30s."""
     now = time.time()
     if _ASSETS_CACHE["data"] is not None and (now - _ASSETS_CACHE["at"]) < ASSETS_TTL:
         return _ASSETS_CACHE["data"]
@@ -221,6 +222,26 @@ def get_open_positions(symbol: Optional[str] = None) -> List[Dict]:
         if hit and (now - hit["at"]) < POSITIONS_STALE_TTL:
             return hit["data"]
         raise
+
+
+def get_history_positions(symbol: Optional[str] = None, page_num: int = 1, page_size: int = 50) -> List[Dict]:
+    """GET /api/v1/private/position/list/history_positions — closed tickets."""
+    key = f"{symbol or '*'}:{page_num}:{page_size}"
+    now = time.time()
+    if _HIST_CACHE["data"] is not None and _HIST_CACHE["key"] == key and (now - _HIST_CACHE["at"]) < HISTORY_TTL:
+        return _HIST_CACHE["data"]
+    params = {"page_num": page_num, "page_size": page_size}
+    if symbol:
+        params["symbol"] = symbol
+    raw = _request("GET", "/position/list/history_positions", params=params).get("data")
+    if isinstance(raw, dict):
+        rows = raw.get("resultList") or raw.get("result") or raw.get("data") or []
+    else:
+        rows = raw or []
+    _HIST_CACHE["data"] = rows
+    _HIST_CACHE["at"] = now
+    _HIST_CACHE["key"] = key
+    return rows
 
 
 def get_open_orders(symbol: str, page_num: int = 1, page_size: int = 20) -> List[Dict]:
