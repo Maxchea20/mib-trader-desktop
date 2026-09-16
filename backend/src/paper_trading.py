@@ -1,7 +1,8 @@
 """Paper trading engine with persistent SQLite history.
 
 Live AUTO shadows (thesis.venue == MEXC) show MEXC's real fill / mark / uPnL
-instead of Hunt's planned 15m level. Hunt SL/TP prices stay Hunt's.
+while open, and MEXC history fill / exit / realised after close.
+Hunt SL/TP prices stay Hunt's.
 """
 import time
 import uuid
@@ -58,22 +59,16 @@ def init_db() -> None:
             );
             """
         )
-        try:
-            conn.execute("ALTER TABLE paper_trades ADD COLUMN source TEXT DEFAULT 'MANUAL'")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE paper_trades ADD COLUMN decision_id TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE paper_trades ADD COLUMN thesis_json TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE paper_trades ADD COLUMN thesis_result TEXT")
-        except sqlite3.OperationalError:
-            pass
+        for stmt in (
+            "ALTER TABLE paper_trades ADD COLUMN source TEXT DEFAULT 'MANUAL'",
+            "ALTER TABLE paper_trades ADD COLUMN decision_id TEXT",
+            "ALTER TABLE paper_trades ADD COLUMN thesis_json TEXT",
+            "ALTER TABLE paper_trades ADD COLUMN thesis_result TEXT",
+        ):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
 
 
@@ -102,6 +97,29 @@ def _thesis(t: Dict) -> Dict:
         return {}
 
 
+def _is_mexc_live(t: Dict) -> bool:
+    if t.get("source") != "AUTO":
+        return False
+    th = _thesis(t)
+    if th.get("venue") == "MEXC":
+        return True
+    # live Isolated tickets are small; old paper was ~1000 notional
+    try:
+        return float(t.get("notional_usd") or 0) < 200
+    except (TypeError, ValueError):
+        return False
+
+
+def _f(p: Dict, *keys):
+    for k in keys:
+        if p.get(k) is not None and p.get(k) != "":
+            try:
+                return float(p.get(k))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _mexc_open_snapshot(symbol: str) -> Optional[Dict]:
     try:
         from .market_data import mexc_private
@@ -111,29 +129,82 @@ def _mexc_open_snapshot(symbol: str) -> Optional[Dict]:
     if not rows:
         return None
     p = rows[0]
-    def f(*keys):
-        for k in keys:
-            if p.get(k) is not None and p.get(k) != "":
-                try:
-                    return float(p.get(k))
-                except (TypeError, ValueError):
-                    continue
-        return None
-    avg = f("holdAvgPrice", "openAvgPrice", "avgEntryPrice", "openPrice")
-    mark = f("fairPrice", "markPrice", "newOpenAvgPrice")
-    upnl = f("unrealised", "unrealisedPnl", "unrealizedPnl", "unrealisedProfit")
-    vol = f("holdVol", "hold_vol", "volume")
-    margin = f("im", "oim", "positionMargin", "holdMargin")
+    avg = _f(p, "holdAvgPrice", "openAvgPrice", "avgEntryPrice", "openPrice")
+    mark = _f(p, "fairPrice", "markPrice", "newOpenAvgPrice")
+    upnl = _f(p, "unrealised", "unrealisedPnl", "unrealizedPnl", "unrealisedProfit", "pnl")
+    vol = _f(p, "holdVol", "hold_vol", "volume")
+    margin = _f(p, "im", "oim", "positionMargin", "holdMargin")
     if not avg:
         return None
-    return {
-        "entry": avg,
-        "mark": mark,
-        "upnl": upnl,
-        "vol": vol,
-        "margin": margin,
-        "raw": p,
-    }
+    return {"entry": avg, "mark": mark, "upnl": upnl, "vol": vol, "margin": margin, "raw": p}
+
+
+def _mexc_history_rows(symbol: str) -> List[Dict]:
+    try:
+        from .market_data import mexc_private
+        return mexc_private.get_history_positions(symbol=symbol, page_num=1, page_size=50) or []
+    except Exception:
+        return []
+
+
+def _match_history(t: Dict, rows: List[Dict]) -> Optional[Dict]:
+    want = 1 if t.get("side") == LONG else 2
+    opened = float(t.get("opened_at") or 0)
+    closed = float(t.get("closed_at") or 0)
+    best = None
+    best_dt = 1e18
+    for p in rows:
+        try:
+            pt = int(p.get("positionType") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pt and pt != want:
+            continue
+        sym = p.get("symbol") or ""
+        if sym and t.get("symbol") and sym != t.get("symbol"):
+            continue
+        created = _f(p, "createTime") or 0
+        if created > 1e12:
+            created = created / 1000.0
+        updated = _f(p, "updateTime") or 0
+        if updated > 1e12:
+            updated = updated / 1000.0
+        dt = abs(created - opened) if opened else 1e18
+        if closed and updated:
+            dt = min(dt, abs(updated - closed))
+        if dt < best_dt and dt < 20 * 60:
+            best = p
+            best_dt = dt
+    return best
+
+
+def apply_mexc_close(tid: str, entry: Optional[float], exit_price: Optional[float],
+                     pnl: Optional[float], pnl_pct: Optional[float]) -> Optional[Dict]:
+    t = get_trade(tid)
+    if not t:
+        return t
+    fields = []
+    args = []
+    if entry is not None:
+        fields.append("entry_price=?")
+        args.append(float(entry))
+    if exit_price is not None:
+        fields.append("exit_price=?")
+        args.append(float(exit_price))
+    if pnl is not None:
+        fields.append("pnl=?")
+        args.append(float(pnl))
+    if pnl_pct is not None:
+        fields.append("pnl_pct=?")
+        args.append(float(pnl_pct))
+    if not fields:
+        return t
+    args.append(tid)
+    with _lock:
+        conn = _connect()
+        conn.execute(f"UPDATE paper_trades SET {', '.join(fields)} WHERE id=?", args)
+        conn.commit()
+    return get_trade(tid)
 
 
 def update_open_fill(tid: str, entry_price: float, qty: Optional[float] = None,
@@ -161,11 +232,7 @@ def update_open_fill(tid: str, entry_price: float, qty: Optional[float] = None,
 
 
 def _overlay_mexc_live(t: Dict) -> Dict:
-    """Replace Hunt planned entry / local mark PnL with MEXC's live ticket."""
-    if t.get("status") != "OPEN" or t.get("source") != "AUTO":
-        return t
-    th = _thesis(t)
-    if th.get("venue") and th.get("venue") != "MEXC":
+    if t.get("status") != "OPEN" or not _is_mexc_live(t):
         return t
     snap = _mexc_open_snapshot(t.get("symbol") or "BTC_USDT")
     if not snap:
@@ -175,6 +242,7 @@ def _overlay_mexc_live(t: Dict) -> Dict:
     upnl = snap["upnl"]
     vol = snap["vol"]
     margin = snap["margin"]
+    stored_entry = float(t.get("entry_price") or 0)
     t["entry_price"] = avg
     if mark:
         t["mark_price"] = round(mark, 1)
@@ -190,13 +258,11 @@ def _overlay_mexc_live(t: Dict) -> Dict:
         t["unrealized_pnl"] = upnl2
         t["unrealized_pnl_pct"] = pct
     try:
-        stored = float(t.get("entry_price") or 0)
-        if abs(stored - avg) > 0.05:
+        if abs(stored_entry - avg) > 0.05:
             qty = t.get("qty")
             notion = t.get("notional_usd")
             cs = None
             try:
-                from .config import SYMBOL as _sym  # noqa: F401
                 from .market_data import mexc_market_data as mkt
                 detail = mkt.rest_get(f"/api/v1/contract/detail?symbol={t.get('symbol') or 'BTC_USDT'}")
                 d = (detail or {}).get("data") or {}
@@ -211,6 +277,37 @@ def _overlay_mexc_live(t: Dict) -> Dict:
             update_open_fill(t["id"], avg, qty=qty, notional_usd=notion)
             t["qty"] = qty if qty is not None else t.get("qty")
             t["notional_usd"] = notion if notion is not None else t.get("notional_usd")
+    except Exception:
+        pass
+    return t
+
+
+def _overlay_mexc_closed(t: Dict, rows: List[Dict]) -> Dict:
+    if t.get("status") != "CLOSED" or not _is_mexc_live(t):
+        return t
+    p = _match_history(t, rows)
+    if not p:
+        return t
+    entry = _f(p, "openAvgPrice", "newOpenAvgPrice", "holdAvgPrice")
+    exit_px = _f(p, "closeAvgPrice", "newCloseAvgPrice")
+    pnl = _f(p, "realised", "closeProfitLoss")
+    ratio = _f(p, "profitRatio")
+    pct = (ratio * 100.0) if ratio is not None else None
+    if pct is None and entry and exit_px:
+        _, pct = _pnl(t["side"], entry, exit_px, t.get("qty") or 1)
+    if entry:
+        t["entry_price"] = entry
+    if exit_px:
+        t["exit_price"] = exit_px
+    if pnl is not None:
+        t["pnl"] = round(pnl, 4)
+    if pct is not None:
+        t["pnl_pct"] = round(pct, 3)
+    try:
+        stored_pnl = t.get("pnl")
+        apply_mexc_close(t["id"], entry, exit_px, pnl, pct)
+        if stored_pnl is not None:
+            pass
     except Exception:
         pass
     return t
@@ -322,6 +419,13 @@ def close_trade(tid: str, exit_price: float, reason: str = "MANUAL") -> Optional
         )
     except Exception:
         pass
+    closed = get_trade(tid)
+    if closed and _is_mexc_live(closed):
+        try:
+            rows = _mexc_history_rows(closed.get("symbol") or "BTC_USDT")
+            _overlay_mexc_closed(closed, rows)
+        except Exception:
+            pass
     return get_trade(tid)
 
 
@@ -359,6 +463,7 @@ def list_trades(status: Optional[str] = None, live_price: Optional[float] = None
             rows = conn.execute("SELECT * FROM paper_trades WHERE status=? ORDER BY opened_at DESC", (status,)).fetchall()
         else:
             rows = conn.execute("SELECT * FROM paper_trades ORDER BY opened_at DESC").fetchall()
+    hist = None
     out = []
     for r in rows:
         t = _row_to_dict(r)
@@ -368,6 +473,10 @@ def list_trades(status: Optional[str] = None, live_price: Optional[float] = None
             t["unrealized_pnl_pct"] = upct
             t["mark_price"] = round(float(live_price), 2)
         t = _overlay_mexc_live(t)
+        if t.get("status") == "CLOSED" and _is_mexc_live(t):
+            if hist is None:
+                hist = _mexc_history_rows(t.get("symbol") or "BTC_USDT")
+            t = _overlay_mexc_closed(t, hist)
         out.append(t)
     return out
 
