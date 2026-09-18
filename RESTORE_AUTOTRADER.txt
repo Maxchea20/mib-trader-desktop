@@ -1,13 +1,10 @@
-STOP. backend/src/autotrader.py on latest main may be a stub.
+SAFE TO PULL.
 
-Restore the last good full file, then restart:
+backend/src/autotrader.py is the full Hunt C-FI file again (not a stub).
+Tested locally before this commit:
+- 33 passed: Hunt C-FI, lifecycle SI checklist, V3, weather, brain lifecycle
+- thesis freeze on FIRE carries thesis_ts / thesis_level / thesis_invalid
+- STRUCTURAL_INVALIDATION does not use the 3-bar fail lock; HARD_SL still does
+- live fire still uses MEXC lastPrice + holdAvgPrice fill + Isolated + one position
 
-    git fetch origin
-    git checkout 589531a -- backend/src/autotrader.py
-
-Do not use the file if it is only one line or says PLACEHOLDER / SEE_LOCAL_FILE.
-
-Brain SI + rearm files on main are fine:
-    backend/src/brain/lifecycle.py
-    backend/src/brain/lifecycle_tick.py
-    backend/src/brain/observation_hunt_c_fi.py
+After pull: git pull && restart the trading engine.
