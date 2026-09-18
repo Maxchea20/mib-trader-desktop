@@ -173,14 +173,14 @@ def reevaluate(
 
     if level_lost:
         pos.thesis.valid = False
-        pos.thesis.invalid_reason = "entry level lost"
+        pos.thesis.invalid_reason = "originating structure lost"
         return {**log, "action": EXIT, "reason": pos.thesis.invalid_reason, "exit_kind": "STRUCTURAL_INVALIDATION"}
 
     sl = pos.hard_sl()
     if pos.side == LONG and lo <= sl:
-        return {**log, "action": EXIT, "reason": "hard SL", "exit_kind": "STRUCTURAL_INVALIDATION", "exit_px": sl}
+        return {**log, "action": EXIT, "reason": "hard SL", "exit_kind": "HARD_SL", "exit_px": sl}
     if pos.side == SHORT and hi >= sl:
-        return {**log, "action": EXIT, "reason": "hard SL", "exit_kind": "STRUCTURAL_INVALIDATION", "exit_px": sl}
+        return {**log, "action": EXIT, "reason": "hard SL", "exit_kind": "HARD_SL", "exit_px": sl}
 
     if pos.tp is not None:
         if pos.side == LONG and hi >= pos.tp:
