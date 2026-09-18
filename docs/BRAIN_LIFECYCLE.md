@@ -13,14 +13,15 @@ One Brain owns PRE-ENTRY → FIRE → HOLD / TRAIL / EXIT.
 - No votes. No separate trade manager.
 - `evaluate_hunt()` on main is unchanged.
 
-## After-FIRE rules (V1)
+## After-FIRE rules (V1b + multi-condition SI)
 
 EXIT when:
-- 15m CHoCH against the thesis
-- 1h trend flips against
-- entry level lost
-- hard SL
+- 15m CHoCH against the frozen thesis (`THESIS_FAILURE`)
+- new 15m close beyond frozen parent **and** frozen level (`STRUCTURAL_INVALIDATION`)
+- hard SL (`HARD_SL`)
 - target reached
+
+1h trend flip against is a warning only. Fill vs 15m close is not an exit.
 
 TRAIL when:
 - price ≥ +1R → protect at least BE, then 1 ATR behind best

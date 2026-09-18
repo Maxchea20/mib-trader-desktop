@@ -1,8 +1,7 @@
-The last two autotrader.py commits on main are stubs. Restore the last good file from git history:
+Hunt C-FI autotrader is the full file again on main (rearm + frozen thesis + multi-condition SI).
 
-    git fetch origin
-    git checkout c885db47 -- backend/src/autotrader.py
+    git checkout main
+    git pull
+    # confirm backend/src/autotrader.py is ~760+ lines, not a stub
 
-Then restart the trading engine.
-
-Do not git pull again until autotrader.py on GitHub is the full ~800 line file again (not a RuntimeError stub).
+Restart the trading engine.
