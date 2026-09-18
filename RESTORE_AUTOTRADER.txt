@@ -1,7 +1,13 @@
-Hunt C-FI autotrader is the full file again on main (rearm + frozen thesis + multi-condition SI).
+STOP. backend/src/autotrader.py on latest main may be a stub.
 
-    git checkout main
-    git pull
-    # confirm backend/src/autotrader.py is ~760+ lines, not a stub
+Restore the last good full file, then restart:
 
-Restart the trading engine.
+    git fetch origin
+    git checkout 589531a -- backend/src/autotrader.py
+
+Do not use the file if it is only one line or says PLACEHOLDER / SEE_LOCAL_FILE.
+
+Brain SI + rearm files on main are fine:
+    backend/src/brain/lifecycle.py
+    backend/src/brain/lifecycle_tick.py
+    backend/src/brain/observation_hunt_c_fi.py
