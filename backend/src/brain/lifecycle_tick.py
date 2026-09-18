@@ -4,18 +4,31 @@ from typing import Any, Dict, Optional
 
 from .lifecycle import position_from_fire, reevaluate, Position
 
-# MEXC swap taker ~0.02% each side. Round-trip to get flat.
-MEXC_TAKER = 0.0002
+
+def _thesis(trade: Dict[str, Any]) -> Dict[str, Any]:
+    raw = trade.get("thesis")
+    if isinstance(raw, dict):
+        return raw
+    raw = trade.get("thesis_json")
+    if isinstance(raw, str):
+        try:
+            import json
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def position_from_open_trade(trade: Dict[str, Any], *, equity: float = 1000.0, risk_pct: float = 0.02) -> Position:
+    th = _thesis(trade)
     fire = {
         "direction": trade.get("side") or trade.get("direction"),
         "entry": float(trade["entry_price"]),
         "stop": float(trade.get("sl_price") or trade["entry_price"]),
         "target": trade.get("tp_price"),
         "atr_15m": abs(float(trade["entry_price"]) - float(trade.get("sl_price") or trade["entry_price"])),
-        "event": (trade.get("thesis") or {}).get("event") if isinstance(trade.get("thesis"), dict) else None,
+        "event": th.get("event"),
         "why_state": ["open position"],
     }
     return position_from_fire(
@@ -38,7 +51,6 @@ def tick_5m(
     level_lost: bool = False,
     now_ts: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """One closed 5m bar. Returns HOLD / TRAIL / EXIT plus sl if trail moved."""
     pos = position_from_open_trade(trade)
     return reevaluate(
         pos,
@@ -52,47 +64,38 @@ def tick_5m(
     )
 
 
-def _round_trip_fee(trade: Dict[str, Any]) -> float:
-    entry = float(trade.get("entry_price") or 0)
-    qty = float(trade.get("qty") or 0)
-    notion = float(trade.get("notional_usd") or 0)
-    if notion <= 0 and entry and qty:
-        notion = entry * qty
-    return abs(notion) * MEXC_TAKER * 2.0
-
-
-def _gross_at(trade: Dict[str, Any], px: float) -> float:
-    upnl = trade.get("unrealized_pnl")
-    if upnl is not None:
+def _opened_ts(trade: Dict[str, Any]) -> Optional[int]:
+    th = _thesis(trade)
+    if trade.get("opened_at"):
         try:
-            return float(upnl)
+            return int(trade["opened_at"])
         except (TypeError, ValueError):
             pass
-    entry = float(trade.get("entry_price") or 0)
-    qty = float(trade.get("qty") or 0)
-    if not entry or not qty:
-        return 0.0
-    if str(trade.get("side")).upper() == "LONG":
-        return (float(px) - entry) * qty
-    return (entry - float(px)) * qty
+    if th.get("thesis_ts"):
+        try:
+            return int(th["thesis_ts"])
+        except (TypeError, ValueError):
+            pass
+    return None
 
 
-def _soft_structure_exit(rec: Dict[str, Any]) -> bool:
-    if rec.get("action") != "EXIT":
-        return False
-    if rec.get("reason") == "hard SL":
-        return False
-    kind = rec.get("exit_kind") or ""
-    return kind in ("STRUCTURAL_INVALIDATION", "THESIS_FAILURE")
+def _frozen_invalid(trade: Dict[str, Any]) -> Optional[float]:
+    th = _thesis(trade)
+    v = th.get("thesis_invalid")
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """If an AUTO trade is open and a new 5m just closed, apply V1b.
+    """EXIT / TRAIL / HOLD. SI is not fill-vs-15m-close.
 
-    EXIT closes the paper trade. TRAIL tightens sl_price.
-    Soft structure-cancel only cuts when gross profit covers round-trip fee.
-    Hard SL always cuts.
-    Safe to call every few seconds. Never raises.
+    Kill structure only when a NEW closed 15m (ts > opened_at) meets
+    CHoCH against, or TWO of: CHoCH against, close beyond frozen parent,
+    close beyond frozen level. Hard SL and TP always exit.
     """
     if not open_trade:
         return None
@@ -110,23 +113,51 @@ def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]
         bar = c5[-1]
         st_ev = st_dir = None
         level_lost = False
+        choch_against = False
+        beyond_parent = False
+        beyond_level = False
         try:
             from ..structure.observe import observe as obs_structure
             w15 = dao.read_closed_candles("15m", limit=320)
+            opened = _opened_ts(open_trade)
+            side = open_trade["side"]
+            th = _thesis(open_trade)
+            parent = _frozen_invalid(open_trade)
+            level = th.get("thesis_level")
+            try:
+                level = float(level) if level is not None else None
+            except (TypeError, ValueError):
+                level = None
             if len(w15) >= 60:
-                st = obs_structure(w15, "15m")
                 last15 = w15[-1]
-                for e in (getattr(st, "events", None) or []):
-                    et = getattr(e, "event_type", "")
-                    if et in ("CHoCH", "CHOCH") and getattr(e, "timestamp", None) == last15.get("ts"):
-                        st_ev, st_dir = et, getattr(e, "direction", None)
-                        break
-                entry = float(open_trade["entry_price"])
-                side = open_trade["side"]
-                if side == "LONG" and last15["close"] < entry:
-                    level_lost = True
-                if side == "SHORT" and last15["close"] > entry:
-                    level_lost = True
+                last_ts = int(last15.get("ts") or 0)
+                new_15m = opened is None or last_ts > int(opened)
+                if new_15m:
+                    st = obs_structure(w15, "15m")
+                    for e in (getattr(st, "events", None) or []):
+                        et = getattr(e, "event_type", "")
+                        if et in ("CHoCH", "CHOCH") and getattr(e, "timestamp", None) == last15.get("ts"):
+                            st_ev, st_dir = et, getattr(e, "direction", None)
+                            sd = (st_dir or "").upper()
+                            choch_against = (
+                                side == "LONG" and sd in ("BEARISH", "SHORT", "DOWN")
+                            ) or (
+                                side == "SHORT" and sd in ("BULLISH", "LONG", "UP")
+                            )
+                            break
+                    close = float(last15["close"])
+                    if parent is not None:
+                        if side == "LONG" and close < parent:
+                            beyond_parent = True
+                        if side == "SHORT" and close > parent:
+                            beyond_parent = True
+                    if level is not None:
+                        if side == "LONG" and close < level:
+                            beyond_level = True
+                        if side == "SHORT" and close > level:
+                            beyond_level = True
+                    hits = int(choch_against) + int(beyond_parent) + int(beyond_level)
+                    level_lost = (not choch_against) and hits >= 2
         except Exception:
             pass
         rec = tick_5m(
@@ -139,19 +170,11 @@ def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]
             level_lost=level_lost,
             now_ts=bar.get("ts"),
         )
-        if _soft_structure_exit(rec):
-            px = rec.get("exit_px") or float(bar["close"])
-            gross = _gross_at(open_trade, px)
-            fee = _round_trip_fee(open_trade)
-            if gross <= fee:
-                rec["action"] = "HOLD"
-                rec["reason"] = (
-                    f"SI parked — profit {gross:.4f} USDT does not cover fee {fee:.4f}"
-                )
-                rec["parked"] = True
-                rec["gross_pnl"] = round(gross, 4)
-                rec["fee_est"] = round(fee, 4)
-                return rec
+        rec["si_hits"] = {
+            "choch_against": choch_against,
+            "beyond_parent": beyond_parent,
+            "beyond_level": beyond_level,
+        }
         if rec.get("action") == EXIT:
             px = rec.get("exit_px") or float(bar["close"])
             paper_trading.close_trade(open_trade["id"], px, rec.get("exit_kind") or "BRAIN_EXIT")
