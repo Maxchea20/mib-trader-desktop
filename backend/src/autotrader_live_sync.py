@@ -74,7 +74,6 @@ def flatten_mexc(side: Optional[str], vol: Optional[float], exit_px: Optional[fl
 
 
 def revive_shadow_if_mexc_open() -> Optional[Dict]:
-    """If the app marked CLOSED but Isolated is still live, put the row back OPEN."""
     if paper_trading.list_trades("OPEN"):
         for t in paper_trading.list_trades("OPEN"):
             if t.get("source") == "AUTO":
@@ -86,18 +85,23 @@ def revive_shadow_if_mexc_open() -> Optional[Dict]:
     last = next((t for t in rows if t.get("source") == "AUTO"), None)
     if not last:
         return None
+    th = paper_trading._thesis(last)
+    sl = th.get("stop") or th.get("hunt_stop") or 81035.5
+    try:
+        sl = float(sl)
+    except (TypeError, ValueError):
+        sl = last.get("sl_price")
     from .market_data import database as mdb
     import sqlite3
-    path = mdb.db_path()
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(mdb.db_path())
     try:
         conn.execute(
             "UPDATE paper_trades SET status='OPEN', closed_at=NULL, exit_price=NULL, "
-            "exit_reason=NULL, pnl=NULL, pnl_pct=NULL WHERE id=?",
-            (last["id"],),
+            "exit_reason=NULL, pnl=NULL, pnl_pct=NULL, sl_price=? WHERE id=?",
+            (sl, last["id"]),
         )
         conn.commit()
     finally:
         conn.close()
-    logger.warning("revived AUTO shadow %s — MEXC Isolated still open", last["id"])
+    logger.warning("revived AUTO shadow %s with SL %s — MEXC Isolated still open", last["id"], sl)
     return paper_trading.get_trade(last["id"])
