@@ -1,5 +1,4 @@
 """Hunt evaluate loop — same-bar WAIT may flip to FIRE."""
-import logging
 import time
 from typing import Dict, Optional
 
@@ -13,6 +12,7 @@ from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
     _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
 )
+from .autotrader_live_sync import revive_shadow_if_mexc_open, flatten_mexc
 
 
 def _in_cooldown(tf_seconds: int) -> bool:
@@ -35,11 +35,22 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = "DISABLED"
         return STATE
     try:
+        revived = revive_shadow_if_mexc_open()
+        if revived:
+            STATE["last_action"] = f"HOLD {revived.get('side')} (MEXC still open)"
+    except Exception:
+        logger.exception("revive shadow failed")
+    try:
         open_before = _open_auto()
         rec = manage_open_on_5m(STATE, open_before)
         if rec:
             STATE["last_lifecycle"] = {k: rec.get(k) for k in ("action", "reason", "exit_kind", "sl")}
             if rec.get("action") == "EXIT":
+                try:
+                    flatten_mexc(open_before.get("side") if open_before else None,
+                                 None, rec.get("exit_px") or live_price)
+                except Exception:
+                    logger.exception("MEXC flatten on lifecycle EXIT failed")
                 _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
                 _record_close(rec.get("exit_kind") or "BRAIN_EXIT")
                 STATE["last_action"] = f"LIFECYCLE_EXIT {rec.get('exit_kind')}"
@@ -90,6 +101,13 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if open_auto is not None:
         STATE["last_action"] = f"HOLD {open_auto.get('side')}"
         return STATE
+    try:
+        from .autotrader_exec import _mexc_open_position_vol
+        if _mexc_open_position_vol() > 0:
+            STATE["last_action"] = "HOLD MEXC Isolated still open"
+            return STATE
+    except Exception:
+        pass
     if hunt.get("action") != "FIRE":
         STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
         return STATE

@@ -9,3 +9,6 @@ from .autotrader_sizing import (  # noqa: F401
     status, update, compute_sizing, _hunt_levels, _fetch_available_balance,
 )
 from .autotrader_loop import evaluate  # noqa: F401
+from .autotrader_live_sync import _install_price_guard
+
+_install_price_guard()
