@@ -73,3 +73,55 @@ STATE = {
     "normal_base": None,
     "normal_base_captured_at": None,
 }
+
+
+def _config_path() -> Path:
+    db = os.environ.get("MARKET_DB_PATH")
+    if db:
+        return Path(db).resolve().parent / "autotrade_config.json"
+    return Path(__file__).resolve().parent.parent / "data" / "autotrade_config.json"
+
+
+def _load_persisted() -> None:
+    path = _config_path()
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        for k in PERSIST_KEYS:
+            if k in data and data[k] is not None:
+                CONFIG[k] = data[k]
+        CONFIG["hunt_version"] = HUNT_VERSION_C_FI
+        CONFIG["margin_mode"] = "ISOLATED"
+        if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:
+            CONFIG["leverage"] = MIN_LIVE_LEVERAGE
+        if CONFIG.get("risk_pct") is None:
+            CONFIG["risk_pct"] = 2.0
+    except Exception:
+        logger.exception("could not load persisted autotrade config")
+
+
+def _persist() -> None:
+    path = _config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob = {k: CONFIG.get(k) for k in PERSIST_KEYS}
+        path.write_text(json.dumps(blob, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("could not persist autotrade config")
+
+
+_load_persisted()
+
+
+def _live_armed() -> bool:
+    return os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true"
+
+
+def _open_auto() -> Optional[Dict]:
+    for t in paper_trading.list_trades("OPEN"):
+        if t.get("source") == "AUTO":
+            return t
+    return None
