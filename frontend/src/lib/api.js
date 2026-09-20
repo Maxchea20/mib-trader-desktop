@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8811";
 export const API = `${BACKEND_URL}/api`;
 
 export const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
@@ -34,12 +34,12 @@ export const getWalkForwardResult = async (id) =>
   (await client.get(`/backtest/walkforward/result/${id}`)).data;
 export const stopWalkForwardBacktest = async (id) =>
   (await client.post(`/backtest/walkforward/stop/${id}`)).data;
-export const getWalkForwardLog = async () => 
-  (await client.get("/backtest/walkforward/log")).data; 
-export const deleteWalkForwardLogEntry = async (id) => 
-  (await client.delete(`/backtest/walkforward/log/${id}`)).data; 
-export const clearWalkForwardLog = async () => 
-  (await client.delete("/backtest/walkforward/log")).data
+export const getWalkForwardLog = async () =>
+  (await client.get("/backtest/walkforward/log")).data;
+export const deleteWalkForwardLogEntry = async (id) =>
+  (await client.delete(`/backtest/walkforward/log/${id}`)).data;
+export const clearWalkForwardLog = async () =>
+  (await client.delete("/backtest/walkforward/log")).data;
 
 export const openPaperTrade = async (payload) => (await client.post("/paper/open", payload)).data;
 export const closePaperTrade = async (id) => (await client.post(`/paper/close/${id}`, {})).data;
