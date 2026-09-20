@@ -35,6 +35,9 @@ function App() {
   tfRef.current = timeframe;
   const [livePrice, setLivePrice] = useState(null);
   const wsRef = useRef(null);
+  const lastTickPaintAt = useRef(0);
+  const pendingTick = useRef(null);
+  const tickTimer = useRef(null);
 
   const loadTicker = useCallback(async () => {
     try {
@@ -119,12 +122,23 @@ function App() {
         try {
           const d = JSON.parse(evt.data);
           if (d.type === "tick") {
-            if (d.price != null) setLivePrice(d.price);
-            setLive((prev) => ({
-              ...(prev || {}), connected: true, ws_connected: d.ws_connected,
-              source: d.source, last_price: d.price, ticker: d.ticker || prev?.ticker,
-            }));
-            if (d.ticker && Object.keys(d.ticker).length > 2) setTicker(d.ticker);
+            pendingTick.current = d;
+            const now = Date.now();
+            const wait = Math.max(0, 200 - (now - lastTickPaintAt.current));
+            if (tickTimer.current) return;
+            tickTimer.current = setTimeout(() => {
+              tickTimer.current = null;
+              const tick = pendingTick.current;
+              pendingTick.current = null;
+              if (!tick) return;
+              lastTickPaintAt.current = Date.now();
+              if (tick.price != null) setLivePrice(tick.price);
+              setLive((prev) => ({
+                ...(prev || {}), connected: true, ws_connected: tick.ws_connected,
+                source: tick.source, last_price: tick.price, ticker: tick.ticker || prev?.ticker,
+              }));
+              if (tick.ticker && Object.keys(tick.ticker).length > 2) setTicker(tick.ticker);
+            }, wait);
           }
         } catch (e) {}
       };
@@ -146,6 +160,7 @@ function App() {
     return () => {
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (tickTimer.current) { clearTimeout(tickTimer.current); tickTimer.current = null; }
       const ws = currentWs;
       currentWs = null;
       wsRef.current = null;
