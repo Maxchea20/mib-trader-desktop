@@ -1,28 +1,81 @@
-"""Persistent local SQLite market-data database.
-
-This is the persistent local store for candle history. It remains available
-locally even when the trading UI is closed so analysis engines can access
-persistent market history. Core market history is NOT stored in any cloud DB.
-"""
+"""Persistent local SQLite market-data database."""
 import os
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 
 _ROOT = Path(__file__).resolve().parents[2]
-_CLEAN = _ROOT / "market_data_clean.db"
-_LEGACY = _ROOT / "market_data.db"
-_DEFAULT = str(_CLEAN if _CLEAN.exists() else _LEGACY)
-_DB_PATH = os.environ.get("MARKET_DB_PATH", _DEFAULT)
 _lock = threading.RLock()
 _conn: Optional[sqlite3.Connection] = None
+_DB_PATH = None
+
+
+def _data_dir() -> Path:
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", str(Path.home()))) / "mib-trader"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "mib-trader"
+    return Path.home() / ".local" / "share" / "mib-trader"
+
+
+def resolve_db_path() -> str:
+    """Prefer a real market_data_clean.db over an empty market_data.db."""
+    names = ("market_data_clean.db", "market_data.db")
+    roots = [
+        _ROOT,
+        _ROOT.parent,
+        _data_dir(),
+        Path.home() / "Downloads" / "mib-trader-desktop-full" / "mib-trader-desktop" / "backend",
+    ]
+    found = []
+    env = os.environ.get("MARKET_DB_PATH", "").strip()
+    if env:
+        p = Path(env)
+        if p.is_file() and p.stat().st_size > 10_000:
+            found.append(p)
+    for root in roots:
+        try:
+            for name in names:
+                p = root / name
+                if p.is_file() and p.stat().st_size > 10_000:
+                    found.append(p.resolve())
+        except OSError:
+            continue
+    uniq = []
+    seen = set()
+    for p in found:
+        key = str(p).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+    if uniq:
+        uniq.sort(key=lambda p: (0 if p.name == "market_data_clean.db" else 1, -p.stat().st_size))
+        return str(uniq[0])
+    return str(_ROOT / "market_data_clean.db")
+
+
+def _db_path() -> str:
+    global _DB_PATH
+    if _DB_PATH is None:
+        _DB_PATH = resolve_db_path()
+        os.environ["MARKET_DB_PATH"] = _DB_PATH
+        try:
+            size = Path(_DB_PATH).stat().st_size if Path(_DB_PATH).exists() else 0
+        except OSError:
+            size = 0
+        print(f"[db] using {_DB_PATH} ({size} bytes)", flush=True)
+    return _DB_PATH
 
 
 def _connect() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        path = _db_path()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        _conn = sqlite3.connect(path, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.execute("PRAGMA journal_mode=WAL;")
     return _conn
@@ -148,4 +201,4 @@ def get_sync_meta(symbol: str, timeframe: str):
 
 
 def db_path() -> str:
-    return _DB_PATH
+    return _db_path()
