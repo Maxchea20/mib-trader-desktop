@@ -64,7 +64,17 @@ def _ensure_defaults() -> None:
 
     os.environ.setdefault(
         "CORS_ORIGINS",
-        "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000",
+        ",".join([
+            "tauri://localhost",
+            "https://tauri.localhost",
+            "http://tauri.localhost",
+            "https://asset.localhost",
+            "http://asset.localhost",
+            "http://localhost:1420",
+            "http://127.0.0.1:1420",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]),
     )
 
 
@@ -74,6 +84,7 @@ def main() -> None:
     from server import app
     from src import http_cors
 
+    # Idempotent — server.py already attached the same stack.
     http_cors.attach(app)
 
     port = int(os.environ.get("MIB_PORT", "8811"))
