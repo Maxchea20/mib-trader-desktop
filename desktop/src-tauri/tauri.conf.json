@@ -4,9 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.maxchea.mibtrader",
   "build": {
-    "frontendDist": "../../frontend/build",
-    "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "set BROWSER=none&& npm start --prefix ../frontend"
+    "frontendDist": "../../frontend/build"
   },
   "app": {
     "windows": [
