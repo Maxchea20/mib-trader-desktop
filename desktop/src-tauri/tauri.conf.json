@@ -5,7 +5,8 @@
   "identifier": "com.maxchea.mibtrader",
   "build": {
     "frontendDist": "../../frontend/build",
-    "devUrl": "http://localhost:3000"
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm start --prefix ../frontend"
   },
   "app": {
     "windows": [
