@@ -1,6 +1,5 @@
 from fastapi import FastAPI, APIRouter, Query, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 import os
 import sys
 import asyncio
@@ -41,6 +40,7 @@ from src import walkforward_log
 from src import paper_trading
 from src import autotrader
 from src import ai_thesis
+from src import http_cors
 from src.market_data import mexc_private
 from pydantic import BaseModel
 from typing import Optional, Dict, List
@@ -513,13 +513,8 @@ async def ws_live(ws: WebSocket):
     finally:
         manager.unregister(ws)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# One CORS stack. run_server.attach() is idempotent and will no-op after this.
+http_cors.attach(app)
 
 
 @app.on_event("startup")
