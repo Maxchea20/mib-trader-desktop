@@ -44,26 +44,47 @@ fn spawn_backend(app: &tauri::AppHandle) {
         return;
     }
 
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .expect("could not resolve app data dir");
+    let data_dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            log::error!("[backend] no app data dir: {err}");
+            return;
+        }
+    };
     std::fs::create_dir_all(&data_dir).ok();
 
     let db_path = data_dir.join("market_data.db");
 
     let shell = app.shell();
-    let command = shell
-        .sidecar("mib-backend")
-        .expect("mib-backend sidecar not found — did you run build_sidecar and place the binary in src-tauri/binaries/?")
-        .env("MARKET_DB_PATH", db_path.to_string_lossy().to_string())
-        .env(
-            "CORS_ORIGINS",
-            "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000",
-        )
-        .env("MIB_PORT", ENGINE_PORT.to_string());
+    let command = match shell.sidecar("mib-backend") {
+        Ok(cmd) => cmd
+            .env("MARKET_DB_PATH", db_path.to_string_lossy().to_string())
+            .env(
+                "CORS_ORIGINS",
+                "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000",
+            )
+            .env("MIB_PORT", ENGINE_PORT.to_string()),
+        Err(err) => {
+            log::warn!(
+                "[backend] sidecar not packaged ({err}). Start backend with: python run_server.py"
+            );
+            let state = app.state::<BackendHandle>();
+            *state.spawned_by_us.lock().unwrap() = false;
+            return;
+        }
+    };
 
-    let (mut rx, child) = command.spawn().expect("failed to spawn backend sidecar");
+    let (mut rx, child) = match command.spawn() {
+        Ok(pair) => pair,
+        Err(err) => {
+            log::warn!(
+                "[backend] could not spawn sidecar ({err}). Start backend with: python run_server.py"
+            );
+            let state = app.state::<BackendHandle>();
+            *state.spawned_by_us.lock().unwrap() = false;
+            return;
+        }
+    };
 
     let handle_state = app.state::<BackendHandle>();
     *handle_state.child.lock().unwrap() = Some(child);
@@ -183,13 +204,7 @@ fn main() {
                 ],
             )?;
 
-            let tray_icon = app
-                .default_window_icon()
-                .cloned()
-                .expect("app icon missing — run: npx tauri icon mib-trader-icons\\icons\\mib-trader-1024.png");
-
-            let _tray = TrayIconBuilder::new()
-                .icon(tray_icon)
+            let mut tray = TrayIconBuilder::new()
                 .tooltip("MIB Trader")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(true)
@@ -220,8 +235,13 @@ fn main() {
                         app.exit(0);
                     }
                     _ => {}
-                })
-                .build(app)?;
+                });
+
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray = tray.icon(icon);
+            }
+
+            let _tray = tray.build(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();
