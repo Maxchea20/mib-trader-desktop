@@ -183,7 +183,14 @@ fn main() {
                 ],
             )?;
 
+            let tray_icon = app
+                .default_window_icon()
+                .cloned()
+                .expect("app icon missing — run: npx tauri icon mib-trader-icons\\icons\\mib-trader-1024.png");
+
             let _tray = TrayIconBuilder::new()
+                .icon(tray_icon)
+                .tooltip("MIB Trader")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
