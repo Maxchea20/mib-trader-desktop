@@ -48,13 +48,19 @@ def _ensure_defaults() -> None:
     else:
         os.environ.setdefault("MARKET_DB_PATH", str(_pick_db(backend_dir)))
 
-    os.environ.setdefault("CORS_ORIGINS", "tauri://localhost,http://localhost:1420,http://localhost:3000")
+    os.environ.setdefault(
+        "CORS_ORIGINS",
+        "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000",
+    )
 
 
 def main() -> None:
     _ensure_defaults()
     import uvicorn
     from server import app
+    from src import http_cors
+
+    http_cors.attach(app)
 
     port = int(os.environ.get("MIB_PORT", "8811"))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
