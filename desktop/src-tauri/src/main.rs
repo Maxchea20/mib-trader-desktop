@@ -1,27 +1,14 @@
 // MIB Trader desktop host.
 //
-// Responsibilities (per the desktop-packaging plan):
-//   1. Spawn the packaged Python backend as a sidecar process.
-//   2. Watchdog it: if it crashes, respawn automatically (with a short
-//      backoff so a fast-crash-loop doesn't spin the CPU).
-//   3. System tray + "minimize to tray" instead of quitting on window
-//      close, so an accidental click doesn't kill an open live position's
-//      local journal/UI (the exchange-side SL/TP brackets keep working
-//      regardless, but you still want the app itself to stay running).
-//   4. Point the backend at a real OS data folder (not a temp extraction
-//      dir) so the SQLite journal survives restarts.
-//   5. Explicitly kill the sidecar child when the app actually quits —
-//      an orphaned backend process left running in the background is a
-//      classic way to end up with two auto-traders fighting over the
-//      same account.
-//
-// NOT yet wired here: pulling MEXC_API_KEY/MEXC_API_SECRET from a
-// Settings screen and writing them to <app_data_dir>/.env before spawn.
-// For now, set them as real OS environment variables before launching
-// the app, or drop a `.env` file into the app data folder shown in the
-// tray menu ("Show Data Folder") — run_server.py already reads it from
-// there if present.
+// Responsibilities:
+//   1. Spawn the packaged Python backend as a sidecar — unless 8811 is
+//      already serving (dev already ran run_server.py). Never two engines.
+//   2. Watchdog only the child WE spawned.
+//   3. System tray + hide-on-X. Quit only from tray "Exit MiB Trader".
+//   4. Point the backend at the OS data folder.
+//   5. Kill the sidecar on real quit. Do not kill a backend we did not start.
 
+use std::net::{SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -33,11 +20,30 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
-struct BackendHandle(Arc<Mutex<Option<CommandChild>>>);
+struct BackendHandle {
+    child: Arc<Mutex<Option<CommandChild>>>,
+    spawned_by_us: Arc<Mutex<bool>>,
+}
 
 const RESTART_BACKOFF_SECS: u64 = 3;
+const ENGINE_PORT: u16 = 8811;
+
+fn engine_listening() -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], ENGINE_PORT));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
+}
 
 fn spawn_backend(app: &tauri::AppHandle) {
+    if engine_listening() {
+        log::info!(
+            "[backend] already listening on 127.0.0.1:{} — not starting a second engine",
+            ENGINE_PORT
+        );
+        let state = app.state::<BackendHandle>();
+        *state.spawned_by_us.lock().unwrap() = false;
+        return;
+    }
+
     let data_dir = app
         .path()
         .app_data_dir()
@@ -51,13 +57,17 @@ fn spawn_backend(app: &tauri::AppHandle) {
         .sidecar("mib-backend")
         .expect("mib-backend sidecar not found — did you run build_sidecar and place the binary in src-tauri/binaries/?")
         .env("MARKET_DB_PATH", db_path.to_string_lossy().to_string())
-        .env("CORS_ORIGINS", "tauri://localhost,http://localhost:1420")
-        .env("MIB_PORT", "8811");
+        .env(
+            "CORS_ORIGINS",
+            "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000",
+        )
+        .env("MIB_PORT", ENGINE_PORT.to_string());
 
     let (mut rx, child) = command.spawn().expect("failed to spawn backend sidecar");
 
     let handle_state = app.state::<BackendHandle>();
-    *handle_state.0.lock().unwrap() = Some(child);
+    *handle_state.child.lock().unwrap() = Some(child);
+    *handle_state.spawned_by_us.lock().unwrap() = true;
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -75,14 +85,13 @@ fn spawn_backend(app: &tauri::AppHandle) {
                         payload.code,
                         RESTART_BACKOFF_SECS
                     );
-                    // Clear the dead handle so we don't try to kill a
-                    // process that's already gone on shutdown.
                     let state = app_handle.state::<BackendHandle>();
-                    *state.0.lock().unwrap() = None;
+                    *state.child.lock().unwrap() = None;
+                    *state.spawned_by_us.lock().unwrap() = false;
 
                     tokio::time::sleep(Duration::from_secs(RESTART_BACKOFF_SECS)).await;
                     spawn_backend(&app_handle);
-                    break; // this task's job is done; the respawn starts a new one
+                    break;
                 }
                 CommandEvent::Error(err) => {
                     log::error!("[backend] sidecar error: {}", err);
@@ -95,8 +104,32 @@ fn spawn_backend(app: &tauri::AppHandle) {
 
 fn kill_backend(app: &tauri::AppHandle) {
     let state = app.state::<BackendHandle>();
-    if let Some(child) = state.0.lock().unwrap().take() {
+    let ours = *state.spawned_by_us.lock().unwrap();
+    if !ours {
+        log::info!("[backend] not killing — this host did not start the engine");
+        return;
+    }
+    if let Some(child) = state.child.lock().unwrap().take() {
         let _ = child.kill();
+    }
+    *state.spawned_by_us.lock().unwrap() = false;
+}
+
+fn toggle_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_visible().unwrap_or(true) {
+            let _ = w.hide();
+        } else {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }
+}
+
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
     }
 }
 
@@ -108,38 +141,61 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(BackendHandle(Arc::new(Mutex::new(None))))
+        .manage(BackendHandle {
+            child: Arc::new(Mutex::new(None)),
+            spawned_by_us: Arc::new(Mutex::new(false)),
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             spawn_backend(&handle);
 
-            // --- System tray -------------------------------------------------
-            let show_item = MenuItem::with_id(app, "show", "Show MIB Trader", true, None::<&str>)?;
-            let restart_item =
-                MenuItem::with_id(app, "restart_backend", "Restart Trading Engine", true, None::<&str>)?;
+            let open_item = MenuItem::with_id(app, "open", "Open MiB Trader", true, None::<&str>)?;
+            let hide_item = MenuItem::with_id(app, "hide", "Show/Hide", true, None::<&str>)?;
+            let engine_item =
+                MenuItem::with_id(app, "engine_status", "Engine Status", true, None::<&str>)?;
+            let mexc_item = MenuItem::with_id(
+                app,
+                "mexc_status",
+                "MEXC Connection Status",
+                true,
+                None::<&str>,
+            )?;
+            let restart_item = MenuItem::with_id(
+                app,
+                "restart_backend",
+                "Restart Trading Engine",
+                true,
+                None::<&str>,
+            )?;
             let data_folder_item =
                 MenuItem::with_id(app, "open_data_folder", "Show Data Folder", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Exit MiB Trader", true, None::<&str>)?;
             let tray_menu = Menu::with_items(
                 app,
-                &[&show_item, &restart_item, &data_folder_item, &quit_item],
+                &[
+                    &open_item,
+                    &hide_item,
+                    &engine_item,
+                    &mexc_item,
+                    &restart_item,
+                    &data_folder_item,
+                    &quit_item,
+                ],
             )?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                    "open" => show_window(app),
+                    "hide" => toggle_window(app),
+                    "engine_status" | "mexc_status" => {
+                        show_window(app);
                     }
                     "restart_backend" => {
                         log::info!("Manual backend restart requested from tray");
                         kill_backend(app);
                         let handle = app.clone();
-                        // give the OS a moment to release the port before respawn
                         tauri::async_runtime::spawn(async move {
                             tokio::time::sleep(Duration::from_millis(500)).await;
                             spawn_backend(&handle);
@@ -147,7 +203,9 @@ fn main() {
                     }
                     "open_data_folder" => {
                         if let Ok(dir) = app.path().app_data_dir() {
-                            let _ = app.opener().open_path(dir.to_string_lossy().to_string(), None::<&str>);
+                            let _ = app
+                                .opener()
+                                .open_path(dir.to_string_lossy().to_string(), None::<&str>);
                         }
                     }
                     "quit" => {
@@ -158,9 +216,6 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Minimize to tray instead of closing the process, so a stray
-            // click on the window's X button doesn't kill an unattended
-            // trading engine.
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
