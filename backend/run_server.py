@@ -17,10 +17,21 @@ def _is_frozen() -> bool:
     return getattr(sys, "frozen", False)
 
 
+def _usable(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 10_000
+    except OSError:
+        return False
+
+
 def _pick_db(folder: Path) -> Path:
     clean = folder / "market_data_clean.db"
     legacy = folder / "market_data.db"
-    return clean if clean.exists() else legacy
+    if _usable(clean):
+        return clean
+    if _usable(legacy):
+        return legacy
+    return clean
 
 
 def _load_env_file(path: Path) -> None:
@@ -38,15 +49,18 @@ def _ensure_defaults() -> None:
     data_dir = _default_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Desktop data folder first (packaged app), then backend/.env (dev).
-    # override=False so the first file that set a key wins.
     _load_env_file(data_dir / ".env")
     _load_env_file(backend_dir / ".env")
 
-    if _is_frozen():
-        os.environ.setdefault("MARKET_DB_PATH", str(_pick_db(data_dir)))
-    else:
-        os.environ.setdefault("MARKET_DB_PATH", str(_pick_db(backend_dir)))
+    picked = _pick_db(data_dir if _is_frozen() else backend_dir)
+    # Always prefer a real clean DB over an env path that points at empty market_data.db
+    env_path = Path(os.environ.get("MARKET_DB_PATH", "") or "")
+    if _usable(picked) and picked.name == "market_data_clean.db":
+        os.environ["MARKET_DB_PATH"] = str(picked)
+    elif not _usable(env_path):
+        os.environ["MARKET_DB_PATH"] = str(picked)
+
+    print(f"[db] MARKET_DB_PATH={os.environ.get('MARKET_DB_PATH')}", flush=True)
 
     os.environ.setdefault(
         "CORS_ORIGINS",
