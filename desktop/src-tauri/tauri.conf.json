@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../../frontend/build",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm start --prefix ../frontend"
+    "beforeDevCommand": "set BROWSER=none&& npm start --prefix ../frontend"
   },
   "app": {
     "windows": [
