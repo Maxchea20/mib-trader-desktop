@@ -1,7 +1,9 @@
-"""Post-FIRE Brain: one engine owns HOLD / TRAIL / EXIT.
+"""Post-FIRE Brain: one engine owns HOLD / EXIT.
 
 No votes. No separate trade manager.
 V1b: 1h alone does not exit. 15m CHoCH against does.
+Trail is OFF — SL stays at the Hunt 1.5 ATR stop. Do not walk SL to BE
+or best-ATR; that was cutting winners before TP.
 """
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from ..contract import LONG, SHORT
 
-LIFECYCLE_VERSION = "BRAIN_LIFECYCLE_V1B"
+LIFECYCLE_VERSION = "BRAIN_LIFECYCLE_V1B_NOTRAIL"
 HOLD, TRAIL, EXIT = "HOLD", "TRAIL", "EXIT"
 
 
@@ -47,12 +49,8 @@ class Position:
     protected: bool = False
 
     def hard_sl(self) -> float:
-        t = self.trail_sl
-        if t is None:
-            return self.sl
-        if self.side == LONG:
-            return max(self.sl, t)
-        return min(self.sl, t)
+        # Trail disabled: always the original Hunt stop.
+        return self.sl
 
 
 def size_from_risk(equity: float, risk_pct: float, entry: float, sl: float) -> Dict[str, float]:
@@ -140,7 +138,7 @@ def reevaluate(
     level_lost: bool = False,
     now_ts: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """One tick of after-FIRE Brain. Facts in, HOLD / TRAIL / EXIT out."""
+    """One tick of after-FIRE Brain. Facts in, HOLD / EXIT out. No trail."""
     hi = high if high is not None else price
     lo = low if low is not None else price
     if pos.side == LONG:
@@ -188,32 +186,4 @@ def reevaluate(
         if pos.side == SHORT and lo <= pos.tp:
             return {**log, "action": EXIT, "reason": "target reached", "exit_kind": "TARGET_REACHED", "exit_px": pos.tp}
 
-    moved = False
-    if pos.r_now >= 1.0 and pos.atr > 0:
-        if pos.side == LONG:
-            be = pos.entry
-            trail = pos.best - pos.atr
-            new_sl = max(pos.sl, be, trail)
-            if pos.trail_sl is None or new_sl > pos.trail_sl:
-                pos.trail_sl = new_sl
-                pos.protected = True
-                moved = True
-        else:
-            be = pos.entry
-            trail = pos.best + pos.atr
-            new_sl = min(pos.sl, be, trail)
-            if pos.trail_sl is None or new_sl < pos.trail_sl:
-                pos.trail_sl = new_sl
-                pos.protected = True
-                moved = True
-
-    if moved:
-        return {
-            **log,
-            "action": TRAIL,
-            "reason": "protect profit / structure trail",
-            "sl": pos.hard_sl(),
-            "protected": True,
-        }
-
-    return {**log, "action": HOLD, "reason": "thesis still valid", "sl": pos.hard_sl()}
+    return {**log, "action": HOLD, "reason": "thesis still valid", "sl": sl}
