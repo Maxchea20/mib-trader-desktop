@@ -3,8 +3,10 @@ import { createChart } from "lightweight-charts";
 import { useFvgOverlay } from "./chart/useFvgOverlay";
 import { useStructureMarkers } from "./chart/useStructureMarkers";
 import { useStructureEventOverlay } from "./chart/useStructureEventOverlay";
+import { useHuntMapOverlay } from "./chart/useHuntMapOverlay";
 import { FvgOverlayLayer } from "./chart/FvgOverlayLayer";
 import { StructureEventOverlayLayer } from "./chart/StructureEventOverlayLayer";
+import { HuntMapOverlayLayer } from "./chart/HuntMapOverlayLayer";
 
 const DIR = {
   support: "#00f59b",
@@ -158,11 +160,16 @@ export const CandleChart = ({
     events: chartEvents,
   });
 
+  const huntMapLines = useHuntMapOverlay({
+    chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe,
+  });
+
   return (
     <div className="relative w-full h-full overflow-hidden" data-testid="trading-chart-container">
       <div ref={containerRef} className="w-full h-full" />
       <FvgOverlayLayer bands={bands} />
       <StructureEventOverlayLayer lines={structureEventLines} />
+      <HuntMapOverlayLayer lines={huntMapLines} />
     </div>
   );
 };
