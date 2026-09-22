@@ -16,23 +16,6 @@ const DIR = {
   dynamic: "#eab308",
 };
 
-function huntMapPrices(hunt, candles, timeframe) {
-  const pack = hunt?.hunt && typeof hunt.hunt === "object" ? hunt.hunt : {};
-  let high = Number(pack.map_high ?? hunt?.map_high);
-  let low = Number(pack.map_low ?? hunt?.map_low);
-  if (!Number.isFinite(high) || !Number.isFinite(low)) {
-    if (String(timeframe).toLowerCase() === "15m" && candles?.length >= 2) {
-      const prior = candles[candles.length - 2];
-      high = Number(prior?.high);
-      low = Number(prior?.low);
-    }
-  }
-  return {
-    high: Number.isFinite(high) ? high : null,
-    low: Number.isFinite(low) ? low : null,
-  };
-}
-
 export const CandleChart = ({
   candles,
   levels = [],
@@ -161,29 +144,7 @@ export const CandleChart = ({
       });
       priceLinesRef.current.push(line);
     });
-
-    const map = huntMapPrices(hunt, candles, timeframe);
-    if (map.high != null) {
-      priceLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-        price: map.high,
-        color: "#00f59b",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "THIS LINE ↑",
-      }));
-    }
-    if (map.low != null) {
-      priceLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-        price: map.low,
-        color: "#ff3b56",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "THIS LINE ↓",
-      }));
-    }
-  }, [levels, hunt, candles, timeframe]);
+  }, [levels]);
 
   const bands = useFvgOverlay({ chartRef, candleSeriesRef, containerRef, candles, fvgZones });
 
