@@ -1,7 +1,7 @@
 """Collect AnalysisObservation adapters + Hunt C-FI snapshot for the API/UI."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .breakout.observe import observe as obs_breakout
 from .fair_value_gap.observe import observe as obs_fvg
@@ -20,6 +20,22 @@ def _live_5ms(candles_5m: List[dict]) -> List[dict]:
         return []
     po = parent_open(candles_5m[-1]["ts"])
     return [c for c in candles_5m if parent_open(c["ts"]) == po]
+
+
+def _map_15(candles_15m: List[dict], candles_5m: Optional[List[dict]]) -> Tuple[Optional[float], Optional[float]]:
+    """Prior closed 15m high/low — the line 5m #3 must close through."""
+    if not candles_15m:
+        return None, None
+    last15 = candles_15m[-1]
+    forming = bool(
+        candles_5m
+        and parent_open(candles_5m[-1]["ts"]) == int(last15["ts"])
+    )
+    prior = candles_15m[-2] if forming and len(candles_15m) >= 2 else last15
+    try:
+        return float(prior["high"]), float(prior["low"])
+    except (TypeError, ValueError, KeyError):
+        return None, None
 
 
 def _events_15m(candles_15m: List[dict]) -> List[dict]:
@@ -98,6 +114,13 @@ def collect_observations(
             }
         if hunt is not None:
             hunt["structure_events_15m"] = _events_15m(hunt_15)
+            map_high, map_low = _map_15(hunt_15, candles_5m)
+            pack = dict(hunt.get("hunt") or {})
+            pack["map_high"] = map_high
+            pack["map_low"] = map_low
+            hunt["hunt"] = pack
+            hunt["map_high"] = map_high
+            hunt["map_low"] = map_low
     if candles_4h:
         try:
             weather = classify(candles_4h, candles_1h or [])
