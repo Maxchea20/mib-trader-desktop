@@ -161,7 +161,7 @@ export const CandleChart = ({
   });
 
   const huntMapLines = useHuntMapOverlay({
-    chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe,
+    chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe, marketState,
   });
 
   return (
