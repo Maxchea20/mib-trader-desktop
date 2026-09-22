@@ -13,6 +13,7 @@ from .volume.observe import observe as obs_vol
 from .brain.observation_hunt_c import parent_open
 from .brain.observation_hunt_c_fi import evaluate_hunt_c_fi, HUNT_VERSION_C_FI
 from .brain.weather import classify
+from .market_state.builder import build_market_state
 
 
 def _live_5ms(candles_5m: List[dict]) -> List[dict]:
@@ -38,6 +39,43 @@ def _map_15(
         return float(prior["high"]), float(prior["low"]), int(prior["ts"])
     except (TypeError, ValueError, KeyError):
         return None, None, None
+
+
+def _hunt_breaks(candles_15m: List[dict]) -> List[dict]:
+    """Last swing high/low Hunt treats as the next CHoCH or BOS break.
+
+    C-fast (default 15m structure) is first. Break up through last swing
+    high is BOS if Hunt is already bullish, CHoCH if Hunt is bearish.
+    Break down is the mirror.
+    """
+    if not candles_15m or len(candles_15m) < 30:
+        return []
+    try:
+        ms = build_market_state(candles_15m, symbol="UNKNOWN", timeframe="15m")
+    except Exception:
+        return []
+    last = None
+    for e in ms.structure.events or []:
+        if (e.event or "") in ("CHoCH", "CHOCH", "BOS"):
+            last = e
+    bull = bool(last and (last.direction or "") in ("LONG", "BULLISH"))
+    bear = bool(last and (last.direction or "") in ("SHORT", "BEARISH"))
+    out: List[dict] = []
+    if ms.swing_highs:
+        sh = ms.swing_highs[-1]
+        kind = "BOS" if bull else ("CHoCH" if bear else "CHoCH/BOS")
+        out.append({
+            "side": "up", "kind": kind,
+            "price": float(sh.price), "ts": int(sh.timestamp),
+        })
+    if ms.swing_lows:
+        sl = ms.swing_lows[-1]
+        kind = "CHoCH" if bull else ("BOS" if bear else "CHoCH/BOS")
+        out.append({
+            "side": "down", "kind": kind,
+            "price": float(sl.price), "ts": int(sl.timestamp),
+        })
+    return out
 
 
 def _events_15m(candles_15m: List[dict]) -> List[dict]:
@@ -116,6 +154,7 @@ def collect_observations(
             }
         if hunt is not None:
             hunt["structure_events_15m"] = _events_15m(hunt_15)
+            hunt["breaks"] = _hunt_breaks(hunt_15)
             map_high, map_low, map_ts = _map_15(hunt_15, candles_5m)
             pack = dict(hunt.get("hunt") or {})
             pack["map_high"] = map_high
