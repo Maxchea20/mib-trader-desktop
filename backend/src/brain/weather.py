@@ -1,9 +1,16 @@
-"""Closed-candle weather: CHOP / SWING_UP / SWING_DOWN.\n\nCausal 4h (+ optional 1h veto). No calendar fitting.\n"""
+"""Closed-candle weather: CHOP / SWING_UP / SWING_DOWN.
+
+Causal 4h (+ optional 1h veto). No calendar fitting.
+V1b: a 1.0 ATR retrace off the recent 4h extreme turns SWING_* into
+CHOP so the opposite side is not blocked until a full 4h flip.
+"""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 CHOP, SWING_UP, SWING_DOWN, UNKNOWN = "CHOP", "SWING_UP", "SWING_DOWN", "UNKNOWN"
-WEATHER_VERSION = "WEATHER_V1"
+WEATHER_VERSION = "WEATHER_V1B_RETRACE"
+RETRACE_ATR = 1.0
+RETRACE_BARS = 8
 
 
 def _atr(rows: List[dict], n: int = 14) -> Optional[float]:
@@ -49,6 +56,24 @@ def _body_vote(bar: dict) -> Optional[str]:
     return None
 
 
+def _retrace(candles_4h: List[dict], flag: str, atr_now: Optional[float]) -> Tuple[float, str]:
+    """If price has given back >= 1 ATR from the 4h window extreme, CHOP."""
+    if not atr_now or atr_now <= 0 or len(candles_4h) < 3:
+        return 0.0, flag
+    window = candles_4h[-min(RETRACE_BARS, len(candles_4h)):]
+    hi = max(float(b["high"]) for b in window)
+    lo = min(float(b["low"]) for b in window)
+    close = float(candles_4h[-1]["close"])
+    if flag == SWING_UP:
+        r = (hi - close) / atr_now
+        return r, CHOP if r >= RETRACE_ATR else flag
+    if flag == SWING_DOWN:
+        r = (close - lo) / atr_now
+        return r, CHOP if r >= RETRACE_ATR else flag
+    r = max((hi - close) / atr_now, (close - lo) / atr_now)
+    return r, flag
+
+
 def classify(candles_4h: List[dict], candles_1h: Optional[List[dict]] = None) -> Dict[str, Any]:
     out = {"version": WEATHER_VERSION, "flag": UNKNOWN, "allow": ("LONG", "SHORT")}
     if len(candles_4h) < 20:
@@ -77,8 +102,14 @@ def classify(candles_4h: List[dict], candles_1h: Optional[List[dict]] = None) ->
             flag = CHOP
         elif flag == SWING_DOWN and u1 >= 5:
             flag = CHOP
+    retrace_atr, flag = _retrace(candles_4h, flag, atr_now)
     allow = ("LONG",) if flag == SWING_UP else (("SHORT",) if flag == SWING_DOWN else ("LONG", "SHORT"))
-    out.update(flag=flag, allow=allow)
+    out.update(
+        flag=flag,
+        allow=allow,
+        retrace_atr=round(float(retrace_atr), 2),
+        retrace_unlock=RETRACE_ATR,
+    )
     return out
 
 
