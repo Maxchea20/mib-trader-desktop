@@ -1,6 +1,6 @@
 import React from "react";
 
-/** Full-width Hunt map lines + arrows so the 15m high/low is obvious. */
+/** Hunt map sits on the prior 15m candle only — high stub and low stub. */
 export const HuntMapOverlayLayer = ({ lines }) => (
   <div className="absolute inset-0 pointer-events-none overflow-hidden" data-testid="hunt-map-overlays">
     {lines.map((l) => (
@@ -8,22 +8,22 @@ export const HuntMapOverlayLayer = ({ lines }) => (
         <div
           className="absolute"
           style={{
-            left: 0,
+            left: `${l.left}px`,
             top: `${l.top}px`,
             width: `${l.width}px`,
             height: 0,
-            borderTop: `${l.focus ? 2 : 1}px ${l.focus ? "solid" : "dashed"} ${l.color}`,
-            opacity: l.focus ? 1 : 0.7,
+            borderTop: `${l.focus ? 3 : 2}px solid ${l.color}`,
+            opacity: l.focus ? 1 : 0.85,
             zIndex: 7,
           }}
         />
         <span
           className="absolute font-mono-t font-bold leading-none whitespace-nowrap"
           style={{
-            left: 8,
-            top: `${l.top - 13}px`,
+            left: `${l.left + l.width + 4}px`,
+            top: `${l.top - 6}px`,
             color: l.color,
-            fontSize: l.focus ? 11 : 9,
+            fontSize: 10,
             textShadow: "0 0 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95)",
             zIndex: 8,
           }}
