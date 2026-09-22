@@ -15,6 +15,52 @@ function fallbackMap(candles, timeframe) {
   return { high: num(prior?.high), low: num(prior?.low), ts: num(prior?.ts) };
 }
 
+function evName(ev) {
+  return String(ev?.event || ev?.event_type || "").toUpperCase();
+}
+
+function evDir(ev) {
+  return String(ev?.direction || "").toUpperCase();
+}
+
+function breaksFromState(hunt, marketState) {
+  if (Array.isArray(hunt?.breaks) && hunt.breaks.length) return hunt.breaks;
+  const events = [
+    ...(marketState?.structure?.events || []),
+    ...(hunt?.structure_events_15m || []),
+  ];
+  let last = null;
+  events.forEach((ev) => {
+    const n = evName(ev);
+    if (n === "BOS" || n === "CHOCH" || n === "CHoCH") last = ev;
+  });
+  const d = evDir(last);
+  const bull = d === "LONG" || d === "BULLISH" || d === "UP";
+  const bear = d === "SHORT" || d === "BEARISH" || d === "DOWN";
+  const highs = marketState?.swings?.highs || [];
+  const lows = marketState?.swings?.lows || [];
+  const out = [];
+  if (highs.length) {
+    const sh = highs[highs.length - 1];
+    out.push({
+      side: "up",
+      kind: bull ? "BOS" : bear ? "CHoCH" : "CHoCH/BOS",
+      price: sh.price,
+      ts: sh.timestamp,
+    });
+  }
+  if (lows.length) {
+    const sl = lows[lows.length - 1];
+    out.push({
+      side: "down",
+      kind: bull ? "CHoCH" : bear ? "BOS" : "CHoCH/BOS",
+      price: sl.price,
+      ts: sl.timestamp,
+    });
+  }
+  return out;
+}
+
 function candleBox(timeScale, candleIndexByTime, ts, timeframe) {
   let xStart = getXForTimestamp(timeScale, candleIndexByTime, ts);
   const tf = String(timeframe || "15m").toLowerCase();
@@ -39,7 +85,7 @@ function candleBox(timeScale, candleIndexByTime, ts, timeframe) {
   return { left, width: Math.max(12, right - left) };
 }
 
-export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe }) {
+export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe, marketState }) {
   const [lines, setLines] = useState([]);
 
   useEffect(() => {
@@ -84,8 +130,7 @@ export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hun
         }
       }
 
-      const breaks = Array.isArray(hunt?.breaks) ? hunt.breaks : [];
-      breaks.forEach((br, i) => {
+      breaksFromState(hunt, marketState).forEach((br, i) => {
         const price = num(br.price);
         const ts = num(br.ts);
         if (price == null || ts == null) return;
@@ -125,7 +170,7 @@ export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hun
       unsub();
       window.removeEventListener("resize", onResize);
     };
-  }, [hunt, candles, timeframe]);
+  }, [hunt, candles, timeframe, marketState]);
 
   return lines;
 }
