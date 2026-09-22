@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { buildCandleIndexByTime, getXForTimestamp } from "./timeToX";
 
 function num(v) {
   if (v == null || v === "") return null;
@@ -7,9 +8,11 @@ function num(v) {
 }
 
 function fallbackMap(candles, timeframe) {
-  if (!candles?.length || String(timeframe).toLowerCase() !== "15m") return { high: null, low: null };
+  if (!candles?.length || String(timeframe).toLowerCase() !== "15m") {
+    return { high: null, low: null, ts: null };
+  }
   const prior = candles.length >= 2 ? candles[candles.length - 2] : candles[candles.length - 1];
-  return { high: num(prior?.high), low: num(prior?.low) };
+  return { high: num(prior?.high), low: num(prior?.low), ts: num(prior?.ts) };
 }
 
 export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hunt, candles, timeframe }) {
@@ -20,7 +23,7 @@ export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hun
       const series = candleSeriesRef.current;
       const chart = chartRef.current;
       const cont = containerRef.current;
-      if (!series || !chart || !cont) {
+      if (!series || !chart || !cont || !candles?.length) {
         setLines([]);
         return;
       }
@@ -29,19 +32,40 @@ export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hun
       const fb = fallbackMap(candles, timeframe);
       const high = num(pack.map_high) ?? num(hunt?.map_high) ?? fb.high;
       const low = num(pack.map_low) ?? num(hunt?.map_low) ?? fb.low;
-      if (high == null && low == null) {
+      const mapTs = num(pack.map_ts) ?? num(hunt?.map_ts) ?? fb.ts;
+      if ((high == null && low == null) || mapTs == null) {
         setLines([]);
         return;
       }
 
-      let priceScaleWidth = 58;
-      try {
-        const actualWidth = chart.priceScale("right").width();
-        if (Number.isFinite(actualWidth) && actualWidth > 0) priceScaleWidth = actualWidth;
-      } catch (e) {}
-      const plotRight = Math.max(80, cont.clientWidth - priceScaleWidth);
-      const h = cont.clientHeight;
+      const timeScale = chart.timeScale();
+      const candleIndexByTime = buildCandleIndexByTime(candles);
+      let xStart = getXForTimestamp(timeScale, candleIndexByTime, mapTs);
+      const tf = String(timeframe || "15m").toLowerCase();
+      const spanSec = tf === "5m" ? 900 : 900;
+      let xEnd = getXForTimestamp(timeScale, candleIndexByTime, mapTs + spanSec);
+      if (xEnd == null && xStart != null) {
+        const idx = candleIndexByTime.get(Number(mapTs));
+        if (idx != null) {
+          try {
+            xEnd = timeScale.logicalToCoordinate(idx + (tf === "5m" ? 3 : 1));
+          } catch (e) {}
+        }
+      }
+      if (xStart == null && xEnd == null) {
+        setLines([]);
+        return;
+      }
+      if (xStart == null) xStart = xEnd;
+      if (xEnd == null) xEnd = xStart;
+      let left = Math.min(xStart, xEnd);
+      let right = Math.max(xStart, xEnd);
+      if (right - left < 10) {
+        left -= 8;
+        right += 8;
+      }
 
+      const h = cont.clientHeight;
       const side = String(hunt?.direction || pack.side || "").toUpperCase();
       const focusHigh = side === "LONG" || side === "BULLISH" || side === "UP";
       const focusLow = side === "SHORT" || side === "BEARISH" || side === "DOWN";
@@ -50,17 +74,16 @@ export function useHuntMapOverlay({ chartRef, candleSeriesRef, containerRef, hun
       const add = (price, kind) => {
         if (price == null) return;
         const y = series.priceToCoordinate(price);
-        if (y == null || y < 14 || y > h - 8) return;
+        if (y == null || y < 12 || y > h - 8) return;
         const focus = kind === "high" ? focusHigh : focusLow;
         out.push({
           key: `hunt-map-${kind}`,
+          left,
+          width: Math.max(12, right - left),
           top: y,
-          width: plotRight,
           focus,
           color: kind === "high" ? "#00f59b" : "#ff3b56",
-          label: focus
-            ? (kind === "high" ? `↓ THIS LINE  close above  ${price.toFixed(1)}` : `↑ THIS LINE  close below  ${price.toFixed(1)}`)
-            : (kind === "high" ? `long line  ${price.toFixed(1)}` : `short line  ${price.toFixed(1)}`),
+          label: kind === "high" ? `↓ close above` : `↑ close below`,
         });
       };
       add(high, "high");
