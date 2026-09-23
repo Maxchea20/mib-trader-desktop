@@ -97,3 +97,70 @@ async def _autotrade_loop():
             pass
 
         await asyncio.sleep(5)
+
+
+async def _paper_monitor_loop():
+    """Auto-close paper trades when the live price hits SL/TP (persists history).
+
+    Skipped entirely while disconnected — never marks a trade SL/TP-hit
+    against a price that isn't actually live from MEXC.
+    """
+    from .. import paper_trading
+
+    while True:
+        await asyncio.sleep(1)
+
+        try:
+            if STATE.get("connected"):
+                paper_trading.check_open_trades(STATE.get("last_price"))
+        except Exception:
+            pass
+
+
+# --- Frontend WebSocket fan-out -----------------------------------------
+
+
+async def register(ws) -> None:
+    _clients.add(ws)
+
+
+def unregister(ws) -> None:
+    _clients.discard(ws)
+
+
+def _snapshot_msg() -> str:
+    t = STATE["last_ticker"] or {}
+
+    return json.dumps({
+        "type": "tick",
+        "price": STATE["last_price"],
+        "ticker": t,
+        "source": STATE["source"],
+        "ws_connected": STATE["ws_connected"],
+        "ts": STATE["last_tick_ts"],
+    })
+
+
+async def _broadcast_loop():
+    """Push the latest price to all connected frontend clients (throttled)."""
+    global _dirty
+
+    while True:
+        await asyncio.sleep(0.15)
+
+        if not _dirty or not _clients:
+            _dirty = False
+            continue
+
+        _dirty = False
+        msg = _snapshot_msg()
+        dead = []
+
+        for ws in list(_clients):
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+
+        for ws in dead:
+            _clients.discard(ws)
