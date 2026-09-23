@@ -1,16 +1,9 @@
-"""AI Thesis — a read-only, OpenAI-generated plain-English read of the current
-chart, compared against what Hunt C-FI/the Brain is currently doing.
+"""AI Thesis — read-only OpenAI observer of Hunt / Scenario state.
 
-HARD BOUNDARY: this module has no write path anywhere. It never calls
-paper_trading.open_trade/close_trade, never calls autotrader.update(), never
-touches MEXC order submission. It only reads analysis_service.full_analysis()
-(the same read-only call BrainHeroPanel already renders from) and
-autotrader.compute_sizing() (the sizing PREVIEW, not an order). If this
-module crashed entirely, nothing about live trading would be affected.
+HARD BOUNDARY: no write path. Never calls paper_trading.open_trade/close_trade,
+never calls autotrader.update(), never touches MEXC order submission.
 
-The AI is explicitly instructed to form its own read first and state
-disagreement with the Brain plainly when it has one — not to rationalize
-whatever the Brain already concluded.
+Scheduled review every ~900s plus immediate wake on detector events.
 """
 import asyncio
 import logging
@@ -27,81 +20,207 @@ logger = logging.getLogger(__name__)
 
 CONFIG = {
     "enabled": True,
-    "interval_seconds": 900,   # 15 min
+    "interval_seconds": 900,
     "model": os.environ.get("AI_THESIS_MODEL", "gpt-5.4-mini"),
 }
 
 STATE = {
     "thesis": None,
-    "aligned_with_brain": None,   # True / False / None (model states this itself; None until first run)
+    "aligned_with_brain": None,
     "generated_at": None,
     "processing": False,
     "error": None,
+    "last_event": None,
+    "last_fingerprint": None,
+    "pending_event": None,
 }
 
 _PROMPT_INSTRUCTIONS = """You are a market-analysis assistant embedded in a trading terminal. You are \
-shown the current BTC_USDT chart data and the terminal's own automated "Brain" state (Hunt C-FI). \
+shown structured BTC_USDT market state and the terminal's automated Brain (Hunt / Scenario). \
 Your job is ONLY to observe and explain — you do not trade, you have no ability to place or affect \
 any order, and nothing you say is executed automatically.
 
-Form your OWN independent read of the price action first, from the candles and structure data given. \
-THEN compare it to what the Brain currently says (its WAIT/FIRE state and its stated reasoning). \
-State plainly whether you agree or disagree with the Brain. If you disagree, say so directly and \
-explain why in plain English — do not soften a genuine disagreement just to sound aligned, and do not \
-assume the Brain is right by default.
+Form your OWN independent read first from the candles and structure. THEN compare it to the Brain. \
+State plainly whether you agree or disagree. Do not assume the Brain is right by default.
 
-Write for someone who is NOT a trader — plain English, no jargon, 3-5 sentences.
+If an EVENT woke you, explain: what changed, why it matters, which timeframe is the evidence, \
+whether the setup got stronger/weaker/unchanged, whether the thesis is still valid, and what would \
+invalidate it. If this is a scheduled REVIEW_15M and nothing material changed versus the previous \
+thesis, say that in one sentence — do not repeat the same speech.
 
-Respond in exactly this format:
+Write for someone who is NOT a trader — plain English, 3-6 sentences.
+
+Respond in this format:
 ALIGNED: yes|no
-THESIS: <your plain-English read of what's happening and why, including whether/why you agree or \
-disagree with the Brain>"""
+STRENGTH: stronger|weaker|unchanged
+VALID: yes|no
+INVALIDATE_IF: <one short clause>
+THESIS: <plain-English read>"""
+
+
+def _fmt_bar(c: Dict) -> str:
+    return (
+        f"O:{float(c.get('open', 0)):.1f} "
+        f"H:{float(c.get('high', 0)):.1f} "
+        f"L:{float(c.get('low', 0)):.1f} "
+        f"C:{float(c.get('close', 0)):.1f} "
+        f"V:{float(c.get('volume', 0)):.1f}"
+    )
+
+
+def _recent_ohlcv_summary(candles: List[Dict], n: int = 8) -> str:
+    tail = candles[-n:] if len(candles) > n else candles
+    if not tail:
+        return "none"
+    return " | ".join(_fmt_bar(c) for c in tail)
 
 
 def _recent_candles_summary(candles: List[Dict], n: int = 30) -> str:
     tail = candles[-n:] if len(candles) > n else candles
-    lines = [f"{c['close']:.1f}" for c in tail]
-    return ", ".join(lines)
+    return ", ".join(f"{c['close']:.1f}" for c in tail)
 
 
-def _gather_snapshot() -> Optional[Dict]:
-    """Read-only. Returns None if there isn't enough data yet (mirrors the
-    same guard full_analysis() itself uses)."""
+def _levels_summary(agents: List[Dict], agent_name: str) -> str:
+    for a in agents or []:
+        if a.get("agent") == agent_name:
+            levels = a.get("key_levels") or []
+            if not levels:
+                return "none"
+            parts = []
+            for lv in levels[:6]:
+                label = lv.get("label") or "level"
+                price = lv.get("price")
+                parts.append(f"{label} @ {price}")
+            return "; ".join(parts)
+    return "none"
+
+
+def _status_strip_summary(agents: List[Dict]) -> str:
+    if not agents:
+        return "none"
+    parts = []
+    for a in agents:
+        name = a.get("agent")
+        if not name:
+            continue
+        direction = a.get("direction") or "NEUTRAL"
+        conf = a.get("confidence")
+        if conf is None:
+            parts.append(f"{name}: {direction}")
+        else:
+            parts.append(f"{name}: {direction} ({conf}%)")
+    return "; ".join(parts) if parts else "none"
+
+
+def _fvg_summary(agents: List[Dict]) -> str:
+    return _levels_summary(agents, "fair_value_gap")
+
+
+def _open_position_summary() -> str:
+    try:
+        from .autotrader_state import _open_auto
+        t = _open_auto()
+    except Exception:
+        t = None
+    if not t:
+        return "none"
+    return (
+        f"side={t.get('side')} entry={t.get('entry')} sl={t.get('sl')} "
+        f"tp={t.get('tp')} source={t.get('source')}"
+    )
+
+
+def _gather_snapshot(event: Optional[Dict] = None) -> Optional[Dict]:
     tf = autotrader.CONFIG.get("timeframe", "15m")
     result = analysis_service.full_analysis(tf)
     if result.get("error"):
         return None
-    sizing = autotrader.compute_sizing()
-    candles = dao.read_closed_candles(tf, limit=40)
+    agents = result.get("agents") or []
+    hunt = result.get("hunt") or {}
+    weather = result.get("weather") or {}
+    market_state = result.get("market_state") or {}
+    structure = (market_state.get("structure") or {}) if isinstance(market_state, dict) else {}
+    c15 = dao.read_closed_candles("15m", limit=16)
+    c5 = dao.read_closed_candles("5m", limit=8)
+    c1 = dao.read_closed_candles("1m", limit=8)
+    at = autotrader.STATE
+    sc = at.get("last_scenario_result") or {}
+    lc = at.get("last_lifecycle") or {}
+    prev_thesis = STATE.get("thesis")
     return {
         "timeframe": tf,
         "price": result.get("price"),
-        "recent_closes": _recent_candles_summary(candles),
-        "hunt_action": (result.get("hunt") or {}).get("action"),
-        "hunt_why": (result.get("hunt") or {}).get("why_state"),
-        "weather_flag": (result.get("weather") or {}).get("flag"),
-        "market_regime": ((result.get("market_state") or {}).get("structure") or {}).get("regime"),
-        "sizing_mode": sizing.get("sizing_mode"),
-        "sizing_error": sizing.get("error"),
+        "recent_ohlcv": _recent_ohlcv_summary(c15, 8),
+        "m15_ohlcv": _recent_ohlcv_summary(c15, 8),
+        "m5_ohlcv": _recent_ohlcv_summary(c5, 6),
+        "m1_ohlcv": _recent_ohlcv_summary(c1, 5),
+        "recent_closes": _recent_candles_summary(c15, 30),
+        "support_resistance": _levels_summary(agents, "support_resistance"),
+        "fibonacci": _levels_summary(agents, "fibonacci"),
+        "fair_value_gaps": _fvg_summary(agents),
+        "agent_status_strip": _status_strip_summary(agents),
+        "hunt_action": hunt.get("action"),
+        "hunt_why": hunt.get("why_state"),
+        "hunt_event": hunt.get("event"),
+        "hunt_direction": hunt.get("direction"),
+        "thesis_ts": hunt.get("thesis_ts") or sc.get("origin_ts"),
+        "thesis_level": hunt.get("thesis_level") or sc.get("origin_level"),
+        "thesis_invalid": hunt.get("thesis_invalid"),
+        "weather_flag": weather.get("flag"),
+        "market_regime": structure.get("regime"),
+        "m5_state": (hunt.get("hunt") or {}).get("m5_path") if isinstance(hunt.get("hunt"), dict) else hunt.get("v3a_path"),
+        "slot": sc.get("m5_slot"),
+        "thesis_id": sc.get("thesis_id"),
+        "scenario_action": sc.get("action"),
+        "scenario_reason": sc.get("reason"),
+        "open_position": _open_position_summary(),
+        "lifecycle": lc,
+        "last_action": at.get("last_action"),
+        "previous_thesis": prev_thesis,
+        "event": event,
     }
 
 
 def _build_prompt(snap: Dict) -> str:
-    return (
-        f"{_PROMPT_INSTRUCTIONS}\n\n"
-        f"Symbol: {SYMBOL}\n"
-        f"Timeframe: {snap['timeframe']}\n"
-        f"Current price: {snap['price']}\n"
-        f"Recent closes (oldest to newest): {snap['recent_closes']}\n"
-        f"Market regime (structure): {snap.get('market_regime')}\n"
-        f"Brain's current action: {snap.get('hunt_action')}\n"
-        f"Brain's stated reasoning: {snap.get('hunt_why')}\n"
-        f"4H weather flag: {snap.get('weather_flag')}\n"
-    )
+    ev = snap.get("event") or {}
+    ev_kind = ev.get("kind") if isinstance(ev, dict) else None
+    lines = [
+        _PROMPT_INSTRUCTIONS,
+        "",
+        f"Symbol: {SYMBOL}",
+        f"Timeframe: {snap.get('timeframe')}",
+        f"Current price: {snap.get('price')}",
+        f"Wake reason: {ev_kind or 'REVIEW_15M'}",
+        f"M15 OHLC (oldest to newest): {snap.get('m15_ohlcv') or snap.get('recent_ohlcv')}",
+        f"M5 OHLC: {snap.get('m5_ohlcv')}",
+        f"M1 OHLC (closed): {snap.get('m1_ohlcv')}",
+        f"Market regime (structure): {snap.get('market_regime')}",
+        f"M5 path/state: {snap.get('m5_state')}",
+        f"Support/resistance: {snap.get('support_resistance')}",
+        f"Fibonacci: {snap.get('fibonacci')}",
+        f"Fair value gaps: {snap.get('fair_value_gaps')}",
+        f"Agent strip: {snap.get('agent_status_strip')}",
+        f"Brain action: {snap.get('hunt_action')}",
+        f"Brain event: {snap.get('hunt_event')}",
+        f"Brain direction: {snap.get('hunt_direction')}",
+        f"Brain reasoning: {snap.get('hunt_why')}",
+        f"Thesis ts/level/id: {snap.get('thesis_ts')} / {snap.get('thesis_level')} / {snap.get('thesis_id')}",
+        f"Thesis invalid flag: {snap.get('thesis_invalid')}",
+        f"M5 slot: {snap.get('slot')}",
+        f"Scenario action: {snap.get('scenario_action')} ({snap.get('scenario_reason')})",
+        f"4H weather flag: {snap.get('weather_flag')}",
+        f"Open position: {snap.get('open_position')}",
+        f"Lifecycle: {snap.get('lifecycle')}",
+        f"Engine last_action: {snap.get('last_action')}",
+        f"Previous AI thesis: {snap.get('previous_thesis')}",
+    ]
+    if ev:
+        lines.append(f"Event payload: {ev}")
+    return "\n".join(lines)
 
 
 def _call_openai(prompt: str) -> str:
-    from openai import OpenAI  # imported lazily so a missing key/package never breaks startup
+    from openai import OpenAI
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
@@ -109,7 +228,7 @@ def _call_openai(prompt: str) -> str:
     resp = client.chat.completions.create(
         model=CONFIG["model"],
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=300,
+        max_tokens=420,
     )
     return resp.choices[0].message.content or ""
 
@@ -117,24 +236,44 @@ def _call_openai(prompt: str) -> str:
 def _parse_response(text: str) -> Dict:
     aligned = None
     thesis = text.strip()
+    strength = None
+    valid = None
+    invalidate_if = None
     for line in text.splitlines():
-        low = line.strip().lower()
+        raw = line.strip()
+        low = raw.lower()
         if low.startswith("aligned:"):
             v = low.split(":", 1)[1].strip()
             aligned = v.startswith("y")
-        if line.strip().lower().startswith("thesis:"):
-            thesis = line.split(":", 1)[1].strip()
-    return {"aligned": aligned, "thesis": thesis}
+        elif low.startswith("strength:"):
+            strength = raw.split(":", 1)[1].strip().lower()
+        elif low.startswith("valid:"):
+            v = low.split(":", 1)[1].strip()
+            valid = v.startswith("y")
+        elif low.startswith("invalidate_if:"):
+            invalidate_if = raw.split(":", 1)[1].strip()
+        elif low.startswith("thesis:"):
+            thesis = raw.split(":", 1)[1].strip()
+    return {
+        "aligned": aligned,
+        "thesis": thesis,
+        "strength": strength,
+        "valid": valid,
+        "invalidate_if": invalidate_if,
+    }
 
 
-def run_once() -> None:
-    """One full cycle: gather -> prompt -> call -> store. Never raises —
-    failures land in STATE["error"] so the loop keeps running on schedule."""
+def run_once(reason: str = "REVIEW_15M", event: Optional[Dict] = None) -> None:
+    if event is None:
+        event = {"kind": reason}
+    elif "kind" not in event:
+        event = {**event, "kind": reason}
     if not CONFIG["enabled"]:
         return
     STATE["processing"] = True
+    STATE["last_event"] = event.get("kind")
     try:
-        snap = _gather_snapshot()
+        snap = _gather_snapshot(event)
         if snap is None:
             STATE["error"] = "not enough candle data yet"
             return
@@ -145,11 +284,39 @@ def run_once() -> None:
         STATE["aligned_with_brain"] = parsed["aligned"]
         STATE["generated_at"] = time.time()
         STATE["error"] = None
+        STATE["last_fingerprint"] = (event or {}).get("fingerprint")
     except Exception as e:
         STATE["error"] = str(e)
         logger.exception("ai_thesis run_once failed")
     finally:
         STATE["processing"] = False
+        pending = STATE.get("pending_event")
+        if pending:
+            STATE["pending_event"] = None
+            run_once(reason=pending.get("kind") or "REVIEW_15M", event=pending)
+
+
+def notify_event(event: Dict) -> None:
+    if not event or not CONFIG["enabled"]:
+        return
+    if STATE["processing"]:
+        STATE["pending_event"] = event
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(asyncio.to_thread(run_once, event.get("kind") or "REVIEW_15M", event))
+    except RuntimeError:
+        run_once(reason=event.get("kind") or "REVIEW_15M", event=event)
+
+
+def after_evaluate() -> None:
+    try:
+        from . import ai_event_detector
+        ev = ai_event_detector.inspect_and_maybe_emit(autotrader.STATE)
+        if ev:
+            notify_event(ev)
+    except Exception:
+        logger.exception("ai observer hook failed")
 
 
 def status() -> Dict:
@@ -157,14 +324,10 @@ def status() -> Dict:
 
 
 async def loop() -> None:
-    """Background task — started once from server.py's startup hook. Sleeps
-    interval_seconds between runs; a slow/failed OpenAI call never blocks or
-    crashes anything else, since run_once() catches everything and this is
-    its own independent asyncio task."""
-    await asyncio.sleep(10)  # let the rest of the app finish its own startup first
+    await asyncio.sleep(10)
     while True:
         try:
-            await asyncio.to_thread(run_once)
+            await asyncio.to_thread(run_once, "REVIEW_15M", {"kind": "REVIEW_15M"})
         except Exception:
             logger.exception("ai_thesis loop iteration failed")
         await asyncio.sleep(CONFIG["interval_seconds"])
