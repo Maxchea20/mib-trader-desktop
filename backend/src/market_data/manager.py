@@ -164,3 +164,209 @@ async def _broadcast_loop():
 
         for ws in dead:
             _clients.discard(ws)
+
+
+# --- MEXC live WebSocket -----------------------------------------------
+
+
+async def _mexc_ws_loop():
+    """Connect to MEXC Futures WS using resolved IPs and stream live data."""
+    global _dirty
+
+    while True:
+        try:
+            ips = await asyncio.to_thread(resolve_mexc_ips)
+            logger.info(f"MEXC resolved IPs: {ips}")
+            connected = False
+            for ip in ips:
+                try:
+                    logger.info(f"Connecting to MEXC: {ip}")
+                    async with websockets.connect(
+                        MEXC_WS_URL,
+                        host=ip,
+                        port=443,
+                        ping_interval=None,
+                        open_timeout=12,
+                        close_timeout=5,
+                    ) as ws:
+                        logger.info("MEXC WebSocket connected.")
+                        await ws.send(json.dumps({"method": "sub.ticker", "param": {"symbol": SYMBOL}}))
+                        logger.info(f"Subscribed to {SYMBOL} ticker.")
+                        await ws.send(json.dumps({"method": "sub.deal", "param": {"symbol": SYMBOL}}))
+                        logger.info(f"Subscribed to {SYMBOL} trades.")
+
+                        async def _keepalive():
+                            while True:
+                                await asyncio.sleep(12)
+                                try:
+                                    await ws.send(json.dumps({"method": "ping"}))
+                                except Exception:
+                                    break
+
+                        ka = asyncio.create_task(_keepalive())
+                        STATE["ws_connected"] = True
+                        STATE["connected"] = True
+                        STATE["source"] = "mexc_ws"
+                        connected = True
+                        try:
+                            while True:
+                                raw = await asyncio.wait_for(ws.recv(), timeout=40)
+                                d = json.loads(raw)
+                                last_tick = STATE.get("last_tick_ts")
+                                if last_tick is not None and time.time() - last_tick > 45:
+                                    raise ConnectionError(f"MEXC market data stale: {int(time.time() - last_tick)}s")
+                                ch = d.get("channel")
+                                if ch == "push.ticker":
+                                    _update_ticker(d.get("data", {}))
+                                    _dirty = True
+                                elif ch == "push.deal":
+                                    deals = d.get("data")
+                                    deal = deals[0] if isinstance(deals, list) and deals else deals
+                                    if isinstance(deal, dict) and deal.get("p") is not None:
+                                        _update_price(float(deal["p"]))
+                                        _dirty = True
+                        finally:
+                            ka.cancel()
+                            with contextlib.suppress(asyncio.CancelledError, Exception):
+                                await ka
+                except Exception as e:
+                    logger.error(f"MEXC connection failed ({ip}): {type(e).__name__}: {e}")
+                    STATE["ws_connected"] = False
+                    continue
+            if not connected:
+                STATE["connected"] = False
+                STATE["ws_connected"] = False
+                STATE["source"] = "disconnected"
+                logger.error("MEXC WebSocket unavailable on all resolved IPs.")
+                await asyncio.sleep(3)
+        except Exception as e:
+            logger.error(f"MEXC WebSocket/DNS error: {type(e).__name__}: {e}")
+            STATE["ws_connected"] = False
+            STATE["connected"] = False
+            STATE["source"] = "disconnected"
+            await asyncio.sleep(3)
+
+
+def _update_price(price: float):
+    STATE["last_price"] = price
+    STATE["last_tick_ts"] = int(time.time())
+    if STATE["last_ticker"] is None:
+        STATE["last_ticker"] = {"symbol": SYMBOL, "last": price}
+    else:
+        STATE["last_ticker"]["last"] = price
+
+
+def _update_ticker(data: dict):
+    try:
+        last = float(data.get("lastPrice", STATE.get("last_price") or 0))
+        t = {
+            "symbol": data.get("symbol", SYMBOL),
+            "last": last,
+            "bid": float(data.get("bid1", last)),
+            "ask": float(data.get("ask1", last)),
+            "high24": float(data.get("high24Price", 0)),
+            "low24": float(data.get("lower24Price", 0)),
+            "volume24": float(data.get("volume24", 0)),
+            "amount24": float(data.get("amount24", 0)),
+            "change_rate": float(data.get("riseFallRate", 0)),
+            "change_value": float(data.get("riseFallValue", 0)),
+            "funding_rate": float(data.get("fundingRate", 0)),
+            "index_price": float(data.get("indexPrice", last)),
+            "ts": int(data.get("timestamp", int(time.time() * 1000))),
+        }
+        STATE["last_ticker"] = t
+        STATE["last_price"] = last
+        STATE["last_tick_ts"] = int(time.time())
+    except (TypeError, ValueError):
+        pass
+
+
+async def _startup_sync():
+    try:
+        ok = await mexc.ping()
+        if not ok:
+            if not STATE["ws_connected"]:
+                STATE["connected"] = False
+                STATE["source"] = "disconnected"
+            STATE["startup_synced"] = False
+            return
+        for tf in TIMEFRAMES:
+            try:
+                await gap_sync.sync_timeframe(SYMBOL, tf)
+            except Exception as exc:
+                logger.error(f"Startup sync failed for {tf}: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(0.15)
+        STATE["startup_synced"] = True
+        STATE["connected"] = True
+        STATE["source"] = "mexc_ws" if STATE["ws_connected"] else "mexc_rest"
+    except Exception as exc:
+        logger.error(f"Startup sync error: {type(exc).__name__}: {exc}")
+        STATE["startup_synced"] = False
+        if not STATE["ws_connected"]:
+            STATE["connected"] = False
+            STATE["source"] = "disconnected"
+
+
+async def _poll_loop():
+    """Low-frequency candle sync.
+
+    Live price comes from MEXC WebSocket.
+    REST is used only for candle persistence, gap recovery,
+    and as a price fallback when WebSocket is unavailable.
+    """
+    last_1m_sync = 0
+    last_5m_sync = 0
+    last_15m_sync = 0
+    last_full_sync = time.time()
+    last_rest_ticker = 0
+
+    while True:
+        now = time.time()
+        try:
+            if now - last_1m_sync >= 15:
+                await gap_sync.sync_latest(SYMBOL, "1m")
+                last_1m_sync = time.time()
+            if now - last_5m_sync >= 60:
+                await gap_sync.sync_latest(SYMBOL, "5m")
+                last_5m_sync = time.time()
+            if now - last_15m_sync >= 60:
+                await gap_sync.sync_latest(SYMBOL, "15m")
+                last_15m_sync = time.time()
+            if now - last_full_sync >= 300:
+                for tf in TIMEFRAMES:
+                    await gap_sync.sync_timeframe(SYMBOL, tf, limit=MAX_CANDLES)
+                    await asyncio.sleep(0.1)
+                last_full_sync = time.time()
+            if not STATE["ws_connected"] and now - last_rest_ticker >= 30:
+                t = await mexc.get_ticker(SYMBOL)
+                last_rest_ticker = time.time()
+                if t:
+                    STATE["connected"] = True
+                    STATE["source"] = "mexc_rest"
+                    STATE["last_ticker"] = t
+                    STATE["last_price"] = t["last"]
+                    STATE["last_tick_ts"] = int(time.time())
+                else:
+                    STATE["connected"] = False
+                    STATE["source"] = "disconnected"
+        except Exception as e:
+            logger.error(f"Market candle sync error: {type(e).__name__}: {e}")
+            if not STATE["ws_connected"]:
+                STATE["connected"] = False
+                STATE["source"] = "disconnected"
+        await asyncio.sleep(5)
+
+
+def live_status() -> Dict:
+    age = None
+    if STATE["last_tick_ts"]:
+        age = int(time.time()) - STATE["last_tick_ts"]
+    return {
+        "connected": STATE["connected"],
+        "ws_connected": STATE["ws_connected"],
+        "source": STATE["source"],
+        "startup_synced": STATE["startup_synced"],
+        "last_price": STATE["last_price"],
+        "tick_age_seconds": age,
+        "ticker": STATE["last_ticker"],
+    }
