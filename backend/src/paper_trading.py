@@ -73,7 +73,9 @@ def init_db() -> None:
 
 
 def _row_to_dict(r: sqlite3.Row) -> Dict:
-    return {k: r[k] for k in r.keys()}
+    d = {k: r[k] for k in r.keys()}
+    d["thesis"] = _thesis(d)
+    return d
 
 
 def _pnl(side: str, entry: float, exit_price: float, qty: float):

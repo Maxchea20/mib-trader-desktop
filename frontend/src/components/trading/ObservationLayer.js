@@ -41,26 +41,52 @@ function FactCard({ obs }) {
   );
 }
 
-export const ObservationLayer = ({ observations = [], hunt, weather }) => {
-  const path = hunt && hunt.hunt && hunt.hunt.m5_path;
-  const why = hunt && (hunt.why_state || [])[0];
-  const action = hunt ? hunt.action : "WAIT";
-  const side = hunt?.direction || "";
+function scenarioLabelForSlot(slot) {
+  if (slot == null) return "—";
+  if (slot === 3) return "M5#3 (excluded)";
+  return `M5#${slot} (C)`;
+}
+
+export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => {
+  const isScenario = auto?.config?.entry_engine === "scenario";
+  const result = auto?.state?.last_scenario_result;
+
+  // Engine-agnostic facts (Market Structure / Breakout / S/R / FVG /
+  // Volume / Trend / Momentum below) are unchanged either way -- they
+  // come from the same observe() agents scenario_engine.py itself
+  // calls internally, not from either engine's decision layer. Only
+  // this top strip actually differs by which engine is active.
+  let action, path, why, side;
+  if (isScenario) {
+    const slot = result?.m5_slot;
+    action = result ? (result.action === "ALREADY_ATTEMPTED" ? "HANDLED" : result.action) : "WAIT";
+    path = scenarioLabelForSlot(slot);
+    why = result?.reason || "No active M15 thesis yet.";
+    side = result?.direction || "";
+  } else {
+    path = hunt && hunt.hunt && hunt.hunt.m5_path;
+    why = hunt && (hunt.why_state || [])[0];
+    action = hunt ? hunt.action : "WAIT";
+    side = hunt?.direction || "";
+  }
   const rgb = glowRgb(`${action} ${side}`);
 
   return (
     <div data-testid="observation-layer">
       <div className="flex items-center gap-2 mb-3 px-0.5">
         <span className="font-head font-bold text-slate-200 tracking-wide text-lg">OBSERVATIONS</span>
-        <span className="widget-label">Layer 3 · observe() facts + hunt path</span>
+        <span className="widget-label">
+          Layer 3 · observe() facts + {isScenario ? "scenario path" : "hunt path"}
+        </span>
       </div>
 
       <div
         className="breathe-glow panel p-3 mb-3 flex flex-wrap gap-6 items-center"
         style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }}
+        data-testid="observation-top-strip"
       >
         <div>
-          <div className="widget-label">Hunt</div>
+          <div className="widget-label">{isScenario ? "Scenario" : "Hunt"}</div>
           <div
             className="font-head font-bold text-xl pulse-dot"
             style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}
@@ -69,7 +95,7 @@ export const ObservationLayer = ({ observations = [], hunt, weather }) => {
           </div>
         </div>
         <div>
-          <div className="widget-label">5m path</div>
+          <div className="widget-label">{isScenario ? "M5 slot" : "5m path"}</div>
           <div className="font-mono-t text-cyan-400">{path || "—"}</div>
         </div>
         <div>

@@ -30,6 +30,106 @@ def _record_close(reason: str) -> None:
     STATE["last_close_reason"] = reason
 
 
+def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
+                              live_mode: bool, live_armed: bool) -> Dict:
+    """Scenario-engine entry path, parallel to the legacy FIRE block in
+    evaluate() below. Only reached when CONFIG["entry_engine"] ==
+    "scenario". The shared pre-checks (existing-position lifecycle
+    management, open_auto / MEXC-still-open guards) already ran in
+    evaluate() before this is called.
+
+    Deliberately does NOT apply the legacy 4h "weather" gate
+    (brain.weather.side_allowed) -- that is legacy-specific context
+    scenario_engine.py was never validated against this session; adding
+    it here would be a new, untested filter bolted onto the tested
+    engine, not a safety measure. Everything else that IS a shared
+    account-level safety control (cooldown, live/paper gate, MEXC
+    margin/position checks inside the existing exec functions) is reused
+    unchanged.
+    """
+    from . import scenario_live_bridge
+    from .brain import lifecycle
+    from .autotrader_exec import _open_from_hunt, _open_live_from_hunt
+
+    result = scenario_live_bridge.evaluate_scenario(live_price)
+    STATE["last_scenario_result"] = result
+    action = result.get("action")
+
+    if action != "FIRE":
+        STATE["last_action"] = f"SCENARIO {action} ({result.get('reason') or ''})"
+        return STATE
+
+    if _in_cooldown(300):
+        STATE["last_action"] = "COOLDOWN"
+        return STATE
+
+    try:
+        pos = lifecycle.position_from_scenario_fire(
+            result,
+            trade_id=f"scn-{result['thesis_id']}-{result['entry_ts']}",
+            equity=CONFIG["notional_usd"],
+            risk_pct=CONFIG["risk_pct"] / 100.0,
+            sl_atr_mult=CONFIG["sl_atr_mult"],
+            tp_atr_mult=CONFIG["tp_atr_mult"],
+            opened_ts=result["entry_ts"],
+        )
+    except Exception as e:
+        STATE["last_action"] = "SCENARIO FIRE BUT SIZING FAILED"
+        STATE["last_reason"] = str(e)
+        logger.exception("scenario position sizing failed")
+        return STATE
+
+    side = result["direction"]
+    hunt_like = {
+        "direction": side, "entry": pos.entry, "stop": pos.sl, "target": pos.tp,
+        "event": result.get("origin_event"), "gate": f"scenario/{result.get('scenario')}",
+        "why_state": [result.get("reason")],
+        "thesis_ts": result.get("origin_ts"), "thesis_level": result.get("origin_level"),
+    }
+    case_label = {1: "M5#1", 2: "C", 3: "M5#3"}.get(result.get("m5_slot"), "UNKNOWN")
+    entry_method = "C" if result.get("m5_slot") == 2 else "A"
+    scenario_thesis = {
+        "thesis_id": result.get("thesis_id"), "case": case_label, "m5_slot": result.get("m5_slot"),
+        "entry_method": entry_method, "engine": "scenario",
+        "c_intended_price": result.get("c_intended_price"), "c_intended_ts": result.get("c_intended_ts"),
+        "atr15": result.get("atr15"), "scenario_class": result.get("scenario"),
+    }
+
+
+    STATE["last_scenario_trade_log"] = {
+        "thesis_id": result.get("thesis_id"), "direction": side,
+        "origin_event": result.get("origin_event"), "origin_level": result.get("origin_level"),
+        "origin_ts": result.get("origin_ts"), "m5_confirmation_ts": result.get("m5_confirmation_ts"),
+        "m5_slot": result.get("m5_slot"), "case": case_label, "entry_method": entry_method,
+        "scenario_class": result.get("scenario"),
+        "c_intended_price": result.get("c_intended_price"), "c_intended_ts": result.get("c_intended_ts"),
+        "actual_entry_price": pos.entry, "atr15": result.get("atr15"),
+        "sl": pos.sl, "tp": pos.tp, "qty": pos.qty, "risk_usd": pos.risk_usd,
+        "reason": result.get("reason"), "eval_at": int(time.time()),
+    }
+
+    if live_mode and live_armed:
+        try:
+            t0 = time.time()
+            order_result = _open_live_from_hunt(hunt_like, tf, live_price, extra_thesis=scenario_thesis)
+            STATE["last_scenario_trade_log"]["execution_delay_s"] = round(time.time() - t0, 3)
+            STATE["last_scenario_trade_log"]["order_result"] = order_result
+            STATE["last_action"] = f"SCENARIO LIVE OPEN {side} {order_result.get('data')}"
+        except Exception as e:
+            STATE["last_action"] = "SCENARIO LIVE ORDER FAILED"
+            STATE["last_reason"] = str(e)
+            logger.exception("scenario live order failed")
+        return STATE
+
+    if live_mode and not live_armed:
+        STATE["last_reason"] = (
+            "LIVE toggle is on but MEXC_LIVE_TRADING_ENABLED is not true — paper fill only."
+        )
+    _open_from_hunt(hunt_like, tf, thesis=scenario_thesis)
+    STATE["last_action"] = f"SCENARIO OPEN {side} {result.get('scenario')}"
+    return STATE
+
+
 def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if not CONFIG["enabled"]:
         STATE["last_action"] = "DISABLED"
@@ -108,6 +208,13 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             return STATE
     except Exception:
         pass
+    if CONFIG.get("entry_engine", "legacy") != "legacy":
+        # Scenario-engine entry path. Only the legacy FIRE decision below
+        # this point is skipped -- everything above (revive-shadow,
+        # existing-position lifecycle management, open_auto / MEXC-still-
+        # open guards) already ran unconditionally and applies to BOTH
+        # engines equally, so only one can ever open a new trade.
+        return _evaluate_scenario_entry(tf, live_price, live_mode, live_armed)
     if hunt.get("action") != "FIRE":
         STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
         return STATE

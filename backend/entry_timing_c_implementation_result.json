@@ -1,0 +1,1373 @@
+{
+  "paired": [
+    {
+      "thesis_id": "TH-000002",
+      "direction": "LONG",
+      "a_ts": 1786479300,
+      "b_ts": 1786479000,
+      "c_ts": 1786478760,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 6.447,
+        "mae_atr": 2.854,
+        "mae_before_target_atr": 1.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 6.201,
+        "mae_atr": 3.101,
+        "mae_before_target_atr": 1.247,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 6.382,
+        "mae_atr": 2.919,
+        "mae_before_target_atr": 1.066,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000006",
+      "direction": "SHORT",
+      "a_ts": 1786555200,
+      "b_ts": 1786546500,
+      "c_ts": 1786546260,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 3.242,
+        "mae_atr": 2.759,
+        "mae_before_target_atr": 2.759,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 0.93,
+        "mae_atr": 2.653,
+        "mae_before_target_atr": 2.653,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 1.421,
+        "mae_atr": 2.163,
+        "mae_before_target_atr": 2.163,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000011",
+      "direction": "SHORT",
+      "a_ts": 1786645800,
+      "b_ts": 1786639200,
+      "c_ts": 1786639080,
+      "a_outcome": "LOSS",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": -1.5,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 2.645,
+        "mae_atr": 2.306,
+        "mae_before_target_atr": 2.306,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 2.454,
+        "mae_atr": 2.498,
+        "mae_before_target_atr": 2.498,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 3.34,
+        "mae_atr": 1.612,
+        "mae_before_target_atr": 1.612,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000016",
+      "direction": "LONG",
+      "a_ts": 1786722300,
+      "b_ts": 1786722000,
+      "c_ts": 1786721880,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 1.459,
+        "mae_atr": 1.3,
+        "mae_before_target_atr": 1.3,
+        "reached_target": false,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 1.387,
+        "mae_atr": 1.372,
+        "mae_before_target_atr": 1.372,
+        "reached_target": false,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 1.726,
+        "mae_atr": 1.034,
+        "mae_before_target_atr": 1.034,
+        "reached_target": false,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000017",
+      "direction": "LONG",
+      "a_ts": 1786751100,
+      "b_ts": 1786750800,
+      "c_ts": 1786750740,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 2.885,
+        "mae_atr": 1.616,
+        "mae_before_target_atr": 0.397,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 3.441,
+        "mae_atr": 1.059,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 3.668,
+        "mae_atr": 0.832,
+        "mae_before_target_atr": 0.008,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000019",
+      "direction": "SHORT",
+      "a_ts": 1786783500,
+      "b_ts": 1786783200,
+      "c_ts": 1786783020,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 2.521,
+        "mae_atr": 3.138,
+        "mae_before_target_atr": 0.392,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 2.546,
+        "mae_atr": 3.113,
+        "mae_before_target_atr": 0.673,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 2.552,
+        "mae_atr": 3.106,
+        "mae_before_target_atr": 0.666,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000024",
+      "direction": "LONG",
+      "a_ts": 1786890600,
+      "b_ts": 1786890300,
+      "c_ts": 1786890060,
+      "a_outcome": "WIN",
+      "b_outcome": "LOSS",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": -1.5,
+      "c_pnl": 2.5,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 38.394,
+        "mae_atr": 18.806,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 36.745,
+        "mae_atr": 20.455,
+        "mae_before_target_atr": 1.659,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 37.377,
+        "mae_atr": 19.823,
+        "mae_before_target_atr": 1.028,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000025",
+      "direction": "SHORT",
+      "a_ts": 1786910400,
+      "b_ts": 1786910100,
+      "c_ts": 1786910040,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 7.279,
+        "mae_atr": 26.883,
+        "mae_before_target_atr": 0.486,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 7.303,
+        "mae_atr": 26.859,
+        "mae_before_target_atr": 0.462,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 6.974,
+        "mae_atr": 27.188,
+        "mae_before_target_atr": 0.791,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000036",
+      "direction": "SHORT",
+      "a_ts": 1787119200,
+      "b_ts": 1787118900,
+      "c_ts": 1787118840,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 1.426,
+        "mae_atr": 91.047,
+        "mae_before_target_atr": 91.047,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 1.543,
+        "mae_atr": 90.93,
+        "mae_before_target_atr": 90.93,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 1.593,
+        "mae_atr": 90.88,
+        "mae_before_target_atr": 90.88,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000037",
+      "direction": "LONG",
+      "a_ts": 1787129100,
+      "b_ts": 1787128800,
+      "c_ts": 1787128680,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 84.366,
+        "mae_atr": 1.419,
+        "mae_before_target_atr": 1.419,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 83.707,
+        "mae_atr": 1.032,
+        "mae_before_target_atr": 1.032,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 82.906,
+        "mae_atr": 0.929,
+        "mae_before_target_atr": 0.929,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000047",
+      "direction": "LONG",
+      "a_ts": 1787479500,
+      "b_ts": 1787474400,
+      "c_ts": 1787474280,
+      "a_outcome": "WIN",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": 2.5,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 4.753,
+        "mae_atr": 0.267,
+        "mae_before_target_atr": 0.267,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 5.535,
+        "mae_atr": 0.0,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 5.543,
+        "mae_atr": 0.05,
+        "mae_before_target_atr": 0.05,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000049",
+      "direction": "LONG",
+      "a_ts": 1787555700,
+      "b_ts": 1787555400,
+      "c_ts": 1787555400,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 13.536,
+        "mae_atr": 3.257,
+        "mae_before_target_atr": 3.257,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 14.065,
+        "mae_atr": 2.728,
+        "mae_before_target_atr": 2.728,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 14.065,
+        "mae_atr": 2.728,
+        "mae_before_target_atr": 2.728,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 5
+    },
+    {
+      "thesis_id": "TH-000056",
+      "direction": "SHORT",
+      "a_ts": 1787756400,
+      "b_ts": 1787756100,
+      "c_ts": 1787756040,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 0.606,
+        "mae_atr": 7.36,
+        "mae_before_target_atr": 7.36,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 0.423,
+        "mae_atr": 7.558,
+        "mae_before_target_atr": 7.558,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 0.653,
+        "mae_atr": 7.328,
+        "mae_before_target_atr": 7.328,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000058",
+      "direction": "LONG",
+      "a_ts": 1787819400,
+      "b_ts": 1787817300,
+      "c_ts": 1787817120,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 10.028,
+        "mae_atr": 6.111,
+        "mae_before_target_atr": 1.253,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 15.294,
+        "mae_atr": 0.845,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 15.895,
+        "mae_atr": 0.244,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000062",
+      "direction": "SHORT",
+      "a_ts": 1787884200,
+      "b_ts": 1787883900,
+      "c_ts": 1787883720,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 10.081,
+        "mae_atr": 0.974,
+        "mae_before_target_atr": 0.974,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 10.782,
+        "mae_atr": 0.274,
+        "mae_before_target_atr": 0.274,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 10.675,
+        "mae_atr": 0.381,
+        "mae_before_target_atr": 0.381,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000065",
+      "direction": "LONG",
+      "a_ts": 1788019500,
+      "b_ts": 1788014400,
+      "c_ts": 1788014340,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": null,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 10.709,
+        "mae_atr": 0.772,
+        "mae_before_target_atr": 0.772,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 12.365,
+        "mae_atr": 0.0,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 12.474,
+        "mae_atr": 0.0,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000070",
+      "direction": "SHORT",
+      "a_ts": 1788122700,
+      "b_ts": 1788122400,
+      "c_ts": 1788122400,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": null,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 8.299,
+        "mae_atr": 3.589,
+        "mae_before_target_atr": 1.221,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 9.013,
+        "mae_atr": 2.875,
+        "mae_before_target_atr": 0.189,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 9.013,
+        "mae_atr": 2.875,
+        "mae_before_target_atr": 0.189,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 5
+    },
+    {
+      "thesis_id": "TH-000071",
+      "direction": "SHORT",
+      "a_ts": 1788144600,
+      "b_ts": 1788132300,
+      "c_ts": 1788132240,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": null,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 0.518,
+        "mae_atr": 6.736,
+        "mae_before_target_atr": 6.736,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 3.776,
+        "mae_atr": 4.959,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 3.958,
+        "mae_atr": 4.777,
+        "mae_before_target_atr": 0.237,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000078",
+      "direction": "SHORT",
+      "a_ts": 1788252600,
+      "b_ts": 1788251100,
+      "c_ts": 1788251040,
+      "a_outcome": "LOSS",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": -1.5,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 6.798,
+        "mae_atr": 2.896,
+        "mae_before_target_atr": 2.896,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 8.186,
+        "mae_atr": 1.508,
+        "mae_before_target_atr": 0.421,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 8.503,
+        "mae_atr": 1.191,
+        "mae_before_target_atr": 0.104,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000079",
+      "direction": "LONG",
+      "a_ts": 1788272100,
+      "b_ts": 1788271800,
+      "c_ts": 1788271620,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 0.29,
+        "mae_atr": 7.961,
+        "mae_before_target_atr": 7.961,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 0.253,
+        "mae_atr": 7.998,
+        "mae_before_target_atr": 7.998,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 0.676,
+        "mae_atr": 7.575,
+        "mae_before_target_atr": 7.575,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000091",
+      "direction": "SHORT",
+      "a_ts": 1788485400,
+      "b_ts": 1788485100,
+      "c_ts": 1788485040,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 9.5,
+        "mae_atr": 2.18,
+        "mae_before_target_atr": 2.18,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 9.082,
+        "mae_atr": 2.597,
+        "mae_before_target_atr": 2.597,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 9.364,
+        "mae_atr": 2.316,
+        "mae_before_target_atr": 2.316,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000096",
+      "direction": "LONG",
+      "a_ts": 1788657300,
+      "b_ts": 1788657000,
+      "c_ts": 1788656760,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 6.133,
+        "mae_atr": 7.436,
+        "mae_before_target_atr": 7.436,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 5.919,
+        "mae_atr": 7.65,
+        "mae_before_target_atr": 7.65,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 6.017,
+        "mae_atr": 7.552,
+        "mae_before_target_atr": 7.552,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000099",
+      "direction": "LONG",
+      "a_ts": 1788718500,
+      "b_ts": 1788718200,
+      "c_ts": 1788717960,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 6.228,
+        "mae_atr": 9.739,
+        "mae_before_target_atr": 1.644,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 6.173,
+        "mae_atr": 9.793,
+        "mae_before_target_atr": 1.699,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 6.296,
+        "mae_atr": 9.67,
+        "mae_before_target_atr": 1.575,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000100",
+      "direction": "SHORT",
+      "a_ts": 1788732900,
+      "b_ts": 1788732600,
+      "c_ts": 1788732480,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 10.994,
+        "mae_atr": 8.111,
+        "mae_before_target_atr": 8.111,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 10.175,
+        "mae_atr": 8.93,
+        "mae_before_target_atr": 8.93,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 10.894,
+        "mae_atr": 8.211,
+        "mae_before_target_atr": 8.211,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000104",
+      "direction": "LONG",
+      "a_ts": 1788786000,
+      "b_ts": 1788785700,
+      "c_ts": 1788785520,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 0.505,
+        "mae_atr": 13.482,
+        "mae_before_target_atr": 13.482,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 0.412,
+        "mae_atr": 13.575,
+        "mae_before_target_atr": 13.575,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 0.825,
+        "mae_atr": 13.161,
+        "mae_before_target_atr": 13.161,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000105",
+      "direction": "SHORT",
+      "a_ts": 1788790500,
+      "b_ts": 1788790200,
+      "c_ts": 1788790020,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 11.455,
+        "mae_atr": 2.459,
+        "mae_before_target_atr": 0.816,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 11.24,
+        "mae_atr": 2.674,
+        "mae_before_target_atr": 1.031,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 11.604,
+        "mae_atr": 2.31,
+        "mae_before_target_atr": 0.667,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 2
+    },
+    {
+      "thesis_id": "TH-000113",
+      "direction": "SHORT",
+      "a_ts": 1788966900,
+      "b_ts": 1788966600,
+      "c_ts": 1788966360,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 5.723,
+        "mae_atr": 0.996,
+        "mae_before_target_atr": 0.996,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 5.739,
+        "mae_atr": 0.98,
+        "mae_before_target_atr": 0.98,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 6.067,
+        "mae_atr": 0.652,
+        "mae_before_target_atr": 0.652,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000114",
+      "direction": "SHORT",
+      "a_ts": 1788992100,
+      "b_ts": 1788991800,
+      "c_ts": 1788991740,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 5.466,
+        "mae_atr": 3.387,
+        "mae_before_target_atr": 3.387,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 5.393,
+        "mae_atr": 3.46,
+        "mae_before_target_atr": 3.46,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 5.351,
+        "mae_atr": 3.501,
+        "mae_before_target_atr": 3.501,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000115",
+      "direction": "SHORT",
+      "a_ts": 1789038000,
+      "b_ts": 1789037700,
+      "c_ts": 1789037700,
+      "a_outcome": "LOSS",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": -1.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "B_PULLBACK_CONTINUATION",
+      "a_exc": {
+        "mfe_atr": 9.531,
+        "mae_atr": 2.352,
+        "mae_before_target_atr": 2.352,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 10.668,
+        "mae_atr": 1.215,
+        "mae_before_target_atr": 1.215,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 10.668,
+        "mae_atr": 1.215,
+        "mae_before_target_atr": 1.215,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 5
+    },
+    {
+      "thesis_id": "TH-000116",
+      "direction": "LONG",
+      "a_ts": 1789104900,
+      "b_ts": 1789100700,
+      "c_ts": 1789100460,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "A_BREAK_AND_FLY",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 16.286,
+        "mae_atr": 6.595,
+        "mae_before_target_atr": 6.595,
+        "reached_target": true,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 16.814,
+        "mae_atr": 6.067,
+        "mae_before_target_atr": 0.086,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 17.12,
+        "mae_atr": 5.761,
+        "mae_before_target_atr": 0.0,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000119",
+      "direction": "SHORT",
+      "a_ts": 1789282800,
+      "b_ts": 1789282500,
+      "c_ts": 1789282440,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "B_PULLBACK_CONTINUATION",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 14.584,
+        "mae_atr": 14.881,
+        "mae_before_target_atr": 0.869,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 14.421,
+        "mae_atr": 15.044,
+        "mae_before_target_atr": 1.033,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 15.159,
+        "mae_atr": 14.306,
+        "mae_before_target_atr": 0.294,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 4
+    },
+    {
+      "thesis_id": "TH-000126",
+      "direction": "SHORT",
+      "a_ts": 1789455600,
+      "b_ts": 1789455300,
+      "c_ts": 1789455060,
+      "a_outcome": "WIN",
+      "b_outcome": "WIN",
+      "c_outcome": "WIN",
+      "a_pnl": 2.5,
+      "b_pnl": 2.5,
+      "c_pnl": 2.5,
+      "a_class": "A_BREAK_AND_FLY",
+      "b_class": "B_PULLBACK_CONTINUATION",
+      "c_class": "A_BREAK_AND_FLY",
+      "a_exc": {
+        "mfe_atr": 14.641,
+        "mae_atr": 0.523,
+        "mae_before_target_atr": 0.325,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "b_exc": {
+        "mfe_atr": 14.464,
+        "mae_atr": 0.7,
+        "mae_before_target_atr": 0.502,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "c_exc": {
+        "mfe_atr": 14.756,
+        "mae_atr": 0.408,
+        "mae_before_target_atr": 0.21,
+        "reached_target": true,
+        "sl15_would_stop": false
+      },
+      "confirmed_at_minute": 1
+    },
+    {
+      "thesis_id": "TH-000137",
+      "direction": "SHORT",
+      "a_ts": 1789652700,
+      "b_ts": 1789652400,
+      "c_ts": 1789652280,
+      "a_outcome": "LOSS",
+      "b_outcome": "LOSS",
+      "c_outcome": "LOSS",
+      "a_pnl": -1.5,
+      "b_pnl": -1.5,
+      "c_pnl": -1.5,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 0.0,
+        "mae_atr": 16.773,
+        "mae_before_target_atr": 16.773,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 0.0,
+        "mae_atr": 14.162,
+        "mae_before_target_atr": 14.162,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 0.534,
+        "mae_atr": 12.103,
+        "mae_before_target_atr": 12.103,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 3
+    },
+    {
+      "thesis_id": "TH-000138",
+      "direction": "SHORT",
+      "a_ts": 1789682400,
+      "b_ts": 1789682100,
+      "c_ts": 1789681860,
+      "a_outcome": "UNDETERMINED",
+      "b_outcome": "UNDETERMINED",
+      "c_outcome": "UNDETERMINED",
+      "a_pnl": null,
+      "b_pnl": null,
+      "c_pnl": null,
+      "a_class": "C_PULLBACK_FAILURE",
+      "b_class": "C_PULLBACK_FAILURE",
+      "c_class": "C_PULLBACK_FAILURE",
+      "a_exc": {
+        "mfe_atr": 0.932,
+        "mae_atr": 38.654,
+        "mae_before_target_atr": 38.654,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "b_exc": {
+        "mfe_atr": 1.631,
+        "mae_atr": 37.954,
+        "mae_before_target_atr": 37.954,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "c_exc": {
+        "mfe_atr": 1.646,
+        "mae_atr": 37.94,
+        "mae_before_target_atr": 37.94,
+        "reached_target": false,
+        "sl15_would_stop": true
+      },
+      "confirmed_at_minute": 1
+    }
+  ],
+  "stats_a": {
+    "total": 34,
+    "long": 14,
+    "short": 20,
+    "resolved": 18,
+    "wins": 8,
+    "losses": 10,
+    "undetermined": 16,
+    "win_pct": 44.4,
+    "net_atr": 5.0,
+    "expectancy": 0.278,
+    "profit_factor": 1.333,
+    "max_dd": 6.5,
+    "sl_hits": 10,
+    "tp_hits": 8,
+    "avg_mae": 9.401,
+    "median_mae": 3.322,
+    "avg_mfe": 9.655,
+    "median_mfe": 6.338,
+    "nosl_eventual_winners": 26,
+    "stopped_by_1.5atr": 11,
+    "stopped_pct": 42.3
+  },
+  "stats_b": {
+    "total": 34,
+    "long": 14,
+    "short": 20,
+    "resolved": 18,
+    "wins": 10,
+    "losses": 8,
+    "undetermined": 16,
+    "win_pct": 55.6,
+    "net_atr": 13.0,
+    "expectancy": 0.722,
+    "profit_factor": 2.083,
+    "max_dd": 4.5,
+    "sl_hits": 8,
+    "tp_hits": 10,
+    "avg_mae": 9.018,
+    "median_mae": 2.988,
+    "avg_mfe": 9.944,
+    "median_mfe": 6.187,
+    "nosl_eventual_winners": 25,
+    "stopped_by_1.5atr": 7,
+    "stopped_pct": 28.0
+  },
+  "stats_c": {
+    "total": 34,
+    "long": 14,
+    "short": 20,
+    "resolved": 18,
+    "wins": 11,
+    "losses": 7,
+    "undetermined": 16,
+    "win_pct": 61.1,
+    "net_atr": 17.0,
+    "expectancy": 0.944,
+    "profit_factor": 2.619,
+    "max_dd": 4.5,
+    "sl_hits": 7,
+    "tp_hits": 11,
+    "avg_mae": 8.728,
+    "median_mae": 2.897,
+    "avg_mfe": 10.168,
+    "median_mfe": 6.339,
+    "nosl_eventual_winners": 26,
+    "stopped_by_1.5atr": 7,
+    "stopped_pct": 26.9
+  },
+  "timing_distribution": {
+    "1": 9,
+    "3": 6,
+    "4": 10,
+    "2": 6,
+    "5": 3
+  },
+  "excluded_no_1m": 0
+}

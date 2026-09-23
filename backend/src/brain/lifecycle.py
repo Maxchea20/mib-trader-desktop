@@ -108,6 +108,56 @@ def position_from_fire(
     )
 
 
+def position_from_scenario_fire(
+    scenario_result: Dict[str, Any],
+    *,
+    trade_id: str,
+    equity: float,
+    risk_pct: float,
+    sl_atr_mult: float,
+    tp_atr_mult: float,
+    opened_ts: Optional[int] = None,
+) -> Position:
+    """Thin adapter: scenario_engine.py's FIRE output -> the existing,
+    UNCHANGED Position/Thesis machinery, via the existing position_from_fire().
+
+    scenario_engine.py deliberately has no SL/TP of its own (see its
+    module docstring) -- entry timing and structural confluence are its
+    only job. This function computes SL/TP from the caller-supplied ATR
+    multiples (pass CONFIG["sl_atr_mult"]/["tp_atr_mult"] -- the same
+    values already used by the legacy engine, currently 1.5/2.5, which
+    also happen to match the convention this session's research used to
+    validate C) and the fire's own atr15, then builds a plain dict in
+    exactly the shape position_from_fire() already expects and delegates
+    to it entirely. No new sizing/risk logic is introduced here.
+    """
+    entry = float(scenario_result["entry"])
+    atr15 = scenario_result.get("atr15")
+    if not atr15:
+        raise ValueError("scenario fire missing a usable atr15 -- cannot size SL/TP; refusing to open blind")
+    atr15 = float(atr15)
+    side = scenario_result.get("direction")
+    if side == LONG:
+        sl = entry - sl_atr_mult * atr15
+        tp = entry + tp_atr_mult * atr15
+    elif side == SHORT:
+        sl = entry + sl_atr_mult * atr15
+        tp = entry - tp_atr_mult * atr15
+    else:
+        raise ValueError(f"scenario fire has unrecognized direction: {side!r}")
+
+    fire = {
+        "direction": side,
+        "entry": entry,
+        "stop": sl,
+        "target": tp,
+        "atr_15m": atr15,
+        "event": scenario_result.get("origin_event") or scenario_result.get("scenario"),
+        "why_state": [scenario_result.get("reason")] if scenario_result.get("reason") else [],
+    }
+    return position_from_fire(fire, trade_id=trade_id, equity=equity, risk_pct=risk_pct, opened_ts=opened_ts)
+
+
 def _r_multiple(pos: Position, price: float) -> float:
     risk = abs(pos.entry - pos.sl)
     if risk <= 0:

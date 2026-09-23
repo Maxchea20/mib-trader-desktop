@@ -132,7 +132,8 @@ def _wait_mexc_fill(side: str, tries: int = 8) -> Optional[float]:
     return last
 
 
-def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Dict:
+def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
+                          extra_thesis: Optional[Dict] = None) -> Dict:
     side = hunt.get("direction")
     hunt_entry = float(hunt["entry"])
     hunt_sl = float(hunt["stop"])
@@ -218,6 +219,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float]) -> Di
         "rearm": hunt.get("rearm"),
         "event": hunt.get("event"),
         "gate": hunt.get("gate"),
+        **(extra_thesis or {}),
     })
     try:
         rows = paper_trading.list_trades(status="OPEN")

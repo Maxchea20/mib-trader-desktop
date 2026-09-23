@@ -45,6 +45,13 @@ export const TradeTable = ({ rows, onClose, testid }) => (
                 <span className={`text-[9px] px-1 py-0.5 rounded-sm border ${t.source === "AUTO" ? "border-cyan-500/50 text-cyan-400" : "border-slate-600 text-slate-400"}`}>
                   {t.source || "MANUAL"}
                 </span>
+                {t.thesis?.engine === "scenario" && (
+                  <div className="mt-1 text-[9px] text-slate-500 whitespace-nowrap" title={t.thesis?.thesis_id || ""}>
+                    <span className={`${t.thesis?.entry_method === "C" ? "text-cyan-400" : "text-slate-400"}`}>
+                      {t.thesis?.case || "—"} · {t.thesis?.entry_method === "C" ? "C" : "A"}
+                    </span>
+                  </div>
+                )}
               </td>
               <td className={`px-3 py-2 font-bold ${st.text}`}>{t.side}</td>
               <td className="px-3 py-2">

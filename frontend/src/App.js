@@ -6,10 +6,14 @@ import {
   getCandles,
   getAnalysis,
   getSyncStatus,
+  getAutotrade,
+  updateAutotrade,
 } from "@/lib/api";
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
+import { ScenarioBrainPanel } from "@/components/trading/ScenarioBrainPanel";
+import { SystemHealthPanel } from "@/components/trading/SystemHealthPanel";
 import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
@@ -65,6 +69,23 @@ function App() {
     try { setSyncStatus(await getSyncStatus()); } catch (e) {}
   }, []);
 
+  // Single source of truth for /autotrade state -- shared by the Brain
+  // hero area (which engine is active, Case-1/C status) and the trade
+  // panel below, instead of each polling the same endpoint separately.
+  const [auto, setAuto] = useState(null);
+  const loadAuto = useCallback(async () => {
+    try { setAuto(await getAutotrade()); } catch (e) {}
+  }, []);
+  const saveAuto = useCallback(async (payload) => {
+    try {
+      const a = await updateAutotrade(payload);
+      setAuto(a);
+      return a;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
   const refreshAll = useCallback(async (tf) => {
     setRefreshing(true);
     await Promise.all([loadCandles(tf), loadAnalysis(tf)]);
@@ -95,11 +116,12 @@ function App() {
     const stopCandles = startPoll(() => loadCandles(tfRef.current), 8000, false, activeRef);
     const stopAnalysis = startPoll(() => loadAnalysis(tfRef.current), 12000, false, activeRef);
     const stopSync = startPoll(loadSync, 15000, true, activeRef);
+    const stopAuto = startPoll(loadAuto, 3000, true, activeRef);
     return () => {
       activeRef.current = false;
-      [stopTicker, stopCandles, stopAnalysis, stopSync].forEach((stop) => stop());
+      [stopTicker, stopCandles, stopAnalysis, stopSync, stopAuto].forEach((stop) => stop());
     };
-  }, [loadTicker, loadCandles, loadAnalysis, loadSync, startPoll]);
+  }, [loadTicker, loadCandles, loadAnalysis, loadSync, loadAuto, startPoll]);
 
   useEffect(() => {
     let closed = false;
@@ -223,7 +245,12 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
+            {auto?.config?.entry_engine === "scenario" ? (
+              <ScenarioBrainPanel auto={auto} syncStatus={syncStatus} />
+            ) : (
+              <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
+            )}
+            <SystemHealthPanel syncStatus={syncStatus} auto={auto} />
             <AiThesisPanel />
           </section>
         </div>
@@ -232,9 +259,10 @@ function App() {
             observations={analysis?.observations || []}
             hunt={analysis?.hunt}
             weather={analysis?.weather}
+            auto={auto}
           />
         </div>
-        <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} />
+        <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} auto={auto} onSaveAuto={saveAuto} />
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <BacktestHuntModal open={backtestOpen} onClose={() => setBacktestOpen(false)} timeframe={timeframe} />

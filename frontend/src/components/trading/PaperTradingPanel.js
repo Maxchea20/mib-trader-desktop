@@ -2,12 +2,11 @@ import React, { useEffect, useState, useCallback } from "react";
 import { TrendingUp, TrendingDown, Wallet, Bot, Plus } from "lucide-react";
 import {
   openPaperTrade, closePaperTrade, getPaperTrades, getPaperStats,
-  getAutotrade, updateAutotrade, getMexcAccount,
+  updateAutotrade, getMexcAccount,
 } from "../../lib/api";
 import { dirStyle, fmt } from "../../lib/style";
 import { TradeTable } from "./TradeMoneyRow";
 
-const fmtTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
 const LiveTradingControls = ({ auto, onSave }) => {
   const [acct, setAcct] = useState(null);
@@ -35,6 +34,7 @@ const LiveTradingControls = ({ auto, onSave }) => {
   const sizing = auto?.sizing_preview || {};
   const sizingMode = cfg.sizing_mode || "NORMAL";
   const armed = !!auto?.live_armed;
+  const entryEngineLabel = cfg.entry_engine === "scenario" ? "SCENARIO ENGINE" : "HUNT C-FI";
   const [allocationInput, setAllocationInput] = useState(cfg.allocation_pct ?? 20);
   const [maxNotionalInput, setMaxNotionalInput] = useState(cfg.max_live_notional_usd ?? 1000);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,7 +149,7 @@ const LiveTradingControls = ({ auto, onSave }) => {
         </div>
         <div>
           <div className="widget-label mb-1">EXECUTION</div>
-          <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">HUNT C-FI · ISOLATED {fmt(leverage, 0)}x</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-amber-500/30 font-mono-t text-xs text-amber-400 rounded-sm">{entryEngineLabel} · ISOLATED {fmt(leverage, 0)}x</div>
         </div>
       </div>
     </div>
@@ -162,11 +162,10 @@ const Pnl = ({ v, pct }) => {
   return <span className={`font-mono-t ${c}`}>{v >= 0 ? "+" : ""}${fmt(v, 2)} {pct != null && <span className="text-[10px] opacity-70">({v >= 0 ? "+" : ""}{fmt(pct, 2)}%)</span>}</span>;
 };
 
-export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
+export const PaperTradingPanel = ({ brain, livePrice, timeframe, auto, onSaveAuto }) => {
   const [trades, setTrades] = useState([]);
   const [stats, setStats] = useState(null);
   const [markPrice, setMarkPrice] = useState(null);
-  const [auto, setAuto] = useState(null);
   const [tab, setTab] = useState("open");
   const [showForm, setShowForm] = useState(false);
   const bias = brain?.direction && brain.direction !== "NEUTRAL" ? brain.direction : "LONG";
@@ -178,13 +177,15 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
   const entry = livePrice || markPrice;
   const slPrice = entry ? (side === "LONG" ? entry * (1 - slPct / 100) : entry * (1 + slPct / 100)) : null;
   const tpPrice = entry ? (side === "LONG" ? entry * (1 + tpPct / 100) : entry * (1 - tpPct / 100)) : null;
+  // auto/onSaveAuto are lifted to App.js (single /autotrade poll shared
+  // with the Brain hero area) -- refresh() here only covers this panel's
+  // own data (trades/stats/mark price), not auto state.
   const refresh = useCallback(async () => {
     try {
-      const [d, s, a] = await Promise.all([getPaperTrades(), getPaperStats(), getAutotrade()]);
+      const [d, s] = await Promise.all([getPaperTrades(), getPaperStats()]);
       setTrades(d.trades || []);
       setMarkPrice(d.live_price);
       setStats(s);
-      setAuto(a);
     } catch (e) {}
   }, []);
   useEffect(() => {
@@ -198,10 +199,10 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
     tick();
     return () => { active = false; if (timeoutId) clearTimeout(timeoutId); };
   }, [refresh]);
+  const saveAuto = onSaveAuto || (async (payload) => { try { return await updateAutotrade(payload); } catch (e) { return null; } });
   const toggleAuto = async () => {
-    const next = !(auto?.config?.enabled);
-    setAuto((p) => ({ ...(p || {}), config: { ...(p?.config || {}), enabled: next } }));
-    try { const a = await updateAutotrade({ enabled: next }); setAuto(a); refresh(); } catch (e) {}
+    await saveAuto({ enabled: !(auto?.config?.enabled) });
+    refresh();
   };
   const submit = async () => {
     setBusy(true);
@@ -224,29 +225,63 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe }) => {
   const openTrades = trades.filter((t) => t.status === "OPEN");
   const autoOn = auto?.config?.enabled;
   const mode = auto?.config?.mode || "PAPER";
+  const entryEngine = auto?.config?.entry_engine || "legacy";
   const toggleMode = async () => {
-    const next = mode === "PAPER" ? "LIVE" : "PAPER";
-    setAuto((p) => ({ ...(p || {}), config: { ...(p?.config || {}), mode: next } }));
-    try { const a = await updateAutotrade({ mode: next }); setAuto(a); refresh(); } catch (e) {}
+    await saveAuto({ mode: mode === "PAPER" ? "LIVE" : "PAPER" });
+    refresh();
   };
+  // Item 4: Current Position detail. At most one AUTO position is ever
+  // open (enforced elsewhere in the backend), so this shows the single
+  // scenario-originated open trade's full detail when present.
+  const scenarioOpenTrade = openTrades.find((t) => t.thesis?.engine === "scenario");
   return (
     <div className="mt-4" data-testid="paper-panel">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-2 px-0.5">
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-emerald-400" />
-          <span className="font-head font-bold text-slate-200 tracking-wide text-lg">{mode === "LIVE" ? "LIVE TRADING" : "PAPER TRADING"}</span>
+          <span className="font-head font-bold text-slate-200 tracking-wide text-lg">{mode === "LIVE" ? (autoOn ? "LIVE AUTO-TRADE" : "LIVE TRADING") : "PAPER TRADING"}</span>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={toggleAuto} className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${autoOn ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-300" : "border-[#1d2635] bg-[#0d121b] text-slate-400"}`}>
             <Bot className={`w-3.5 h-3.5 ${autoOn ? "text-cyan-400" : "text-slate-500"}`} />
             AUTO-TRADE {autoOn ? "ON" : "OFF"}
           </button>
+          <span
+            className={`px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${entryEngine === "scenario" ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-300" : "border-[#1d2635] bg-[#0d121b] text-slate-400"}`}
+            data-testid="entry-engine-badge"
+          >
+            ENGINE {entryEngine === "scenario" ? "SCENARIO ENGINE" : "HUNT C-FI"}
+          </span>
           <button onClick={toggleMode} className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${mode === "PAPER" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300" : "border-amber-500/60 bg-amber-500/10 text-amber-300"}`}>MODE {mode}</button>
           <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-[#1d2635] bg-[#0d121b] text-slate-300 font-mono-t text-[11px]"><Plus className="w-3.5 h-3.5" /> New Trade</button>
         </div>
       </div>
       {mode === "LIVE" && (
-        <LiveTradingControls auto={auto} onSave={async (payload) => { try { const a = await updateAutotrade(payload); setAuto(a); return a; } catch (e) { return null; } }} />
+        <LiveTradingControls auto={auto} onSave={saveAuto} />
+      )}
+      {scenarioOpenTrade && (
+        <div className="panel p-3 mb-3 border-cyan-500/30" data-testid="current-position-detail">
+          <div className="widget-label mb-2">CURRENT POSITION — SCENARIO ENGINE</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 font-mono-t text-[11px]">
+            <div>Thesis <span className="text-cyan-400">{scenarioOpenTrade.thesis?.thesis_id || "—"}</span></div>
+            <div>Direction <span className={scenarioOpenTrade.side === "LONG" ? "text-emerald-400" : "text-rose-400"}>{scenarioOpenTrade.side}</span></div>
+            <div>Entry <span className="text-slate-200">${fmt(scenarioOpenTrade.entry, 1)}</span></div>
+            <div>
+              Entry method{" "}
+              <span className="text-slate-200">
+                {scenarioOpenTrade.thesis?.entry_method === "C"
+                  ? "C — M5#2 INTRABAR"
+                  : scenarioOpenTrade.thesis?.m5_slot === 1
+                  ? "A — M5#1 IMMEDIATE"
+                  : "A — M5#3 STANDARD"}
+              </span>
+            </div>
+            <div>SL <span className="text-rose-400/80">${fmt(scenarioOpenTrade.sl, 1)}</span></div>
+            <div>TP <span className="text-emerald-400/80">${fmt(scenarioOpenTrade.tp, 1)}</span></div>
+            <div>Size <span className="text-slate-200">{fmt(scenarioOpenTrade.qty, 4)}</span></div>
+            {scenarioOpenTrade.thesis?.atr15 != null && <div>ATR <span className="text-slate-200">{fmt(scenarioOpenTrade.thesis.atr15, 1)}</span></div>}
+          </div>
+        </div>
       )}
       {stats && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
