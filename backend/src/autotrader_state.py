@@ -36,35 +36,7 @@ CONFIG = {
     "leverage": 10.0,
     "max_live_notional_usd": 1000.0,
     "margin_mode": "ISOLATED",
-    # Which engine's entry decision is authoritative for opening NEW
-    # trades. "legacy" (default, unchanged behavior) = Hunt C-FI, as
-    # today. "scenario" = scenario_engine.py + Case-1 C entry timing via
-    # scenario_live_bridge.py. Only one can ever open a new trade at a
-    # time -- see autotrader_loop.py::evaluate(). Switching this does
-    # NOT affect management of a trade already open; that always goes
-    # through the existing, unchanged brain/lifecycle_tick.py regardless
-    # of which engine opened it.
-    "entry_engine": "scenario",
-    # Which M5 slots are allowed to actually open a live entry when
-    # entry_engine == "scenario". Every slot in this list is routed
-    # through the SAME C mechanism (src/brain/entry_timing_c.py,
-    # unmodified) watching that slot's own 5-minute window of M1
-    # candles -- no per-slot tuning. Any slot NOT in this list is still
-    # detected and logged (action: "SKIPPED", with a stated reason) but
-    # never opens a trade. Backtested and enabled: M5#1, M5#2. M5#3
-    # excluded completely -- its own C-equivalent backtest was only
-    # marginally positive and has not been vetted to the same standard
-    # as M5#1/M5#2. Add 3 here only after that changes.
-    "enabled_m5_slots": [1, 2],
-    # Whether FRESH_PULLBACK_CONTINUATION (S2) confirmations that arrive
-    # later than the M15 origin candle's own 15-minute window are allowed
-    # to fire live. Default OFF: unlike M5#1/M5#2 (extensively
-    # backtested before being enabled), this pattern has never been
-    # backtested for live trading -- enabling this only stops these
-    # setups from being silently dropped; it does not mean they're known
-    # to be profitable. Backtest first, same as every other live-trading
-    # decision this session.
-    "enable_late_pullback_fire": False,
+    "entry_engine": "legacy",
 }
 
 STATE = {
@@ -105,6 +77,7 @@ def _load_persisted() -> None:
                 CONFIG[k] = data[k]
         CONFIG["hunt_version"] = HUNT_VERSION_C_FI
         CONFIG["margin_mode"] = "ISOLATED"
+        CONFIG["entry_engine"] = "legacy"
         if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:
             CONFIG["leverage"] = MIN_LIVE_LEVERAGE
         if CONFIG.get("risk_pct") is None:
