@@ -1,32 +1,25 @@
-"""Scenario SL/TP preview for the live-controls boxes."""
+"""Scenario SL/TP preview for the live-controls boxes.
+
+Must not invent levels from a naked 15m close. That made the boxes
+light up whenever Hunt/AI shouted FIRE even though Scenario was WAIT.
+"""
 from typing import Dict, Optional, Tuple
 
-from .market_data import data_access as dao
 from .autotrader_state import CONFIG, STATE
+
+_LIVE_ACTIONS = {"FIRE", "C_WATCHING", "WATCH", "SETUP", "ARMED"}
 
 
 def scenario_levels() -> Tuple[Optional[float], Optional[float], Optional[float], Optional[str], Optional[float]]:
     sc = STATE.get("last_scenario_result") or {}
     log = STATE.get("last_scenario_trade_log") or {}
+    action = str(sc.get("action") or "").upper()
+    armed = bool(sc.get("thesis_id") or log.get("thesis_id"))
+    if action not in _LIVE_ACTIONS and not armed:
+        return None, None, None, None, None
     entry = sc.get("entry") or log.get("actual_entry_price") or log.get("c_intended_price") or sc.get("origin_level")
     side = sc.get("direction") or log.get("direction")
     atr = sc.get("atr15") or log.get("atr15")
-    if entry is None:
-        try:
-            bars = dao.read_closed_candles(CONFIG.get("timeframe", "15m"), limit=1)
-            if bars:
-                entry = float(bars[-1]["close"])
-        except Exception:
-            entry = None
-    if atr is None:
-        try:
-            from .indicators import arrays, atr as calc_atr
-            bars = dao.read_closed_candles("15m", limit=40)
-            if len(bars) >= 20:
-                aa = arrays(bars)
-                atr = float(calc_atr(aa["high"], aa["low"], aa["close"], 14) or 0)
-        except Exception:
-            atr = None
     sl_m = float(CONFIG.get("sl_atr_mult") or 1.5)
     tp_m = float(CONFIG.get("tp_atr_mult") or 2.5)
     sl = tp = None
