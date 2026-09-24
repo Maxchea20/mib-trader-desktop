@@ -86,11 +86,17 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
         "why_state": [result.get("reason")],
         "thesis_ts": result.get("origin_ts"), "thesis_level": result.get("origin_level"),
     }
-    case_label = {1: "M5#1", 2: "C", 3: "M5#3"}.get(result.get("m5_slot"), "UNKNOWN")
-    entry_method = "C" if result.get("m5_slot") == 2 else "A"
+    # S1/S2 + the M5 slot of the M15 candle; every entry goes through C.
+    case_label = f"{result.get('setup') or 'S?'} M5#{result.get('m5_slot') or '?'}"
+    entry_method = "C"
     scenario_thesis = {
         "thesis_id": result.get("thesis_id"), "case": case_label, "m5_slot": result.get("m5_slot"),
         "entry_method": entry_method, "engine": "scenario",
+        # used by rule (b) in evaluate(): S1 entered before its M15 closed
+        "setup": result.get("setup"), "origin_ts": result.get("origin_ts"),
+        "provisional": bool(result.get("provisional")),
+        "m5_event": result.get("m5_event"), "m5_level": result.get("m5_level"),
+        "trigger_level": result.get("trigger_level"),
         "c_intended_price": result.get("c_intended_price"), "c_intended_ts": result.get("c_intended_ts"),
         "atr15": result.get("atr15"), "scenario_class": result.get("scenario"),
     }
@@ -130,6 +136,45 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
     return STATE
 
 
+def _exit_if_m15_break_failed(open_trade: Optional[Dict], live_price: Optional[float]) -> bool:
+    """Rule (b): an S1 trade entered inside its M15 candle is exited if
+    that candle CLOSES back inside the breakout level. Checked once per
+    trade, as soon as that M15 candle is in storage. Returns True when
+    the trade was exited."""
+    if not open_trade:
+        return False
+    from . import paper_trading, scenario_live_bridge
+    th = paper_trading._thesis(open_trade) or {}
+    if th.get("engine") != "scenario" or th.get("setup") != "S1" or not th.get("provisional"):
+        return False
+    if th.get("origin_ts") is None or STATE.get("m15_break_checked_trade") == open_trade["id"]:
+        return False
+    failed = scenario_live_bridge.break_failed(int(th["origin_ts"]), open_trade["side"])
+    if failed is None:
+        return False  # the M15 candle has not closed / synced yet
+    if not failed:
+        STATE["m15_break_checked_trade"] = open_trade["id"]
+        return False
+    from .autotrader_exec import _fresh_price
+    px = _fresh_price() or live_price or float(open_trade["entry_price"])
+    try:
+        flatten_mexc(open_trade["side"], None, px)
+    except Exception as e:
+        # Keep the shadow open so this retries next tick.
+        STATE["last_action"] = "M15 BREAK FAILED -- MEXC EXIT FAILED, RETRYING"
+        STATE["last_reason"] = str(e)
+        logger.exception("MEXC flatten on failed M15 break failed")
+        return True
+    paper_trading.close_trade(open_trade["id"], px, "M15_BREAK_FAILED")
+    STATE["m15_break_checked_trade"] = open_trade["id"]
+    _record_close("M15_BREAK_FAILED")
+    STATE["normal_base"] = None
+    STATE["normal_base_captured_at"] = None
+    STATE["last_action"] = "EXIT M15_BREAK_FAILED"
+    STATE["last_reason"] = "S1 entered early, but the M15 candle closed back inside the breakout level"
+    return True
+
+
 def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if not CONFIG["enabled"]:
         STATE["last_action"] = "DISABLED"
@@ -167,6 +212,11 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
                 STATE["last_reason"] = rec.get("reason")
     except Exception:
         pass
+    try:
+        if _exit_if_m15_break_failed(_open_auto(), live_price):
+            return STATE
+    except Exception:
+        logger.exception("M15 failed-break check failed")
     tf = CONFIG["timeframe"]
     candles = dao.read_closed_candles(tf, limit=ANALYSIS_LOOKBACK)
     if len(candles) < 30:

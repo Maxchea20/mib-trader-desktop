@@ -1,55 +1,99 @@
-"""Scenario live bridge. NEW module.
+"""Scenario live bridge.
 
-Wires scenario_engine.py (UNCHANGED) and entry_timing_c.py (UNCHANGED)
-into the existing live evaluation loop, lifecycle, and execution
-machinery. Does not touch scenario_engine.py's internals, does not
-touch entry_timing_c.py's internals, does not duplicate lifecycle.py's
-SL/TP/position logic (uses lifecycle.position_from_scenario_fire, the
-thin adapter added alongside this), and does not duplicate
-autotrader_exec.py's order mechanics.
+Wires scenario_engine.py and entry_timing_c.py (C) into the live
+evaluation loop. Decides only; real orders are created by the existing
+execution path in autotrader_loop.py / autotrader_exec.py.
 
 Selected as the live entry engine only when
-autotrader_state.CONFIG["entry_engine"] == "scenario" (default remains
-"legacy" -- see autotrader_loop.py). When selected, this module is the
-ONLY thing permitted to open a NEW scenario-originated trade; once open,
-management reverts entirely to the existing, unchanged
-brain/lifecycle_tick.py machinery, same as any legacy-originated trade.
+autotrader_state.CONFIG["entry_engine"] == "scenario" (see
+autotrader_loop.py).
 
-One entry attempt per thesis (duplicate-entry guard) is enforced here
-via _attempted_thesis_ids, a persistent, growing set for the life of the
-process. This is intentionally simple over being "clever": it trades a
-small amount of memory for an unambiguous guarantee.
+Early-entry design (M15 candle 10:00-10:15, its 3 x M5 slots 10:00 /
+10:05 / 10:10):
+
+  S1  (scenario_engine FRESH_CLEAN_BREAKOUT)
+      15M BOS/CHoCH seen inside the forming candle -> 5M BOS/CHoCH ->
+      M1 close beyond both levels -> FIRE. The 5M break AND the M1 close
+      must both happen in the FIRST 5 minutes of that M15 candle
+      (10:00-10:05, slot 1). If the M15 candle then closes back inside,
+      the trade is exited (autotrader_loop.py, rule b).
+  S2  (scenario_engine FRESH_PULLBACK_CONTINUATION)
+      15M BOS/CHoCH -> extension -> pullback -> fresh 5M BOS/CHoCH ->
+      M1 close beyond both levels -> FIRE. Any time while the thesis is
+      valid; the M1 close may come until the end of the M15 candle in
+      which the 5M confirmation happened.
+  C   M1 execution trigger (brain/entry_timing_c_watcher.py): checked on
+      every M1 close in that window, continuously; a miss cancels that
+      attempt only, never the thesis.
+
+One attempt per engine execution event (fire_id), persisted in
+scenario_c_watch so it survives restarts.
 """
+import json
 import time
 from typing import Dict, Optional
 
 from .config import ANALYSIS_LOOKBACK
 from .market_data import data_access as dao
 from .market_data import database as db
-from .brain.scenario_engine import ScenarioEngine
+from .brain.scenario_engine import ScenarioEngine, m15_break_held
 from .brain.entry_timing_c_watcher import EntryTimingCWatcher
 from .autotrader_state import CONFIG, logger
 
 _ENGINE = ScenarioEngine()
 _WATCHER = EntryTimingCWatcher()
 
+M15_SECONDS = 900
+S1 = "FRESH_CLEAN_BREAKOUT"
+S2 = "FRESH_PULLBACK_CONTINUATION"
+SETUP_NAME = {S1: "S1", S2: "S2"}
+# S1: 5M break and M1 close must be inside the FIRST 5 minutes (slot 1).
+S1_SLOT = 1
+
 
 def _restore_attempted_ids() -> set:
-    """Restart safety for the duplicate-attempt guard: any thesis_id ever
-    recorded in scenario_c_watch (watching, fired, OR cancelled) has
-    already been handled and must never be attempted again, across a
-    restart. Uses the same persistent store as the watcher -- no second
-    persistence system. Falls back to an empty set (fail-open on the
-    guard, not on real order safety -- the existing DB-backed open-
-    position check in autotrader_loop.py::evaluate() remains the actual
-    backstop against a duplicate live order regardless)."""
+    """Restart safety for the duplicate-attempt guard: every attempt id
+    ever recorded in scenario_c_watch (watching, fired, cancelled or
+    skipped) has already been handled and is never attempted again. The
+    DB-backed open-position check in autotrader_loop.py::evaluate()
+    remains the real backstop against a duplicate live order."""
     try:
         return {row["thesis_id"] for row in db.load_all_scenario_watch()}
     except Exception:
         return set()
 
 
+def _restore_pending_watches() -> Dict[str, Dict]:
+    """Resume every M1 watch still marked 'watching' after a restart, so
+    it keeps being checked until it fires, its window ends, or the thesis
+    is invalidated."""
+    pending: Dict[str, Dict] = {}
+    try:
+        for row in db.load_all_scenario_watch():
+            if row.get("status") != "watching" or not row.get("meta"):
+                continue
+            pending[row["thesis_id"]] = json.loads(row["meta"])
+    except Exception:
+        pass
+    return pending
+
+
 _attempted_thesis_ids = _restore_attempted_ids()
+# attempt_id -> watch info. Driven on EVERY evaluate_scenario() call: the
+# engine reports FIRE for an execution event on one tick only.
+_pending_watches: Dict[str, Dict] = _restore_pending_watches()
+
+
+def _bridge_thesis_id(thesis_dbg: Dict) -> str:
+    """Restart-stable thesis key. scenario_engine numbers theses from
+    TH-000001 again on every process start, while the duplicate guard is
+    restored from the DB -- suffixing the M15 origin candle's ts keeps
+    keys unique per structural break."""
+    return f"{thesis_dbg['thesis_id']}-{thesis_dbg['origin_ts']}"
+
+
+def _m15_open(ts: float) -> int:
+    return int(ts) - int(ts) % M15_SECONDS
 
 
 def classify_m5_slot(origin_ts: Optional[int], event_ts: Optional[int]) -> Optional[int]:
@@ -76,91 +120,172 @@ def _tick_engine(live_price: Optional[float]) -> Dict:
     if len(candles_15m) < 60 or len(candles_5m) < 60:
         return {"action": "WAIT", "reason": "insufficient candle history", "debug": {"thesis": None}}
 
+    # The live bar is always the CURRENT clock 5m bucket, and only when
+    # the previous 5m is already stored -- during a sync lag the live price
+    # is never attributed to an older bucket (it would land in the wrong
+    # M5 slot).
     forming_5m = None
     if candles_5m and live_price:
-        forming_ts = candles_5m[-1]["ts"] + 300
-        if forming_ts <= int(time.time()):
+        now = int(time.time())
+        forming_ts = now - now % 300
+        if int(candles_5m[-1]["ts"]) + 300 == forming_ts:
             forming_5m = {"ts": forming_ts, "open": live_price, "high": live_price,
                            "low": live_price, "close": live_price, "volume": 0.0}
 
     return _ENGINE.tick(candles_15m[-200:], candles_5m[-200:], forming_5m)
 
 
+def _skip(attempt_id: str, reason: str, base: Dict) -> Dict:
+    logger.info(f"[scenario] {attempt_id}: {reason}")
+    try:
+        db.save_scenario_watch(attempt_id, direction=base["direction"], origin_ts=base["origin_ts"],
+                               origin_level=base["origin_level"], m5_slot=base["m5_slot"],
+                               status="skipped", reason=reason)
+    except Exception:
+        pass
+    return {"action": "SKIPPED", "reason": reason, **base}
+
+
 def evaluate_scenario(live_price: Optional[float]) -> Dict:
-    """Sibling to autotrader_loop.py::evaluate()'s entry-decision role,
-    for the scenario engine. Returns a dict describing what happened;
-    the caller (autotrader_loop.py) is responsible for actually invoking
-    execution (lifecycle.position_from_scenario_fire + autotrader_exec)
-    on a "FIRE" result -- this function decides, it does not place orders,
-    keeping the existing execution path as the single place real orders
-    are ever created.
-    """
+    """Returns a dict describing what happened; the caller
+    (autotrader_loop.py) executes a "FIRE" result through the existing
+    execution path -- this function never places orders."""
     out = _tick_engine(live_price)
 
     if out["action"] != "FIRE":
-        return {"action": "WAIT", "reason": out.get("what_happening"), "scenario": out.get("scenario")}
+        return _drive_pending_watches(out)
 
-    thesis_dbg = out.get("debug", {}).get("thesis")
-    if thesis_dbg is None:
-        return {"action": "WAIT", "reason": "engine reported FIRE with no thesis debug -- refusing, should not happen"}
+    dbg = out.get("debug") or {}
+    thesis_dbg = dbg.get("thesis")
+    m5 = dbg.get("m5") or {}
+    if thesis_dbg is None or m5.get("event_ts") is None:
+        return {"action": "WAIT", "reason": "engine reported FIRE without thesis / M5 event -- refusing"}
 
-    thesis_id = thesis_dbg["thesis_id"]
-    origin_ts = thesis_dbg["origin_ts"]
-    event_ts = out["ts"]
-    slot = classify_m5_slot(origin_ts, event_ts)
+    thesis_id = _bridge_thesis_id(thesis_dbg)
+    fire_no = (out.get("fire_id") or "").split("/")[-1] or f"E{thesis_dbg.get('m5_event_id')}"
+    attempt_id = f"{thesis_id}/{fire_no}"
+    origin_ts = int(thesis_dbg["origin_ts"])
+    m5_ts = int(m5["event_ts"])
+    scenario = out.get("scenario")
+    setup = SETUP_NAME.get(scenario)
+    direction = out["direction"]
+    now = time.time()
 
-    log_base = {
-        "thesis_id": thesis_id, "direction": out["direction"],
+    if setup == "S1":
+        slot = classify_m5_slot(origin_ts, m5_ts)
+        window_end = origin_ts + 300 * S1_SLOT          # e.g. 10:05
+    else:
+        slot = classify_m5_slot(_m15_open(m5_ts), m5_ts)
+        window_end = _m15_open(now) + M15_SECONDS       # end of this M15 candle
+
+    levels = [float(thesis_dbg["origin_level"])]
+    if m5.get("level") is not None:
+        levels.append(float(m5["level"]))
+    trigger_level = max(levels) if direction == "LONG" else min(levels)
+
+    base = {
+        "thesis_id": thesis_id, "attempt_id": attempt_id, "setup": setup,
+        "direction": direction,
         "origin_event": thesis_dbg["origin_event"], "origin_level": thesis_dbg["origin_level"],
-        "origin_ts": origin_ts, "m5_confirmation_ts": event_ts, "m5_slot": slot,
-        "scenario": out["scenario"], "atr15": out["debug"]["atr15"],
+        "origin_ts": origin_ts, "provisional": bool(thesis_dbg.get("provisional")),
+        "m5_event": m5.get("event"), "m5_level": m5.get("level"),
+        "m5_confirmation_ts": m5_ts, "m5_slot": slot,
+        "trigger_level": trigger_level, "start_ts": now, "window_end_ts": window_end,
+        "scenario": scenario, "atr15": dbg.get("atr15"),
     }
 
-    if thesis_id in _attempted_thesis_ids:
-        return {"action": "ALREADY_ATTEMPTED", "reason": f"thesis {thesis_id} already attempted", **log_base}
+    if attempt_id in _attempted_thesis_ids:
+        if attempt_id in _pending_watches:
+            return _drive_pending_watches(out)
+        return {"action": "ALREADY_ATTEMPTED", "reason": f"{attempt_id} already attempted", **base}
+    _attempted_thesis_ids.add(attempt_id)
 
-    enabled_slots = CONFIG.get("enabled_m5_slots", [1, 2])
+    if setup is None:
+        return _skip(attempt_id, f"engine FIRE with unknown scenario {scenario} -- not S1/S2", base)
+    if any(w["thesis_id"] == thesis_id for w in _pending_watches.values()):
+        return _skip(attempt_id, "an M1 watch for this thesis is already running", base)
+    if setup == "S1" and slot != S1_SLOT:
+        return _skip(attempt_id, f"S1 5M {m5.get('event')} was on M5 slot {slot}, "
+                                 f"not the first 5 minutes of its M15 candle", base)
 
-    if slot is not None and slot in enabled_slots:
-        # Same C mechanism, same watcher, same find_m5_2_intrabar_entry()
-        # rule for every enabled slot -- only the window watched differs
-        # (that slot's own 5-minute window). No per-slot tuning, and no
-        # hardcoded slot restriction here: which slots are eligible is
-        # controlled entirely by CONFIG["enabled_m5_slots"], so enabling
-        # slot 3 there actually routes it through this same path too.
-        _attempted_thesis_ids.add(thesis_id)
-        c_result = _WATCHER.check(thesis_id, out["direction"], thesis_dbg["origin_level"], origin_ts, slot)
-        if c_result is None:
-            logger.info(f"[scenario] M5#{slot} thesis {thesis_id}: watching M1 for confirming close.")
-            return {"action": "WAIT", "reason": f"M5#{slot}: watching M1 for confirming close", **log_base}
-        if c_result.get("cancelled"):
-            logger.warning(f"[scenario] M5#{slot} thesis {thesis_id}: CANCELLED -- {c_result['reason']}")
-            return {"action": "CANCEL", "reason": c_result["reason"], **log_base}
-        entry_price = c_result["entry_price"]
-        entry_ts = c_result["entry_ts"]
-        reason = (f"C: M1 close confirmed at minute {c_result['confirmed_at_minute']} of M5#{slot} "
-                  f"({c_result['seconds_after_m5_2_open']}s after M5#{slot} open)")
-        return {
-            "action": "FIRE", "direction": out["direction"], "entry": entry_price,
-            "entry_ts": entry_ts, "c_intended_price": entry_price, "c_intended_ts": entry_ts,
-            "atr15": out["debug"]["atr15"], "reason": reason, **log_base,
-        }
+    _pending_watches[attempt_id] = base
+    logger.info(f"[scenario] {setup} {attempt_id}: 5M {m5.get('event')} on slot {slot}; "
+                f"watching M1 closes beyond {trigger_level} until {window_end}.")
+    return _drive_pending_watches(out)
 
-    # Any slot not in enabled_m5_slots (M5#3 is excluded completely by
-    # default -- see CONFIG["enabled_m5_slots"] comment). Detected and
-    # logged, but explicitly never opened -- not a silent drop.
-    _attempted_thesis_ids.add(thesis_id)
-    reason = f"M5 slot {slot} is not in enabled_m5_slots {enabled_slots} -- setup detected but skipped, not fired"
-    logger.info(f"[scenario] thesis {thesis_id}: {reason}")
+
+def _cancel_pending(attempt_id: str, reason: str) -> Dict:
+    base = _pending_watches.pop(attempt_id)
+    _WATCHER.forget(attempt_id)
     try:
-        db.save_scenario_watch(thesis_id, direction=out["direction"], origin_ts=origin_ts,
-                                origin_level=thesis_dbg["origin_level"], m5_slot=slot,
-                                status="skipped", reason=reason)
+        db.save_scenario_watch(attempt_id, status="cancelled", reason=reason)
     except Exception:
         pass
-    return {"action": "SKIPPED", "reason": reason, **log_base}
+    logger.warning(f"[scenario] {attempt_id}: CANCELLED -- {reason}")
+    return {"action": "CANCEL", "reason": reason, **base}
+
+
+def _drive_pending_watches(out: Dict) -> Dict:
+    """Advance every pending M1 watch by one step. Returns the first
+    FIRE/CANCEL it produces, else a WAIT describing the watch (or the
+    engine's own WAIT when nothing is being watched)."""
+    engine_thesis = (out.get("debug") or {}).get("thesis") or {}
+    engine_key = (_bridge_thesis_id(engine_thesis)
+                  if engine_thesis.get("thesis_id") and engine_thesis.get("origin_ts") is not None else None)
+    waiting = None
+    for attempt_id in list(_pending_watches):
+        w = _pending_watches[attempt_id]
+
+        # Thesis invalidated (structure broke, opposing CHoCH, or the M15
+        # break did not hold on its close) while waiting for M1.
+        if engine_key == w["thesis_id"] and engine_thesis.get("status") == "INVALIDATED":
+            why = engine_thesis.get("invalid_reason") or out.get("scenario")
+            return _cancel_pending(attempt_id, f"thesis invalidated while watching M1 ({why})")
+
+        c_result = _WATCHER.check(
+            attempt_id, w["direction"], w["trigger_level"], w["start_ts"], w["window_end_ts"],
+            origin_ts=w["origin_ts"], origin_level=w["origin_level"],
+            m5_slot=w["m5_slot"], meta=json.dumps(w),
+        )
+        if c_result is None:
+            waiting = waiting or {"action": "WAIT", "reason": f"{w['setup']}: watching M1 closes beyond "
+                                                             f"{w['trigger_level']}", **w}
+            continue
+        _pending_watches.pop(attempt_id, None)
+        if c_result.get("cancelled"):
+            logger.warning(f"[scenario] {attempt_id}: CANCELLED -- {c_result['reason']}")
+            return {"action": "CANCEL", "reason": c_result["reason"], **w}
+
+        reason = (f"C: M1 closed beyond {w['trigger_level']} (M15 level + 5M {w['m5_event']} level), "
+                  f"{w['setup']}")
+        logger.info(f"[scenario] {attempt_id}: FIRE -- {reason}")
+        return {
+            **w, "action": "FIRE", "entry": c_result["entry_price"], "entry_ts": c_result["entry_ts"],
+            "c_intended_price": c_result["entry_price"], "c_intended_ts": c_result["entry_ts"],
+            "reason": reason,
+            # A watch resumed after a restart may lack ATR; use the
+            # engine's current M15 ATR so sizing never runs blind.
+            "atr15": w.get("atr15") or (out.get("debug") or {}).get("atr15"),
+        }
+
+    if waiting is not None:
+        return waiting
+    return {"action": "WAIT", "reason": out.get("what_happening"), "scenario": out.get("scenario")}
+
+
+def break_failed(origin_ts: int, direction: str) -> Optional[bool]:
+    """Rule (b) for an S1 trade entered before its M15 candle closed:
+    True = that candle closed back inside (exit), False = the break held,
+    None = the candle has not closed / is not in storage yet."""
+    candles_15m = dao.read_closed_candles("15m", limit=ANALYSIS_LOOKBACK)
+    if not candles_15m or int(candles_15m[-1]["ts"]) < int(origin_ts):
+        return None
+    if not any(int(c["ts"]) == int(origin_ts) for c in candles_15m):
+        return None
+    return m15_break_held(candles_15m, origin_ts, direction) is None
 
 
 def watcher_status() -> Dict:
     return {"active_c_watch_theses": _WATCHER.active_count(),
-            "attempted_thesis_count": len(_attempted_thesis_ids)}
+            "pending_watches": sorted(_pending_watches),
+            "attempted_count": len(_attempted_thesis_ids)}

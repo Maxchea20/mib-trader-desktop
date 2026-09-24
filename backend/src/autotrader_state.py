@@ -45,17 +45,9 @@ CONFIG = {
     # through the existing, unchanged brain/lifecycle_tick.py regardless
     # of which engine opened it.
     "entry_engine": "scenario",
-    # Which M5 slots are allowed to actually open a live entry when
-    # entry_engine == "scenario". Every slot in this list is routed
-    # through the SAME C mechanism (src/brain/entry_timing_c.py,
-    # unmodified) watching that slot's own 5-minute window of M1
-    # candles -- no per-slot tuning. Any slot NOT in this list is still
-    # detected and logged (action: "SKIPPED", with a stated reason) but
-    # never opens a trade. Backtested and enabled: M5#1, M5#2. M5#3
-    # excluded completely -- its own C-equivalent backtest was only
-    # marginally positive and has not been vetted to the same standard
-    # as M5#1/M5#2. Add 3 here only after that changes.
-    "enabled_m5_slots": [1, 2],
+    # S1/S2 timing is fixed by design in scenario_live_bridge.py: S1's
+    # 5M BOS/CHoCH and M1 trigger must both fall in the FIRST 5 minutes
+    # of the breakout M15 candle; S2 has no slot limit.
 }
 
 STATE = {

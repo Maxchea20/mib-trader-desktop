@@ -42,6 +42,15 @@ Locked parameters (2026-09-22):
   Invalidation: close through invalidation_level OR a strong opposing
     fast-M5 CHoCH — either alone is sufficient.
   No candle-counting anywhere in this file.
+
+Early-entry revision (2026-09-24):
+  - The 15M BOS/CHoCH is also detected on the FORMING M15 candle (built
+    from its 5m + live price), opening a provisional thesis so S1 can
+    act inside that candle. When the candle closes the break must hold,
+    else the thesis is invalidated (m15_break_not_held_at_close).
+  - The M5 confirmation is a real 5M BOS/CHoCH (structure detector,
+    FAST_M5_PIVOT swings) in the thesis direction, on the live or last
+    closed 5m bar; an extended BOS (3rd+ in a row) does not count.
 """
 from __future__ import annotations
 
@@ -49,7 +58,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..contract import LONG, SHORT, NEUTRAL
-from ..indicators import arrays, atr as _atr, find_pivots
+from ..indicators import arrays, atr as _atr
 from ..structure.observe import observe as obs_structure
 from ..momentum.observe import observe as obs_momentum
 from ..volume.observe import observe as obs_volume
@@ -161,6 +170,13 @@ class Thesis:
     invalidation_level: Optional[float]
     status: str = "ARMED"  # ARMED | EXTENDED | PULLBACK_WATCH | INVALIDATED
     thesis_id: str = ""
+    # True while the M15 candle that broke structure is still forming
+    # (early detection). Checked when that candle closes: kept if the
+    # BOS/CHoCH held on the close, invalidated if it did not.
+    provisional: bool = False
+    # ts of the 5m bar carrying the latest qualifying M5 BOS/CHoCH, so a
+    # new event id is only counted for a genuinely new 5m break.
+    last_m5_event_ts: Optional[int] = None
 
     # --- M5 execution-event tracking (rising-edge based; DECISION STATE) ---
     m5_event_id: int = 0
@@ -224,36 +240,78 @@ def _m15_candidate(candles_15m: List[dict]) -> Optional[Dict[str, Any]]:
     }
 
 
+def m15_break_held(candles_15m: List[dict], origin_ts: int, direction: str) -> Optional[Dict[str, Any]]:
+    """Did the M15 candle that opened at origin_ts CLOSE as a BOS/CHoCH in
+    `direction`? Judges that candle itself, even if later candles have
+    closed since. None = not held (or that candle is not in storage)."""
+    upto = [c for c in candles_15m if int(c["ts"]) <= int(origin_ts)]
+    if not upto or int(upto[-1]["ts"]) != int(origin_ts):
+        return None
+    held = _m15_candidate(upto)
+    if held and held["ts"] == int(origin_ts) and held["direction"] == direction:
+        return held
+    return None
+
+
 # --------------------------------------------------------------------
 # Fast M5 execution pivot
 # --------------------------------------------------------------------
 
-def _fast_pivots_5m(closed_5m: List[dict]) -> Dict[str, Optional[float]]:
-    if not closed_5m or len(closed_5m) < (2 * FAST_M5_PIVOT + 1):
-        return {"high": None, "low": None}
-    a = arrays(closed_5m)
-    piv = find_pivots(a["high"], a["low"], left=FAST_M5_PIVOT, right=FAST_M5_PIVOT)
-    highs = [p for p in piv if p["type"] == "H"]
-    lows = [p for p in piv if p["type"] == "L"]
+def _forming_15m(candles_15m: List[dict], closed_5m: List[dict],
+                 forming_5m: Optional[dict]) -> Optional[dict]:
+    """The M15 candle forming RIGHT NOW, built from its own closed 5m
+    candles plus the live forming 5m -- so a 15M BOS/CHoCH is seen while
+    it happens inside the candle (early entry), not only after it closes.
+
+    None when there is no live bar, or when the previous closed M15 is not
+    in storage yet (sync lag) -- never bridges a gap."""
+    if forming_5m is None or not candles_15m:
+        return None
+    ts5 = int(forming_5m["ts"])
+    bucket = ts5 - ts5 % 900
+    if bucket != int(candles_15m[-1]["ts"]) + 900:
+        return None
+    parts = [c for c in closed_5m if bucket <= int(c["ts"]) < bucket + 900] + [forming_5m]
     return {
-        "high": float(highs[-1]["price"]) if highs else None,
-        "low": float(lows[-1]["price"]) if lows else None,
+        "ts": bucket,
+        "open": float(parts[0]["open"]) if len(parts) > 1 else float(candles_15m[-1]["close"]),
+        "high": max(float(c["high"]) for c in parts),
+        "low": min(float(c["low"]) for c in parts),
+        "close": float(forming_5m["close"]),
+        "volume": sum(float(c.get("volume") or 0.0) for c in parts),
     }
 
 
-def _m5_confirmation(direction: str, level: Optional[float], forming_5m: Optional[dict],
-                      closed_5m: List[dict]) -> Dict[str, Any]:
-    out = {"level": level, "live": False, "closed": False, "live_price": None}
-    if level is None:
+def _m5_structure_confirmation(direction: str, closed_5m: List[dict],
+                               forming_5m: Optional[dict], not_before_ts: int) -> Dict[str, Any]:
+    """M5 confirmation = a 5M BOS or CHoCH in the thesis direction, on the
+    live forming 5m bar OR the last closed 5m bar. Small swings
+    (FAST_M5_PIVOT each side). An extended BOS (3rd+ in a row) does not
+    count -- same exclusion as the 15M setup. Only breaks at/after the
+    thesis's own M15 candle (not_before_ts) count."""
+    out = {"event": None, "event_ts": None, "level": None, "live": False, "closed": False}
+    if not closed_5m:
         return out
-    if forming_5m is not None:
-        price = float(forming_5m["close"])
-        out["live_price"] = price
-        out["live"] = (direction == LONG and price > level) or (direction == SHORT and price < level)
-    if closed_5m:
-        last = closed_5m[-1]
-        c = float(last["close"])
-        out["closed"] = (direction == LONG and c > level) or (direction == SHORT and c < level)
+    bars = closed_5m + ([forming_5m] if forming_5m is not None else [])
+    if len(bars) < 30:
+        return out
+    st = obs_structure(bars, "5m", pivot_window_override=FAST_M5_PIVOT)
+    breaks = [e for e in (st.history or []) if e.event_type in ("BOS", "CHoCH")]
+    if not breaks:
+        return out
+    e = breaks[-1]  # the latest break -- extended_bos describes this one
+    want = "BULLISH" if direction == LONG else "BEARISH"
+    live_ts = int(forming_5m["ts"]) if forming_5m is not None else None
+    closed_ts = int(closed_5m[-1]["ts"])
+    if e.direction != want or e.timestamp not in (live_ts, closed_ts) or e.timestamp < not_before_ts:
+        return out
+    if e.event_type == "BOS" and (st.flags or {}).get("extended_bos"):
+        return out
+    out.update({
+        "event": e.event_type, "event_ts": int(e.timestamp),
+        "level": float(e.reference_price) if e.reference_price is not None else None,
+        "live": e.timestamp == live_ts, "closed": e.timestamp == closed_ts,
+    })
     return out
 
 
@@ -395,6 +453,7 @@ class ScenarioEngine:
         self._last_action: Optional[str] = None
         self._last_m15_ts_used: Optional[int] = None
         self._thesis_counter: int = 0  # diagnostic-only, feeds thesis_id labels
+        self._invalid_reason: Optional[str] = None
 
     def _log(self, ts: int, text: str) -> None:
         self.trace.append(TraceEvent(ts=ts, text=text))
@@ -407,13 +466,36 @@ class ScenarioEngine:
         atr15 = float(_atr(aa15["high"], aa15["low"], aa15["close"], 14) or 0.0)
 
         # -- thesis creation / invalidation -----------------------------
+        self._invalid_reason = None
         if self.thesis is not None:
-            reason = _invalidated(self.thesis, price, closed_5m) if price is not None else None
+            reason = None
+            # Early (provisional) thesis: once its M15 candle has closed,
+            # the BOS/CHoCH must still be there on the close.
+            if (self.thesis.provisional and candles_15m
+                    and int(candles_15m[-1]["ts"]) >= self.thesis.origin_ts):
+                held = m15_break_held(candles_15m, self.thesis.origin_ts, self.thesis.direction)
+                if held:
+                    self.thesis.provisional = False
+                    self.thesis.origin_level = held["level"]
+                    self.thesis.invalidation_level = held["invalidation_level"]
+                    self._log(ts, f"[{self.thesis.thesis_id}] 15M {held['event']} held on candle close.")
+                else:
+                    reason = "m15_break_not_held_at_close"
+            if reason is None and price is not None:
+                reason = _invalidated(self.thesis, price, closed_5m)
             if reason:
                 self.thesis.status = "INVALIDATED"
+                self._invalid_reason = reason
                 self._log(ts, f"Thesis invalidated ({reason}).")
         else:
-            cand = _m15_candidate(candles_15m)
+            provisional = False
+            cand = None
+            forming_15m = _forming_15m(candles_15m, closed_5m, forming_5m)
+            if forming_15m is not None:
+                cand = _m15_candidate(candles_15m + [forming_15m])
+                provisional = cand is not None
+            if cand is None:
+                cand = _m15_candidate(candles_15m)
             if cand and cand["ts"] != self._last_m15_ts_used:
                 self._thesis_counter += 1
                 self.thesis = Thesis(
@@ -421,13 +503,15 @@ class ScenarioEngine:
                     origin_level=cand["level"], origin_ts=cand["ts"],
                     invalidation_level=cand["invalidation_level"],
                     thesis_id=f"TH-{self._thesis_counter:06d}",
+                    provisional=provisional,
                 )
                 self._last_m15_ts_used = cand["ts"]
                 self._log(ts, f"THESIS OPENED [{self.thesis.thesis_id}]: 15M {cand['event']} "
-                              f"confirmed ({cand['direction']}).")
+                              f"{'forming inside the live candle' if provisional else 'confirmed'} "
+                              f"({cand['direction']}).")
 
         thesis = self.thesis
-        m5 = {"level": None, "live": False, "closed": False, "live_price": price}
+        m5 = {"event": None, "event_ts": None, "level": None, "live": False, "closed": False}
         exq = None
         weak_breakout = False
         just_pulled_back = False
@@ -435,18 +519,18 @@ class ScenarioEngine:
         confirmed_now = False
 
         if thesis is not None and thesis.status != "INVALIDATED" and price is not None:
-            fast = _fast_pivots_5m(closed_5m)
-            level = fast["high"] if thesis.direction == LONG else fast["low"]
-            m5 = _m5_confirmation(thesis.direction, level, forming_5m, closed_5m)
-            confirmed_now = bool(m5["live"] or m5["closed"])
+            m5 = _m5_structure_confirmation(thesis.direction, closed_5m, forming_5m, thesis.origin_ts)
+            confirmed_now = m5["event_ts"] is not None
 
-            # -- rising-edge M5 EXECUTION EVENT tracking --------------
-            if confirmed_now and not thesis.m5_was_confirmed:
+            # -- M5 EXECUTION EVENT tracking: one id per new 5M BOS/CHoCH bar --
+            if confirmed_now and m5["event_ts"] != thesis.last_m5_event_ts:
                 thesis.m5_event_id += 1
+                thesis.last_m5_event_ts = m5["event_ts"]
                 self._log(ts, f"EXECUTION EVENT [{thesis.thesis_id} / M5-E{thesis.m5_event_id:03d}]: "
-                              f"fresh 5M {'bullish' if thesis.direction == LONG else 'bearish'} confirmation.")
+                              f"fresh 5M {m5['event']} {'bullish' if thesis.direction == LONG else 'bearish'} "
+                              f"through {m5['level']} ({'live' if m5['live'] else 'closed'} bar).")
             elif (not confirmed_now) and thesis.m5_was_confirmed:
-                self._log(ts, f"[{thesis.thesis_id}] Live 5M confirmation lost (price reversed before it could fire).")
+                self._log(ts, f"[{thesis.thesis_id}] Live 5M break lost (price reversed before it could fire).")
             thesis.m5_was_confirmed = confirmed_now
             fresh_event = confirmed_now and thesis.m5_event_id != thesis.consumed_m5_event_id
 
@@ -479,7 +563,7 @@ class ScenarioEngine:
             # distinguish a hard structural break (SETUP_INVALIDATED) from an
             # opposing-CHoCH rejection: both set status INVALIDATED above,
             # but we re-derive which reason applied for the label.
-            reason = _invalidated(thesis, price, closed_5m) if price is not None else None
+            reason = self._invalid_reason
             scenario = "REJECTION" if reason == "opposing_fast_choch" else "SETUP_INVALIDATED"
         elif thesis is not None and thesis.status == "PULLBACK_WATCH" and fresh_event:
             scenario = "FRESH_PULLBACK_CONTINUATION"
@@ -568,6 +652,8 @@ class ScenarioEngine:
                     "direction": thesis.direction, "origin_event": thesis.origin_event,
                     "origin_level": thesis.origin_level, "origin_ts": thesis.origin_ts,
                     "invalidation_level": thesis.invalidation_level, "status": thesis.status,
+                    "provisional": thesis.provisional,
+                    "invalid_reason": self._invalid_reason,
                     # decision state (live — reset after each FIRE, see module docstring)
                     "m5_event_id": thesis.m5_event_id, "consumed_m5_event_id": thesis.consumed_m5_event_id,
                     "extension_price": thesis.extension_price, "extension_atr_ref": thesis.extension_atr_ref,

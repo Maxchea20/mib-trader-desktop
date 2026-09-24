@@ -127,10 +127,15 @@ def init_db() -> None:
                 updated_at   REAL NOT NULL,
                 entry_ts     INTEGER,
                 entry_price  REAL,
-                reason       TEXT
+                reason       TEXT,
+                meta         TEXT
             );
             """
         )
+        # Older DBs: add the watch-metadata column (JSON) if missing.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(scenario_c_watch)").fetchall()}
+        if "meta" not in cols:
+            conn.execute("ALTER TABLE scenario_c_watch ADD COLUMN meta TEXT")
         conn.commit()
 
 
@@ -140,11 +145,11 @@ def save_scenario_watch(thesis_id: str, **fields) -> None:
     everything else in this module; not a second persistence system.
     `fields` may include any of: direction, origin_ts, origin_level,
     m5_slot, status, checked_ts (JSON string), started_at, entry_ts,
-    entry_price, reason. Fields not passed keep their previously stored
+    entry_price, reason, meta (JSON string). Fields not passed keep their previously stored
     value."""
     import time as _t
     cols = ["direction", "origin_ts", "origin_level", "m5_slot", "status",
-            "checked_ts", "started_at", "entry_ts", "entry_price", "reason"]
+            "checked_ts", "started_at", "entry_ts", "entry_price", "reason", "meta"]
     with _lock:
         conn = _connect()
         existing = conn.execute(
@@ -155,19 +160,20 @@ def save_scenario_watch(thesis_id: str, **fields) -> None:
             """
             INSERT INTO scenario_c_watch
                 (thesis_id, direction, origin_ts, origin_level, m5_slot, status,
-                 checked_ts, started_at, updated_at, entry_ts, entry_price, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 checked_ts, started_at, updated_at, entry_ts, entry_price, reason, meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(thesis_id) DO UPDATE SET
                 direction=excluded.direction, origin_ts=excluded.origin_ts,
                 origin_level=excluded.origin_level, m5_slot=excluded.m5_slot,
                 status=excluded.status, checked_ts=excluded.checked_ts,
                 started_at=excluded.started_at, updated_at=excluded.updated_at,
                 entry_ts=excluded.entry_ts, entry_price=excluded.entry_price,
-                reason=excluded.reason;
+                reason=excluded.reason, meta=excluded.meta;
             """,
             (thesis_id, merged["direction"], merged["origin_ts"], merged["origin_level"],
              merged["m5_slot"], merged["status"], merged["checked_ts"], merged["started_at"],
-             _t.time(), merged["entry_ts"], merged["entry_price"], merged["reason"]),
+             _t.time(), merged["entry_ts"], merged["entry_price"], merged["reason"],
+             merged["meta"]),
         )
         conn.commit()
 
