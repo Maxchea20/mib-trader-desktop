@@ -1,8 +1,4 @@
-"""AI wake-up detector — Scenario only.
-
-Hunt C-FI may still be computed for the chart. It must NOT stamp FIRE
-on the Event Stream while entry_engine is scenario.
-"""
+"""AI wake-up detector — Hunt C-FI live events."""
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
@@ -23,8 +19,8 @@ def reset() -> None:
     _LAST_FP = None
 
 
-def _sc(state: Dict) -> Dict:
-    return state.get("last_scenario_result") or {}
+def _hunt(state: Dict) -> Dict:
+    return state.get("last_hunt") or {}
 
 
 def _lifecycle(state: Dict) -> Dict:
@@ -36,59 +32,40 @@ def _action(state: Dict) -> str:
 
 
 def fingerprint(state: Dict) -> Tuple:
-    sc = _sc(state)
+    h = _hunt(state)
     lc = _lifecycle(state)
     return (
-        sc.get("action"),
-        sc.get("setup"),
-        sc.get("scenario"),
-        sc.get("thesis_id"),
-        sc.get("direction"),
-        sc.get("m5_slot"),
-        sc.get("reason"),
-        sc.get("provisional"),
+        h.get("action"),
+        h.get("direction"),
+        h.get("event"),
+        h.get("thesis_ts"),
+        h.get("gate"),
         _action(state),
         lc.get("action"),
         lc.get("exit_kind"),
     )
 
 
-def _is_fire(action: str, sc_action: Optional[str]) -> bool:
-    if sc_action == "FIRE":
-        return True
-    a = (action or "").upper()
-    return a.startswith("SCENARIO OPEN") or a.startswith("SCENARIO LIVE OPEN")
-
-
 def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
     if prev is not None and curr == prev:
         return None
-    sc = _sc(state)
+    h = _hunt(state)
     lc = _lifecycle(state)
     action = _action(state)
-    prev_action = prev[8] if prev else ""
-    prev_sc = prev[0] if prev else None
-    prev_lc = prev[9] if prev else None
+    prev_h = prev[0] if prev else None
+    prev_lc = prev[6] if prev else None
+    prev_action = prev[5] if prev else ""
 
-    if _is_fire(action, sc.get("action")) and not _is_fire(prev_action, prev_sc):
+    if h.get("action") == "FIRE" and prev_h != "FIRE":
+        return EVENT_FIRE
+    if str(action).upper().startswith("LIVE OPEN") and not str(prev_action).upper().startswith("LIVE OPEN"):
         return EVENT_FIRE
     if (lc.get("action") == "EXIT" or action.upper().startswith("LIFECYCLE_EXIT")) and not (
         prev_lc == "EXIT" or str(prev_action).upper().startswith("LIFECYCLE_EXIT")
     ):
         return EVENT_EXIT
-    if sc.get("action") in ("CANCEL", "SKIPPED") and prev_sc not in ("CANCEL", "SKIPPED"):
+    if h.get("thesis_invalid") and prev is not None:
         return EVENT_THESIS_INVALID
-    if prev is None:
-        return None
-    reason = str(sc.get("reason") or "").lower()
-    if "c watching" in reason or "watching 1m" in reason:
-        if curr[6] != (prev[6] if prev else None):
-            return EVENT_SETUP_ARMED
-    if "pullback" in reason or sc.get("scenario") == "PULLBACK_WATCH":
-        if curr[2] != (prev[2] if prev else None):
-            return EVENT_PULLBACK
-    if sc.get("thesis_id") and prev and not prev[3]:
-        return EVENT_SETUP_ARMED
     return None
 
 
@@ -99,18 +76,15 @@ def inspect_and_maybe_emit(state: Dict) -> Optional[Dict]:
     _LAST_FP = fp
     if not kind:
         return None
-    sc = _sc(state)
+    h = _hunt(state)
     return {
         "kind": kind,
         "fingerprint": fp,
-        "direction": sc.get("direction"),
-        "thesis_ts": sc.get("origin_ts"),
-        "thesis_level": sc.get("origin_level"),
-        "thesis_id": sc.get("thesis_id"),
-        "m5_slot": sc.get("m5_slot"),
-        "scenario_action": sc.get("action"),
-        "setup": sc.get("setup"),
-        "reason": sc.get("reason"),
+        "direction": h.get("direction"),
+        "thesis_ts": h.get("thesis_ts"),
+        "thesis_level": h.get("thesis_level"),
+        "event": h.get("event"),
+        "gate": h.get("gate"),
         "last_action": _action(state),
         "lifecycle": _lifecycle(state),
     }
