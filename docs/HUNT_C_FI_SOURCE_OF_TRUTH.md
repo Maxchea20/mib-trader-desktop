@@ -1,126 +1,105 @@
 # HUNT C-FI — SOURCE OF TRUTH
 
-Saved 2026-09-24.
+Updated 2026-09-24.
 
-Live Isolated engine as of this date. Version string: `OBSERVATION_HUNT_M5_C_FI`.
+Two layers in this file:
 
-Do not mix S1/S2/C into this file. S1/S2 spec is `docs/S1_S2_SOURCE_OF_TRUTH.md`.
+1. **LIVE NOW** — what Isolated follows today
+2. **TARGET UPGRADE** — how S1 / S2 / C sit *inside Hunt* (not a second engine)
 
----
+Do not ship the target until the user says to code it.
 
-## What Hunt is
-
-Hunt is the **live brain**. When it prints FIRE with entry / stop / target,
-`autotrader_loop.evaluate()` sends Isolated via `_open_live_from_hunt`.
-
-It is not S1. It is not S2. It does not use the 1m C watcher.
+S1/S2 original definitions: `docs/S1_S2_SOURCE_OF_TRUTH.md`.
 
 ---
 
-## Three gates (any one can arm)
+## Intention (locked)
 
-**Gate A — C-fast**  
-Swing 15m CHoCH, or a BOS that is not an extended BOS. Wider 15m pivots.
+Hunt was late. S1/S2 were meant to **upgrade Hunt entry timing**, not become
+a new brain. That accident is what got ripped off live.
 
-**Gate B — Internal**  
-Same event types on tighter 15m pivots (L/R = 2). Fresh on the current 15m.
+Hunt decides **if** there is a trade (thesis + direction + weather + risk).
+S1 / S2 / C only decide **how early** the same trade is sent.
 
-**Gate C — Rearm**  
-Last valid 15m event is still in force (no opposite CHoCH), even if it
-printed on an earlier 15m. 5m may answer again. This is why probe often
-says: “15m thesis is still valid. Waiting for the 5-minute candle to answer again.”
-
-3rd BOS in the same direction is dropped (extended). CHoCH resets that streak.
+One FIRE. One Event Stream. One Isolated pipe.
 
 ---
 
-## How 5m “answers” (fill)
-
-A 15m is three 5m slots:
+## TARGET UPGRADE — S1 / S2 / C inside Hunt
 
 ```
-15m candle
- ├── M5#1  slot 1
- ├── M5#2  slot 2
- └── M5#3  slot 3
-```
-
-- Slot 1 / 2: V2 tap / level fill on the 5m (path stamped `v2_…`)
-- Slot 3: Hunt V3 / impulse_3 — third 5m must close through the **prior 15m high** (long) or **prior 15m low** (short)
-
-No 1m C timing. Fill is on the 5m logic above.
-
----
-
-## 4H weather (on for Hunt live)
-
-File: `backend/src/brain/weather.py`  
-Version: `WEATHER_V1B_RETRACE`
-
-- `SWING_UP` → LONG only  
-- `SWING_DOWN` → SHORT only  
-- `CHOP` → both  
-
-If 4H is swinging but price gives back **≥ 1.0 ATR** from the recent 4H
-extreme (last 8 4H bars), flag becomes **CHOP**. Opposite side is not
-blocked until a full 4H flip.
-
-Hunt live loop: FIRE + weather forbids that side → `WEATHER_BLOCK`.
-Scenario used to skip this gate. Hunt does not.
-
----
-
-## SL / TP / size
-
-- SL 1.5 × ATR  
-- TP 2.5 × ATR  
-- Isolated  
-- Fit qty down to free USDT if margin is short  
-- One Isolated position only  
-- 15 min quiet after a hard reject  
-
-Preview boxes read `last_hunt` entry / stop / target.
-
----
-
-## Live path (current main)
-
-```
-full_analysis → evaluate_hunt_c_fi
+Hunt thesis (may arm while the 15m is still forming)
         ↓
-WAIT | FIRE
+the 5m Hunt is watching (slot 1 or 2 or 3)
         ↓
-weather + cooldown + flat Isolated + levels present
+C watches that 5m’s five 1m candles
         ↓
-_open_live_from_hunt → MEXC Isolated
+first 1m CLOSE across that slot’s line  →  send Isolated
+        ↓
+that 5m ends with no 1m close  →  no fire this slot
+        ↓
+next slot may try C again on its own line
+        ↓
+if already extended  →  S2: measured pullback + NEW 5m + C
+        ↓
+thesis dies  →  cancel C, no order
 ```
 
-`entry_engine` is forced `legacy`.  
-`last_action` examples: `NO-TRADE (WAIT)`, `WEATHER_BLOCK`, `LIVE OPEN LONG Isolated order …`
+**S1** = Hunt fill on slot 1 / 2 of the (forming) 15m + C.
+**Slot 3** = same C, Hunt’s slot-3 line (prior 15m high long / prior 15m low short).
+**S2** = Hunt “too far” path: freeze ATR at extension, real pullback, new 5m, same C.
+Spent 5m cannot re-fire.
+
+C does not invent a thesis. C does not change the line.
+C = first qualifying 1m close inside the 5m Hunt already chose.
+Not hardcoded to minute 1 or 3.
+
+Must-have or it stays late:
+
+- Hunt may arm on a **forming** 15m
+- Slot 3 fallback still exists (C on slot 3, not only impulse_3 close)
+- Shared invalidation (thesis dead → C dead)
+
+Open calls (do not assume):
+
+- 4H weather on slot 1/2 C: still Hunt’s V1b unless the user changes it
+- S3 still not live
 
 ---
 
-## Key files
+## LIVE NOW (do not confuse with the target)
+
+Version: `OBSERVATION_HUNT_M5_C_FI`
+`entry_engine`: `legacy`
+
+Gates: C-fast / Internal / Rearm.
+Fill today: slot 1/2 V2 tap; slot 3 impulse_3 close through prior 15m H/L.
+**No 1m C on live.** Weather V1b on. Isolated via `_open_live_from_hunt`.
+
+---
+
+## 4H weather (live)
+
+`WEATHER_V1B_RETRACE`
+SWING_UP → LONG only. SWING_DOWN → SHORT only. CHOP → both.
+≥ 1.0 ATR retrace off the recent 4H extreme → CHOP.
+
+---
+
+## SL / TP / size (live)
+
+SL 1.5 ATR. TP 2.5 ATR. Isolated. Fit-to-balance. One position.
+15 min quiet after a hard reject.
+
+---
+
+## Key files (live)
 
 | Piece | File |
 |---|---|
 | Hunt C-FI | `backend/src/brain/observation_hunt_c_fi.py` |
-| C-fast | `observation_hunt_c_fast.py` |
-| Internal / slots | `observation_hunt_c.py` |
-| Slot 3 V3 | `observation_hunt_v3.py` |
-| V2 fill | `observation_hunt.py` |
 | Weather | `backend/src/brain/weather.py` |
 | Loop | `backend/src/autotrader_loop.py` |
-| Isolated send | `backend/src/autotrader_exec.py` |
-| UI hero | `BrainHeroPanel.js` |
+| Isolated | `backend/src/autotrader_exec.py` |
 
-Backup tag to cut: `hunt-live-2026-09-24` (create locally if not pushed yet).
-
----
-
-## What Hunt is not
-
-- Not forming-15m slot-1/2 + 1m C  
-- Not S2 pullback continuation  
-- Not S3 early reversal  
-- Chart CHoCH/BOS paint is the same structure overlay Hunt reads — still not S1
+Last S1/S2 code (deleted from live): commit `c77239d`.
