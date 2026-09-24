@@ -153,6 +153,13 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
                     logger.exception("MEXC flatten on lifecycle EXIT failed")
                 _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
                 _record_close(rec.get("exit_kind") or "BRAIN_EXIT")
+                # Force a fresh balance capture for the NEXT trade's sizing
+                # instead of reusing a now-stale snapshot -- this trade's
+                # close just changed the real account balance. Existing
+                # "capture if missing" logic in compute_sizing() picks this
+                # up automatically; nothing else needs to change.
+                STATE["normal_base"] = None
+                STATE["normal_base_captured_at"] = None
                 STATE["last_action"] = f"LIFECYCLE_EXIT {rec.get('exit_kind')}"
                 STATE["last_reason"] = rec.get("reason")
             elif rec.get("action") == "TRAIL":

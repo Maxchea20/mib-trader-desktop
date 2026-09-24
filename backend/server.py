@@ -330,6 +330,11 @@ async def paper_close(trade_id: str, req: CloseTradeReq):
     t = paper_trading.close_trade(trade_id, exit_price, "MANUAL")
     if not t:
         return {"error": "trade_not_found"}
+    # Same reasoning as the automatic lifecycle-exit path: this position
+    # closing just changed the real account balance, so the NEXT trade
+    # should size off a fresh capture rather than a now-stale snapshot.
+    autotrader.STATE["normal_base"] = None
+    autotrader.STATE["normal_base_captured_at"] = None
     return t
 
 

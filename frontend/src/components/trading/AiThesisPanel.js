@@ -59,8 +59,13 @@ const Card = ({ label, value }) => {
 
 const Core = ({ mode }) => (
   <div className={`jarvis-core jarvis-core-${mode}`} data-testid="ai-orb">
+    <div className="jarvis-core-ring jarvis-core-ring-3" />
     <div className="jarvis-core-ring" />
     <div className="jarvis-core-ring jarvis-core-ring-2" />
+    <div className="jarvis-core-ping" />
+    <div className="jarvis-particle jarvis-particle-1" />
+    <div className="jarvis-particle jarvis-particle-2" />
+    <div className="jarvis-particle jarvis-particle-3" />
     <div className="jarvis-core-dot" />
     <div className="jarvis-core-copy">
       <div className="font-head tracking-[0.28em] text-[11px] text-slate-400">MIB INTELLIGENCE</div>

@@ -461,6 +461,17 @@ def check_open_trades(price: Optional[float]) -> int:
         if hit:
             close_trade(t["id"], hit[1], hit[0])
             closed += 1
+            # Any position closing (SL or TP) changes the real account
+            # balance -- force the next trade's sizing to re-fetch fresh
+            # rather than reuse a now-stale normal_base snapshot. Local
+            # import: avoids a top-level circular import with
+            # autotrader_state (which itself locally imports this module).
+            try:
+                from .autotrader_state import STATE as _STATE
+                _STATE["normal_base"] = None
+                _STATE["normal_base_captured_at"] = None
+            except Exception:
+                pass
     return closed
 
 

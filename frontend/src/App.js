@@ -13,7 +13,6 @@ import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
 import { ScenarioBrainPanel } from "@/components/trading/ScenarioBrainPanel";
-import { SystemHealthPanel } from "@/components/trading/SystemHealthPanel";
 import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
@@ -250,7 +249,6 @@ function App() {
             ) : (
               <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
             )}
-            <SystemHealthPanel syncStatus={syncStatus} auto={auto} />
             <AiThesisPanel />
           </section>
         </div>
@@ -264,7 +262,7 @@ function App() {
         </div>
         <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} auto={auto} onSaveAuto={saveAuto} />
       </main>
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} syncStatus={syncStatus} auto={auto} />
       <BacktestHuntModal open={backtestOpen} onClose={() => setBacktestOpen(false)} timeframe={timeframe} />
     </div>
   );

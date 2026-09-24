@@ -19,7 +19,7 @@ const LiveTradingControls = ({ auto, onSave }) => {
         const a = await getMexcAccount();
         if (active) setAcct(a);
       } catch (e) {
-        if (active) setAcct({ connected: false, error: "request failed" });
+        if (active) setAcct({ connected: false, error: e?.response?.data?.error || e?.message || "request failed" });
       }
       if (active) timeoutId = setTimeout(tick, 5000);
     };

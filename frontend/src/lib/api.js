@@ -50,7 +50,13 @@ export const getPaperBalance = async () => (await client.get("/paper/balance")).
 export const setPaperBalance = async (amount) => (await client.post("/paper/balance", { amount })).data;
 export const getAutotrade = async () => (await client.get("/autotrade")).data;
 export const updateAutotrade = async (payload) => (await client.put("/autotrade", payload)).data;
-export const getMexcAccount = async () => (await client.get("/mexc/account")).data;
+export const getMexcAccount = async () =>
+  // Longer timeout than the shared client default: the backend retries
+  // this call across every resolved MEXC IP (up to 12s each) before
+  // giving up, so the frontend needs enough patience for that to
+  // actually finish rather than bailing out first and hiding a request
+  // that was still legitimately in progress.
+  (await client.get("/mexc/account", { timeout: 40000 })).data;
 export const getAiThesis = async () => (await client.get("/ai/thesis")).data;
 
 export const AGENT_META = {

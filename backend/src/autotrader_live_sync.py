@@ -8,7 +8,7 @@ from typing import Optional, Dict
 
 from .config import SYMBOL
 from . import paper_trading
-from .autotrader_state import logger
+from .autotrader_state import logger, STATE
 
 
 def _install_price_guard() -> None:
@@ -38,6 +38,10 @@ def _install_price_guard() -> None:
             if hit:
                 paper_trading.close_trade(t["id"], hit[1], hit[0])
                 closed += 1
+                # Same reasoning as the other close paths -- this is the
+                # MEXC-side SL/TP-fill reconciliation path specifically.
+                STATE["normal_base"] = None
+                STATE["normal_base_captured_at"] = None
         return closed
 
     guarded._mexc_guard = True

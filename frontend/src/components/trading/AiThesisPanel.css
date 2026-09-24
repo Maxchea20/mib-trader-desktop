@@ -31,7 +31,7 @@
 
 .jarvis-core {
   position: relative;
-  min-height: 132px;
+  min-height: 184px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -40,21 +40,80 @@
   background:
     radial-gradient(circle at 50% 42%, rgba(0, 200, 255, 0.10), transparent 58%),
     #0a1018;
-  overflow: hidden;
 }
+
+/* Rings now actually rotate -- alternating directions/speeds for a
+   layered "scanning" feel instead of three static circles. */
 .jarvis-core-ring,
-.jarvis-core-ring-2 {
+.jarvis-core-ring-2,
+.jarvis-core-ring-3 {
   position: absolute;
   border-radius: 50%;
-  border: 1px solid rgba(0, 200, 255, 0.22);
   pointer-events: none;
+  border: 1px solid transparent;
 }
-.jarvis-core-ring { width: 86px; height: 86px; }
+.jarvis-core-ring {
+  width: 86px; height: 86px;
+  border-top-color: rgba(0, 200, 255, 0.45);
+  border-right-color: rgba(0, 200, 255, 0.15);
+  animation: ringSpin 7s linear infinite;
+}
 .jarvis-core-ring-2 {
-  width: 118px;
-  height: 118px;
-  border-color: rgba(0, 200, 255, 0.12);
+  width: 118px; height: 118px;
+  border-bottom-color: rgba(0, 200, 255, 0.28);
+  border-left-color: rgba(0, 200, 255, 0.08);
+  animation: ringSpinReverse 11s linear infinite;
 }
+.jarvis-core-ring-3 {
+  width: 148px; height: 148px;
+  border-color: rgba(0, 200, 255, 0.08);
+  border-top-color: rgba(0, 200, 255, 0.2);
+  animation: ringSpin 17s linear infinite;
+}
+@keyframes ringSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes ringSpinReverse { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+
+/* Small particles orbiting the core at different radii/speeds --
+   the "moving" part of breathing/moving/evolving. */
+.jarvis-particle {
+  position: absolute;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: #67e8f9;
+  box-shadow: 0 0 6px 1px rgba(103, 232, 249, 0.8);
+  top: 50%; left: 50%;
+  transform-origin: 0 0;
+}
+.jarvis-particle-1 { animation: orbitA 5.5s linear infinite; }
+.jarvis-particle-2 { animation: orbitB 8.5s linear infinite reverse; opacity: 0.7; }
+.jarvis-particle-3 { animation: orbitC 13s linear infinite; opacity: 0.5; }
+@keyframes orbitA {
+  from { transform: rotate(0deg) translateX(50px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(50px) rotate(-360deg); }
+}
+@keyframes orbitB {
+  from { transform: rotate(0deg) translateX(66px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(66px) rotate(-360deg); }
+}
+@keyframes orbitC {
+  from { transform: rotate(90deg) translateX(82px) rotate(-90deg); }
+  to   { transform: rotate(450deg) translateX(82px) rotate(-450deg); }
+}
+
+/* Sonar-style expanding ping, on top of the existing scale breathe. */
+.jarvis-core-ping {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 211, 238, 0.6);
+  animation: corePing 3.6s ease-out infinite;
+}
+@keyframes corePing {
+  0%   { transform: scale(1); opacity: 0.8; }
+  70%  { transform: scale(6); opacity: 0; }
+  100% { transform: scale(6); opacity: 0; }
+}
+
 .jarvis-core-dot {
   width: 14px;
   height: 14px;
@@ -62,7 +121,11 @@
   background: radial-gradient(circle at 35% 30%, #fff, #22d3ee 45%, #0d121b 100%);
   z-index: 1;
 }
-.jarvis-core-observing .jarvis-core-dot { animation: orbBreatheIdle 3.6s ease-in-out infinite; }
+/* Idle state still slowly evolves -- a faint hue drift so the orb never
+   looks fully static even with nothing happening. */
+.jarvis-core-observing .jarvis-core-dot {
+  animation: orbBreatheIdle 3.6s ease-in-out infinite, orbHueDriftSlow 14s ease-in-out infinite;
+}
 .jarvis-core-analyzing .jarvis-core-dot {
   animation: orbHueSweep 2.2s linear infinite, orbPulseFast 0.9s ease-in-out infinite;
 }
@@ -77,6 +140,10 @@
 .jarvis-core-weak .jarvis-core-dot,
 .jarvis-core-invalid .jarvis-core-dot {
   background: radial-gradient(circle at 35% 30%, #ffe4e8, #ff3b56 50%, #0d121b 100%);
+}
+@keyframes orbHueDriftSlow {
+  0%, 100% { filter: hue-rotate(0deg); }
+  50%      { filter: hue-rotate(25deg); }
 }
 .jarvis-core-copy {
   position: relative;
