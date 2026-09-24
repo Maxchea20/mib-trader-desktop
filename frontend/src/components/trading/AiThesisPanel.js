@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { getAiThesis } from "../../lib/api";
 import "./AiThesisPanel.css";
 
@@ -93,8 +93,6 @@ const Core = ({ mode }) => (
 
 export const AiThesisPanel = ({ analysis, auto }) => {
   const [data, setData] = useState(null);
-  const [events, setEvents] = useState([]);
-  const lastKey = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -122,50 +120,31 @@ export const AiThesisPanel = ({ analysis, auto }) => {
   const lastAction = auto?.state?.last_action || auto?.last_action;
   const mode = visualFromState(st, sc, lastAction);
 
-  useEffect(() => {
-    const ev = st.last_event;
-    const at = st.generated_at;
-    if (!ev && !at) return;
-    if (!STREAM_KINDS.has(ev)) return;
-    if (ev === "FIRE" && !scenarioIsFire(sc, lastAction)) return;
-    const key = `${ev || ""}|${at || ""}`;
-    if (key === lastKey.current) return;
-    lastKey.current = key;
-    setEvents((prev) => {
-      const row = { id: key, kind: ev, at: at || Date.now() / 1000 };
-      const next = [row, ...prev.filter((x) => x.id !== key)];
-      return next.slice(0, 16);
-    });
-  }, [st.last_event, st.generated_at, sc, lastAction]);
-
   const hunt = analysis?.hunt || {};
   const weather = analysis?.weather || {};
   const structure = analysis?.market_state?.structure || {};
   const momentum = (analysis?.agents || []).find((a) => a.agent === "momentum");
-  const lastHunt = auto?.state?.last_hunt || auto?.last_hunt;
   const interval = cfg.interval_seconds || 900;
   const nextReview = st.generated_at ? st.generated_at + interval : null;
 
   const cards = useMemo(() => {
     const rows = [];
-    if (sc?.action) rows.push(["SCENARIO", sc.action]);
-    if (sc?.m5_slot != null) rows.push(["M5 SLOT", `#${sc.m5_slot}`]);
-    if (sc?.thesis_id) rows.push(["THESIS", sc.thesis_id]);
     if (lastAction) rows.push(["ENGINE", lastAction]);
     if (structure.regime) rows.push(["M15 REGIME", structure.regime]);
     if (momentum?.direction) {
       rows.push(["MOMENTUM", `${momentum.direction}${momentum.confidence != null ? ` ${momentum.confidence}%` : ""}`]);
     }
     if (weather.flag) rows.push(["4H WEATHER", weather.flag]);
+    if (hunt?.timing) rows.push(["TIMING", hunt.timing]);
     return rows;
-  }, [structure.regime, momentum, sc, weather.flag, lastAction]);
+  }, [structure.regime, momentum, weather.flag, lastAction, hunt?.timing]);
 
   return (
     <div className={`panel p-4 jarvis-shell jarvis-shell-${mode}`} data-testid="ai-thesis-panel">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="font-head font-extrabold tracking-[0.22em] text-slate-100 text-sm">MIB AI</div>
-          <div className="widget-label mt-0.5">Observer only — Scenario events</div>
+          <div className="widget-label mt-0.5">Observer only — not Isolated</div>
         </div>
         <div className="text-right">
           <div className="flex items-center justify-end gap-1.5">
@@ -209,7 +188,7 @@ export const AiThesisPanel = ({ analysis, auto }) => {
                 }`}
                 data-testid="ai-aligned-badge"
               >
-                {aligned ? "Aligned with Scenario" : "Diverges from Scenario"}
+                {aligned ? "Aligned with Hunt" : "Diverges from Hunt"}
               </span>
             )}
             {st.last_event && STREAM_KINDS.has(st.last_event) && (
@@ -227,26 +206,8 @@ export const AiThesisPanel = ({ analysis, auto }) => {
         {nextReview && <span>NEXT NOTE ~ {fmtClock(nextReview)}</span>}
       </div>
 
-      <div className="mt-3 pt-3 border-t border-[#1d2635]">
-        <div className="widget-label mb-2">Event stream (Scenario only)</div>
-        {events.length === 0 ? (
-          <div className="font-mono-t text-[10px] text-slate-600">No Scenario FIRE / setup yet this session.</div>
-        ) : (
-          <ul className="space-y-1">
-            {events.slice(0, 12).map((row) => (
-              <li key={row.id} className="flex items-center justify-between font-mono-t text-[10px]">
-                <span className={`jarvis-event ${row.kind === "FIRE" ? "text-emerald-300" : row.kind === "EXIT" || row.kind === "THESIS_INVALID" ? "text-rose-300" : "text-slate-400"}`}>
-                  {row.kind === "FIRE" ? "⚡" : "●"} {EVENT_LABEL[row.kind] || row.kind}
-                </span>
-                <span className="text-slate-600">{fmtClock(row.at)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
       <div className="mt-3 pt-3 border-t border-[#1d2635] font-mono-t text-[10px] text-slate-600">
-        Observer only. 15-minute AI notes are not trades. Isolated only follows the yellow Scenario box.
+        Observer only. Isolated follows Hunt FIRE, not this panel.
       </div>
     </div>
   );
