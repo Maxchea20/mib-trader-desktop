@@ -31,50 +31,12 @@ function FactCard({ obs }) {
   );
 }
 
-function scenarioLabelForSlot(slot, setup) {
-  if (setup === "S2") return "S2 · C on fresh 5m";
-  if (slot === 1 || slot === 2) return `S1 slot ${slot} · C`;
-  if (slot === 3) return "S1 slot 3 · late — no C";
-  return "forming 15m · waiting slot 1/2";
-}
-
-export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => {
-  const isScenario = auto?.config?.entry_engine === "scenario";
-  const result = auto?.state?.last_scenario_result;
-  let action, path, why, side;
-  if (isScenario) {
-    const slot = result?.m5_slot;
-    action = result ? (result.action === "ALREADY_ATTEMPTED" ? "HANDLED" : result.action) : "WAIT";
-    path = scenarioLabelForSlot(slot, result?.setup);
-    why = result?.reason || "No forming-15m thesis yet.";
-    side = result?.direction || "";
-  } else {
-    path = hunt && hunt.hunt && hunt.hunt.m5_path;
-    why = hunt && (hunt.why_state || [])[0];
-    action = hunt ? hunt.action : "WAIT";
-    side = hunt?.direction || "";
-  }
-  const rgb = glowRgb(`${action} ${side}`);
+export const ObservationLayer = ({ observations = [] }) => {
   return (
     <div data-testid="observation-layer">
       <div className="flex items-center gap-2 mb-3 px-0.5">
         <span className="font-head font-bold text-slate-200 tracking-wide text-lg">OBSERVATIONS</span>
-        <span className="widget-label">Layer 3 · {isScenario ? "S1/S2 + C" : "hunt path"}</span>
-      </div>
-      <div className="breathe-glow panel p-3 mb-3 flex flex-wrap gap-6 items-center" style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }} data-testid="observation-top-strip">
-        <div>
-          <div className="widget-label">{isScenario ? "Scenario" : "Hunt"}</div>
-          <div className="font-head font-bold text-xl pulse-dot" style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}>{action}</div>
-        </div>
-        <div>
-          <div className="widget-label">{isScenario ? "S1/S2 slot" : "5m path"}</div>
-          <div className="font-mono-t text-cyan-400">{path || "—"}</div>
-        </div>
-        <div>
-          <div className="widget-label">4H (context only)</div>
-          <div className="font-mono-t text-slate-200">{weather && weather.flag ? weather.flag : "—"}</div>
-        </div>
-        <div className="font-mono-t text-[11px] text-slate-400 max-w-xl">{why}</div>
+        <span className="widget-label">Layer 3 · structure agents</span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {(observations || []).map((o) => (<FactCard key={o.source} obs={o} />))}
