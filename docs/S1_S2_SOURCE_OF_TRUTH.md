@@ -1,12 +1,21 @@
 # S1 / S2 — SOURCE OF TRUTH
 
-Saved 2026-09-24 so this is not lost in chat.
+Updated 2026-09-24.
 
-Live engine as of this date: **Hunt C-FI**. S1 / S2 / C are **not** on Isolated.
-Last code that still contained S1/S2: git commit `c77239d`.
-Deleted from `main` after that. Do not mix these rules into Hunt.
+Live Isolated today: **Hunt C-FI only**. S1 / S2 / C are **not** wired.
+Last S1/S2 code: commit `c77239d`.
 
-User intent: keep this spec. New S1/S2 plan comes later. Do not invent blends.
+**How they sit in Hunt (locked sit, not live yet)**
+S1 / S2 / C are Hunt *fill / timing*, not a second engine.
+See `docs/HUNT_C_FI_SOURCE_OF_TRUTH.md` § TARGET UPGRADE.
+
+- Hunt = thesis + direction + weather + Isolated
+- S1 = slot 1 / 2 of a forming 15m + C
+- Slot 3 = same C on Hunt’s slot-3 line (prior 15m H/L)
+- S2 = after extension: measured pullback + new 5m + C
+- C = first 1m close across that 5m’s line. All three slots.
+
+Do not merge S1 into S2. Do not let C create a thesis.
 
 ---
 
@@ -14,7 +23,7 @@ User intent: keep this spec. New S1/S2 plan comes later. Do not invent blends.
 
 - S1, S2, S3 are **separate** pathways. Do not merge conditions.
 - DETECTION ≠ CONFIRMATION ≠ FIRE ≠ EXECUTION
-- Hunt C-FI is a different engine. Do not redefine “C” as Hunt confluence.
+- C is 1m entry timing on Hunt’s 5m, not Hunt confluence and not a new thesis.
 - M15 BOS/CHoCH in this spec does **not** always mean the 15m candle has closed.
 - No lookahead. No fixed “minute 3”. C = first qualifying 1m **close**.
 - S3 was designed. S3 was **never wired live**.
@@ -40,7 +49,7 @@ FIRE → Isolated
 LONG:  M15 bullish BOS/CHoCH → M5 bullish BOS/CHoCH → C → LONG
 SHORT: M15 bearish BOS/CHoCH → M5 bearish BOS/CHoCH → C → SHORT
 
-- Slot 3 is outside the early window. S1 does not take slot 3.
+- Slot 3 is not S1. Slot 3 may still use the same C on Hunt’s prior-15m high/low line.
 - Old M15 event must not stay valid forever.
 - M1 is timing only (C). M1 does not replace the 15m/5m setup.
 
@@ -72,7 +81,7 @@ Live ATR getting smaller is not a pullback.
 
 ---
 
-## C — 1m entry timing (S1 and S2 only)
+## C — 1m entry timing (S1, S2, and Hunt slot 3)
 
 When the qualifying M5 is identified:
 
@@ -113,27 +122,6 @@ Engine names in that code:
 
 - S1 = `FRESH_CLEAN_BREAKOUT`
 - S2 = `FRESH_PULLBACK_CONTINUATION`
-
-Thesis / scenario / execution-event were kept separate on purpose
-(2026-09-22) so “distance recovered” could not fake a pullback.
-
-Forming 15m: built from that 15m’s closed 5m + live 5m so BOS/CHoCH
-could be seen **inside** the 15m, not only after close.
-
-S1 live slots: 1 and 2 only (`enabled_m5_slots`).
-
-Scenario live path **skipped** the 4H weather gate. Hunt live **uses**
-`WEATHER_V1B_RETRACE` (1.0 ATR retrace turns SWING_* into CHOP).
-
----
-
-## Why live S1/S2 rarely sent
-
-Chart CHoCH/BOS paint ≠ scenario thesis.
-WAIT / “No qualifying 15M structural break” was the usual state.
-Slot 3 ignored. C needed a 1m close across the line.
-~34 C-style fires in ~41 days in the isolated timing test.
-That dryness was the rules, not a dead MEXC pipe.
 
 ---
 
