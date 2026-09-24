@@ -34,7 +34,7 @@ bridge._pending_watches.clear()
 
 def _fake_tick_slot1(live_price):
     return {
-        "action": "FIRE", "direction": "LONG", "ts": 1000, "entry": 50000.0,
+        "action": "FIRE", "direction": "LONG", "ts": 1800, "entry": 50000.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT1-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "CHoCH"}},
@@ -49,7 +49,7 @@ check("M5#1 enabled: does NOT fire immediately (handed to watcher instead)",
       result["action"] in ("WAIT", "CANCEL", "FIRE"), detail=str(result))
 check("M5#1: m5_slot correctly classified as 1", result["m5_slot"] == 1)
 check("M5#1 enabled: thesis is now tracked by the watcher",
-      any(w.startswith("TH-SLOT1-TEST") for w in bridge._WATCHER._state) or result["action"] != "WAIT")
+      "TH-SLOT1-TEST-900" in bridge._WATCHER._state or result["action"] != "WAIT")
 
 # --- M5#1 path, enabled_m5_slots=[2] (M5#1 disabled): must be SKIPPED,
 #     never opened -- confirms the config is a real, per-slot toggle ---
@@ -70,7 +70,7 @@ bridge._pending_watches.clear()
 
 def _fake_tick_slot3(live_price):
     return {
-        "action": "FIRE", "direction": "SHORT", "ts": 1600, "entry": 49500.0,
+        "action": "FIRE", "direction": "SHORT", "ts": 2400, "entry": 49500.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT3-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "BOS"}},
@@ -106,7 +106,7 @@ bridge._pending_watches.clear()
 
 def _fake_tick_slot2(live_price):
     return {
-        "action": "FIRE", "direction": "LONG", "ts": 1300, "entry": 50100.0,
+        "action": "FIRE", "direction": "LONG", "ts": 2100, "entry": 50100.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT2-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "CHoCH"}},
@@ -120,7 +120,7 @@ check("M5#2: does NOT fire immediately (handed to watcher instead)",
       result2["action"] in ("WAIT", "CANCEL", "FIRE"), detail=str(result2))
 check("M5#2: m5_slot correctly classified as 2", result2["m5_slot"] == 2)
 check("M5#2: thesis is now tracked by the watcher",
-      any(w.startswith("TH-SLOT2-TEST") for w in bridge._WATCHER._state) or result2["action"] != "WAIT")
+      "TH-SLOT2-TEST-900" in bridge._WATCHER._state or result2["action"] != "WAIT")
 
 # --- Lifecycle adapter tests ---
 fire_long = {"direction": LONG, "entry": 50000.0, "atr15": 200.0,

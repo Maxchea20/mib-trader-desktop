@@ -82,13 +82,10 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
         "why_state": [result.get("reason")],
         "thesis_ts": result.get("origin_ts"), "thesis_level": result.get("origin_level"),
     }
-    # S1/S2 plus the M5 slot of the M15 candle it confirmed in; every
-    # entry goes through the C (M1 close) execution trigger.
-    case_label = f"{result.get('setup') or 'S?'} M5#{result.get('m5_slot') or '?'}"
-    entry_method = "C"
+    case_label = {1: "M5#1", 2: "C", 3: "M5#3"}.get(result.get("m5_slot"), "UNKNOWN")
+    entry_method = "C" if result.get("m5_slot") == 2 else "A"
     scenario_thesis = {
-        "thesis_id": result.get("thesis_id"), "attempt_id": result.get("attempt_id"),
-        "setup": result.get("setup"), "case": case_label, "m5_slot": result.get("m5_slot"),
+        "thesis_id": result.get("thesis_id"), "case": case_label, "m5_slot": result.get("m5_slot"),
         "entry_method": entry_method, "engine": "scenario",
         "c_intended_price": result.get("c_intended_price"), "c_intended_ts": result.get("c_intended_ts"),
         "atr15": result.get("atr15"), "scenario_class": result.get("scenario"),
