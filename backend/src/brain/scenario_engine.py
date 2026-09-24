@@ -416,11 +416,28 @@ class ScenarioEngine:
             cand = _m15_candidate(candles_15m)
             if cand and cand["ts"] != self._last_m15_ts_used:
                 self._thesis_counter += 1
+                # BUG FIX: thesis_id used to be purely a per-process
+                # counter (TH-000001, TH-000002, ...), which resets to
+                # zero on every restart -- meaning a brand-new thesis
+                # after a restart could get the exact same ID as some
+                # completely different thesis from a prior run.
+                # scenario_live_bridge.py's duplicate-attempt guard is
+                # restored from persisted history across restarts and
+                # keys on this ID alone, so a collision meant a genuine
+                # new opportunity could be silently treated as already
+                # handled. Confirmed directly: two fresh instances
+                # produce an identical first ID otherwise. cand["ts"]
+                # (the M15 origin candle's own timestamp) is already
+                # guaranteed unique per genuine thesis by construction --
+                # a new thesis is only ever created when no thesis is
+                # currently active AND a fresh M15 event just occurred --
+                # so basing the ID on it fixes the collision permanently,
+                # with no counter needed at all. Format kept recognizable.
                 self.thesis = Thesis(
                     direction=cand["direction"], origin_event=cand["event"],
                     origin_level=cand["level"], origin_ts=cand["ts"],
                     invalidation_level=cand["invalidation_level"],
-                    thesis_id=f"TH-{self._thesis_counter:06d}",
+                    thesis_id=f"TH-{cand['ts']}",
                 )
                 self._last_m15_ts_used = cand["ts"]
                 self._log(ts, f"THESIS OPENED [{self.thesis.thesis_id}]: 15M {cand['event']} "

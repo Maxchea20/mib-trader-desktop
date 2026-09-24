@@ -56,6 +56,15 @@ CONFIG = {
     # marginally positive and has not been vetted to the same standard
     # as M5#1/M5#2. Add 3 here only after that changes.
     "enabled_m5_slots": [1, 2],
+    # Whether FRESH_PULLBACK_CONTINUATION (S2) confirmations that arrive
+    # later than the M15 origin candle's own 15-minute window are allowed
+    # to fire live. Default OFF: unlike M5#1/M5#2 (extensively
+    # backtested before being enabled), this pattern has never been
+    # backtested for live trading -- enabling this only stops these
+    # setups from being silently dropped; it does not mean they're known
+    # to be profitable. Backtest first, same as every other live-trading
+    # decision this session.
+    "enable_late_pullback_fire": False,
 }
 
 STATE = {

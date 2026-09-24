@@ -35,6 +35,8 @@ export const ScenarioBrainPanel = ({ auto, syncStatus }) => {
   else if (slot === 2 && action === "WAIT") { badge = "WATCHING"; rgb = "251,191,36"; }
   else if (slot === 2 && action === "CANCEL") { badge = "CANCELLED"; rgb = "255,59,86"; }
   else if (action === "FIRE") { badge = result?.direction === "SHORT" ? "FIRE SHORT" : "FIRE LONG"; rgb = result?.direction === "SHORT" ? "255,59,86" : "0,245,155"; }
+  else if (action === "FIRE_FAILED") { badge = "FIRE FAILED"; rgb = "255,59,86"; }
+  else if (action === "SKIPPED") { badge = "SKIPPED"; rgb = "148,163,184"; }
   else if (action === "ALREADY_ATTEMPTED") { badge = "HANDLED"; rgb = "100,116,139"; }
   const color = `rgb(${rgb})`;
 

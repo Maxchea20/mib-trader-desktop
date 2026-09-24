@@ -74,6 +74,13 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
             opened_ts=result["entry_ts"],
         )
     except Exception as e:
+        # A real FIRE was already recorded into last_scenario_result a
+        # few lines above -- without this, the dashboard would keep
+        # showing "FIRE" indefinitely even though the attempt actually
+        # failed here and no order was ever sent. This is the "UI shows
+        # Fire but nothing reaches MEXC" symptom, confirmed directly.
+        STATE["last_scenario_result"]["action"] = "FIRE_FAILED"
+        STATE["last_scenario_result"]["reason"] = f"sizing failed: {e}"
         STATE["last_action"] = "SCENARIO FIRE BUT SIZING FAILED"
         STATE["last_reason"] = str(e)
         logger.exception("scenario position sizing failed")
@@ -116,6 +123,11 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
             STATE["last_scenario_trade_log"]["order_result"] = order_result
             STATE["last_action"] = f"SCENARIO LIVE OPEN {side} {order_result.get('data')}"
         except Exception as e:
+            # Same reasoning as the sizing-failure branch above -- do not
+            # leave last_scenario_result frozen showing "FIRE" when the
+            # live order never actually went through.
+            STATE["last_scenario_result"]["action"] = "FIRE_FAILED"
+            STATE["last_scenario_result"]["reason"] = f"live order failed: {e}"
             STATE["last_action"] = "SCENARIO LIVE ORDER FAILED"
             STATE["last_reason"] = str(e)
             logger.exception("scenario live order failed")
