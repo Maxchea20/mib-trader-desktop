@@ -1,11 +1,7 @@
 """Hunt C-FI — C-fast OR C-internal OR rearm of a still-valid 15m thesis.
 
-Gate A — C-fast: swing 15m CHoCH or any BOS that is not extended.
-Gate B — Internal: same events on 15m pivots L/R=2.
-Gate C — Rearm: last valid 15m event is still in force (no opposite CHoCH),
-         even if it printed on an earlier 15m. 5m may answer again.
-Fill is unchanged: 5m #3 through prior 15m high/low, or V2 tap on 5m #1/#2,
-level fill, 4h weather must allow, SL 1.5 / TP 2.5.
+Slot 1/2 native V2 FIRE is suppressed. S1/S2 + C own those slots.
+Slot 3 impulse_3 FIRE is unchanged (no C).
 """
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ from .observation_hunt_c import (
 from .observation_hunt_c_fast import evaluate_hunt_c_fast
 from .observation_hunt_v3 import evaluate_hunt_v3
 from .weather import classify, side_allowed
+from .hunt_entry_timing import apply_to_hunt, tick_timing
 
 HUNT_VERSION_C_FI = "OBSERVATION_HUNT_M5_C_FI"
 
@@ -124,6 +121,40 @@ def _try_answer(side, event, live, candles_15m, candle_5m, candles_4h, candles_5
     return None
 
 
+def _with_timing(out, candles_15m, candle_5m, live_5ms, candles_5m, candles_1m, aux):
+    if not out:
+        return out
+    slot = out.get("slot")
+    if slot is None and candle_5m:
+        slot = slot_of(candle_5m["ts"])
+        out["slot"] = slot
+    pack = dict(out.get("hunt") or {})
+    path = str(pack.get("m5_path") or out.get("v3a_path") or "")
+    slot3_impulse = (
+        slot == 3
+        and out.get("action") == "FIRE"
+        and ("impulse" in path or "hold_3" in path or path == "impulse_3")
+    )
+    if out.get("action") == "FIRE" and slot in (1, 2):
+        out["action"] = "WAIT"
+        out["armed"] = True
+        why = list(out.get("why_state") or [])
+        out["why_state"] = ["Slot 1/2 armed — S1/S2 C timing"] + why
+        pack["m5_path"] = "armed_timing"
+        out["hunt"] = pack
+    if slot3_impulse:
+        out["timing"] = "SLOT3"
+        out["timing_state"] = "FIRE"
+        return out
+    rows5 = list(candles_5m or live_5ms or [])
+    if candle_5m:
+        rows5 = [c for c in rows5 if int(c.get("ts") or 0) <= int(candle_5m["ts"])]
+        if not rows5 or int(rows5[-1]["ts"]) != int(candle_5m["ts"]):
+            rows5 = rows5 + [candle_5m]
+    patch = tick_timing(out, candles_15m or [], rows5, candles_1m, aux or {})
+    return apply_to_hunt(out, patch)
+
+
 def evaluate_hunt_c_fi(
     candles_15m: List[dict],
     candle_5m: dict,
@@ -131,6 +162,17 @@ def evaluate_hunt_c_fi(
     candles_4h: Optional[List[dict]] = None,
     candles_1h: Optional[List[dict]] = None,
     candles_5m: Optional[List[dict]] = None,
+    candles_1m: Optional[List[dict]] = None,
+    aux: Optional[Dict] = None,
+) -> Dict:
+    out = _evaluate_hunt_c_fi_core(
+        candles_15m, candle_5m, live_5ms, candles_4h, candles_1h, candles_5m,
+    )
+    return _with_timing(out, candles_15m, candle_5m, live_5ms, candles_5m, candles_1m, aux)
+
+
+def _evaluate_hunt_c_fi_core(
+    candles_15m, candle_5m, live_5ms, candles_4h, candles_1h, candles_5m,
 ) -> Dict:
     fast = evaluate_hunt_c_fast(
         candles_15m,
@@ -147,6 +189,9 @@ def evaluate_hunt_c_fi(
             why[0] = "Hunt C-FI cfast"
             fast["why_state"] = why
         got = active_setup(candles_15m, pivot=5, require_fresh=False)
+        live = live_5ms or ([candle_5m] if candle_5m else [])
+        slot = len(live) if live else (slot_of(candle_5m["ts"]) if candle_5m else None)
+        fast["slot"] = slot
         return _attach_thesis(
             fast, side=fast.get("direction"), event=fast.get("event"),
             gate="cfast", ev_ts=got[2] if got else None,
