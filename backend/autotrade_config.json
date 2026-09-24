@@ -8,7 +8,7 @@
   "cooldown_bars_normal": 1,
   "cooldown_bars_after_failure": 3,
   "sizing_mode": "NORMAL",
-  "allocation_pct": 90.0,
+  "allocation_pct": 85.0,
   "risk_pct": 2.0,
   "leverage": 10.0,
   "max_live_notional_usd": 10000.0,
