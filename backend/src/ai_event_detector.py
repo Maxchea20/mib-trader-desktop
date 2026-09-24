@@ -1,9 +1,7 @@
-"""Deterministic AI wake-up detector.
+"""AI wake-up detector — Scenario only.
 
-Sits AFTER autotrader.evaluate() in the existing 5s loop. Reads autotrader
-STATE only. Never calls OpenAI. Never changes Hunt / Scenario / orders.
-
-Emits at most one event per meaningful fingerprint change.
+Hunt C-FI may still be computed for the chart. It must NOT stamp FIRE
+on the Event Stream while entry_engine is scenario.
 """
 from __future__ import annotations
 
@@ -25,11 +23,7 @@ def reset() -> None:
     _LAST_FP = None
 
 
-def _hunt(state: Dict) -> Dict:
-    return state.get("last_hunt") or {}
-
-
-def _scenario(state: Dict) -> Dict:
+def _sc(state: Dict) -> Dict:
     return state.get("last_scenario_result") or {}
 
 
@@ -42,140 +36,81 @@ def _action(state: Dict) -> str:
 
 
 def fingerprint(state: Dict) -> Tuple:
-    h = _hunt(state)
-    sc = _scenario(state)
+    sc = _sc(state)
     lc = _lifecycle(state)
-    invalid = bool(h.get("thesis_invalid"))
     return (
-        h.get("action"),
-        h.get("direction"),
-        h.get("event"),
-        h.get("thesis_ts"),
-        h.get("thesis_level"),
-        invalid,
-        bool(h.get("rearm")),
-        _action(state),
         sc.get("action"),
+        sc.get("setup"),
+        sc.get("scenario"),
         sc.get("thesis_id"),
+        sc.get("direction"),
         sc.get("m5_slot"),
+        sc.get("reason"),
+        sc.get("provisional"),
+        _action(state),
         lc.get("action"),
         lc.get("exit_kind"),
-        state.get("last_fired_5m_ts"),
     )
 
 
-def _is_fire_action(action: str, hunt_action: Optional[str], sc_action: Optional[str]) -> bool:
-    a = (action or "").upper()
-    if hunt_action == "FIRE":
-        return True
+def _is_fire(action: str, sc_action: Optional[str]) -> bool:
     if sc_action == "FIRE":
         return True
-    prefixes = (
-        "OPEN ", "LIVE OPEN", "SCENARIO OPEN", "SCENARIO LIVE OPEN",
-    )
-    return any(a.startswith(p) for p in prefixes)
-
-
-def _is_exit_action(action: str, lc_action: Optional[str]) -> bool:
     a = (action or "").upper()
-    if lc_action == "EXIT":
-        return True
-    return a.startswith("LIFECYCLE_EXIT")
-
-
-def _looks_pullback(hunt: Dict, action: str) -> bool:
-    ev = str(hunt.get("event") or "").lower()
-    why = str(hunt.get("why") or "").lower()
-    blob = ev + " " + why + " " + action.lower()
-    keys = ("tap", "pull", "retrace", "retest", "wick", "touch")
-    return any(k in blob for k in keys)
-
-
-def _looks_armed(hunt: Dict, action: str) -> bool:
-    if hunt.get("rearm"):
-        return True
-    blob = (str(hunt.get("event") or "") + " " + str(hunt.get("why") or "") + " " + action).lower()
-    return any(k in blob for k in ("arm", "armed", "watching", "setup"))
-
-
-def _looks_weak(hunt: Dict, action: str) -> bool:
-    a = (action or "").upper()
-    if a.startswith("WEATHER_BLOCK"):
-        return True
-    blob = (str(hunt.get("why") or "") + " " + str(hunt.get("event") or "")).lower()
-    return any(k in blob for k in ("weak", "fail to extend", "failed to extend", "roll over", "deteriorat"))
+    return a.startswith("SCENARIO OPEN") or a.startswith("SCENARIO LIVE OPEN")
 
 
 def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
-    """Return an event kind only when the transition is meaningful."""
     if prev is not None and curr == prev:
         return None
-
-    h = _hunt(state)
-    sc = _scenario(state)
+    sc = _sc(state)
     lc = _lifecycle(state)
     action = _action(state)
+    prev_action = prev[8] if prev else ""
+    prev_sc = prev[0] if prev else None
+    prev_lc = prev[9] if prev else None
 
-    prev_action = prev[7] if prev else ""
-    prev_hunt_action = prev[0] if prev else None
-    prev_sc_action = prev[8] if prev else None
-    prev_invalid = prev[5] if prev else False
-    prev_lc = prev[11] if prev else None
-
-    if _is_fire_action(action, h.get("action"), sc.get("action")) and not _is_fire_action(
-        prev_action, prev_hunt_action, prev_sc_action
-    ):
+    if _is_fire(action, sc.get("action")) and not _is_fire(prev_action, prev_sc):
         return EVENT_FIRE
-
-    if _is_exit_action(action, lc.get("action")) and not _is_exit_action(prev_action, prev_lc):
+    if (lc.get("action") == "EXIT" or action.upper().startswith("LIFECYCLE_EXIT")) and not (
+        prev_lc == "EXIT" or str(prev_action).upper().startswith("LIFECYCLE_EXIT")
+    ):
         return EVENT_EXIT
-
-    if bool(h.get("thesis_invalid")) and not prev_invalid:
+    if sc.get("action") in ("CANCEL", "SKIPPED") and prev_sc not in ("CANCEL", "SKIPPED"):
         return EVENT_THESIS_INVALID
-
-    # After a process restart, skip soft events so we do not narrate
-    # the already-current WAIT/watching state as a fresh change.
     if prev is None:
         return None
-
-    if _looks_weak(h, action) and (curr[7] != prev[7] or curr[2] != prev[2]):
-        return EVENT_THESIS_WEAK
-
-    if _looks_pullback(h, action) and (curr[2] != prev[2] or curr[7] != prev[7]):
-        return EVENT_PULLBACK
-
-    if _looks_armed(h, action) and (curr[6] != prev[6] or curr[2] != prev[2]):
+    reason = str(sc.get("reason") or "").lower()
+    if "c watching" in reason or "watching 1m" in reason:
+        if curr[6] != (prev[6] if prev else None):
+            return EVENT_SETUP_ARMED
+    if "pullback" in reason or sc.get("scenario") == "PULLBACK_WATCH":
+        if curr[2] != (prev[2] if prev else None):
+            return EVENT_PULLBACK
+    if sc.get("thesis_id") and prev and not prev[3]:
         return EVENT_SETUP_ARMED
-
     return None
 
 
 def inspect_and_maybe_emit(state: Dict) -> Optional[Dict]:
-    """Compare fingerprints. Return event payload or None.
-
-    Always advances the stored fingerprint so a sticky FIRE does not
-    re-emit every 5 seconds.
-    """
     global _LAST_FP
     fp = fingerprint(state)
     kind = classify(_LAST_FP, fp, state)
     _LAST_FP = fp
     if not kind:
         return None
-    h = _hunt(state)
-    sc = _scenario(state)
+    sc = _sc(state)
     return {
         "kind": kind,
         "fingerprint": fp,
-        "hunt_action": h.get("action"),
-        "hunt_event": h.get("event"),
-        "hunt_why": h.get("why"),
-        "direction": h.get("direction") or sc.get("direction"),
-        "thesis_ts": h.get("thesis_ts") or sc.get("origin_ts"),
-        "thesis_level": h.get("thesis_level") or sc.get("origin_level"),
+        "direction": sc.get("direction"),
+        "thesis_ts": sc.get("origin_ts"),
+        "thesis_level": sc.get("origin_level"),
         "thesis_id": sc.get("thesis_id"),
         "m5_slot": sc.get("m5_slot"),
         "scenario_action": sc.get("action"),
+        "setup": sc.get("setup"),
+        "reason": sc.get("reason"),
         "last_action": _action(state),
         "lifecycle": _lifecycle(state),
     }
