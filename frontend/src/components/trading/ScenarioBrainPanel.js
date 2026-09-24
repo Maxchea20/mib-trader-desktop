@@ -23,23 +23,23 @@ export const ScenarioBrainPanel = ({ auto, syncStatus }) => {
   const tradeLog = auto?.state?.last_scenario_trade_log;
 
   const slot = result?.m5_slot;
+  const setup = result?.setup; // "S1" | "S2"
   const action = result?.action;
-  const hasThesis = slot != null;
+  const hasThesis = result?.thesis_id != null;
+  const watching = action === "WAIT" && result?.attempt_id != null;
 
   let badge = "WAIT";
   let rgb = "148,163,184";
   if (!connected) { badge = "OFFLINE"; rgb = "71,85,105"; }
   else if (!hasThesis) { badge = "WAIT"; rgb = "251,191,36"; }
-  else if (slot === 2 && action === "WAIT") { badge = "WATCHING"; rgb = "251,191,36"; }
-  else if (slot === 2 && action === "CANCEL") { badge = "CANCELLED"; rgb = "255,59,86"; }
+  else if (watching) { badge = "WATCHING"; rgb = "251,191,36"; }
+  else if (action === "CANCEL") { badge = "CANCELLED"; rgb = "255,59,86"; }
   else if (action === "FIRE") { badge = result?.direction === "SHORT" ? "FIRE SHORT" : "FIRE LONG"; rgb = result?.direction === "SHORT" ? "255,59,86" : "0,245,155"; }
   else if (action === "ALREADY_ATTEMPTED") { badge = "HANDLED"; rgb = "100,116,139"; }
   const color = `rgb(${rgb})`;
 
   const caseLabel = !hasThesis ? "NO ACTIVE SETUP"
-    : slot === 1 ? "M5#1 — IMMEDIATE"
-    : slot === 3 ? "M5#3 — STANDARD"
-    : "CASE 1 — M5#2";
+    : `${setup || "SETUP"}${slot != null ? ` — M5#${slot}` : ""}`;
 
   // Human-readable "why" lines (item 6) -- built from the same fields
   // the status badge above already used, not invented separately.
@@ -50,14 +50,12 @@ export const ScenarioBrainPanel = ({ auto, syncStatus }) => {
     whyLines.push(result?.reason || "No M15 structural break has produced a valid thesis yet.");
   } else {
     whyLines.push(`M15 thesis: ${result?.direction || "—"}${tradeLog?.origin_event ? ` (${tradeLog.origin_event})` : ""}`);
-    whyLines.push(`M5 confirmation on slot #${slot}${slot === 2 ? " (Case-1 eligible)" : ""}`);
-    if (slot === 2) {
-      if (action === "WAIT") whyLines.push("Waiting for the first qualifying M1 candle CLOSE.");
-      else if (action === "CANCEL") whyLines.push(`C watcher cancelled — ${result?.reason || "reason not reported"}`);
-      else if (action === "FIRE") whyLines.push("M1 close crossed the structural level — entry submitted.");
-    } else if (action === "FIRE") {
-      whyLines.push(slot === 1 ? "Fired immediately — no C timing applies to M5#1." : "Standard scenario entry — no C timing applies to M5#3.");
-    }
+    if (setup) whyLines.push(`${setup} M5 confirmation${slot != null ? ` on slot #${slot} of its M15 candle` : ""}`);
+    if (watching) whyLines.push("C: watching every M1 close until this M15 candle ends.");
+    else if (action === "CANCEL") whyLines.push(`Cancelled — ${result?.reason || "reason not reported"}`);
+    else if (action === "SKIPPED") whyLines.push(`Skipped — ${result?.reason || "reason not reported"}`);
+    else if (action === "FIRE") whyLines.push("M1 close crossed the structural level — entry submitted.");
+    else if (result?.reason) whyLines.push(result.reason);
   }
 
   return (
@@ -91,7 +89,7 @@ export const ScenarioBrainPanel = ({ auto, syncStatus }) => {
       </div>
 
       {/* C entry details (item 3) -- only when relevant */}
-      {slot === 2 && (result?.c_intended_ts != null || tradeLog?.c_intended_ts != null) && (
+      {(result?.c_intended_ts != null || tradeLog?.c_intended_ts != null) && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 pt-3 border-t border-[#1d2635] font-mono-t text-[11px]">
           <div>
             <div className="widget-label">M1 confirmation</div>

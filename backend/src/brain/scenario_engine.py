@@ -161,6 +161,10 @@ class Thesis:
     invalidation_level: Optional[float]
     status: str = "ARMED"  # ARMED | EXTENDED | PULLBACK_WATCH | INVALIDATED
     thesis_id: str = ""
+    # True while the M15 candle that broke structure is still forming.
+    # Checked once that candle closes: kept if the BOS/CHoCH held on the
+    # close, invalidated if it did not.
+    provisional: bool = False
 
     # --- M5 execution-event tracking (rising-edge based; DECISION STATE) ---
     m5_event_id: int = 0
@@ -221,6 +225,32 @@ def _m15_candidate(candles_15m: List[dict]) -> Optional[Dict[str, Any]]:
         "level": float(candidate.reference_price or candidate.price),
         "ts": bar_ts,
         "invalidation_level": invalidation_level,
+    }
+
+
+def _forming_15m(candles_15m: List[dict], closed_5m: List[dict],
+                 forming_5m: Optional[dict]) -> Optional[dict]:
+    """The M15 candle that is forming RIGHT NOW, built from its closed 5m
+    candles plus the live forming 5m. Lets the engine see a BOS/CHoCH
+    while it happens inside the M15 candle, so S1/S2 can act within that
+    same candle's 3 x M5 slots instead of only after it closes.
+
+    Returns None when there is no live bar, or when the previous closed
+    M15 is not in storage yet (sync lag) -- never bridges a gap."""
+    if forming_5m is None or not candles_15m:
+        return None
+    ts5 = int(forming_5m["ts"])
+    bucket = ts5 - ts5 % 900
+    if bucket != int(candles_15m[-1]["ts"]) + 900:
+        return None
+    parts = [c for c in closed_5m if bucket <= int(c["ts"]) < bucket + 900] + [forming_5m]
+    return {
+        "ts": bucket,
+        "open": float(parts[0]["open"]) if len(parts) > 1 else float(candles_15m[-1]["close"]),
+        "high": max(float(c["high"]) for c in parts),
+        "low": min(float(c["low"]) for c in parts),
+        "close": float(forming_5m["close"]),
+        "volume": sum(float(c.get("volume") or 0.0) for c in parts),
     }
 
 
@@ -395,6 +425,7 @@ class ScenarioEngine:
         self._last_action: Optional[str] = None
         self._last_m15_ts_used: Optional[int] = None
         self._thesis_counter: int = 0  # diagnostic-only, feeds thesis_id labels
+        self._invalid_reason: Optional[str] = None
 
     def _log(self, ts: int, text: str) -> None:
         self.trace.append(TraceEvent(ts=ts, text=text))
@@ -407,13 +438,41 @@ class ScenarioEngine:
         atr15 = float(_atr(aa15["high"], aa15["low"], aa15["close"], 14) or 0.0)
 
         # -- thesis creation / invalidation -----------------------------
+        self._invalid_reason = None
         if self.thesis is not None:
-            reason = _invalidated(self.thesis, price, closed_5m) if price is not None else None
+            reason = None
+            # A thesis opened inside a still-forming M15 candle: once that
+            # candle has closed, the BOS/CHoCH must still be there.
+            if (self.thesis.provisional and candles_15m
+                    and int(candles_15m[-1]["ts"]) >= self.thesis.origin_ts):
+                # Judge the breakout candle itself, even if later candles
+                # have closed since (e.g. the engine was not ticked while
+                # a position was open).
+                upto = [c for c in candles_15m if int(c["ts"]) <= self.thesis.origin_ts]
+                held = _m15_candidate(upto) if upto else None
+                if (held and held["ts"] == self.thesis.origin_ts
+                        and held["direction"] == self.thesis.direction):
+                    self.thesis.provisional = False
+                    self.thesis.origin_level = held["level"]
+                    self.thesis.invalidation_level = held["invalidation_level"]
+                    self._log(ts, f"[{self.thesis.thesis_id}] 15M {held['event']} held on candle close.")
+                else:
+                    reason = "m15_break_not_held_at_close"
+            if reason is None and price is not None:
+                reason = _invalidated(self.thesis, price, closed_5m)
             if reason:
                 self.thesis.status = "INVALIDATED"
+                self._invalid_reason = reason
                 self._log(ts, f"Thesis invalidated ({reason}).")
         else:
-            cand = _m15_candidate(candles_15m)
+            provisional = False
+            cand = None
+            forming_15m = _forming_15m(candles_15m, closed_5m, forming_5m)
+            if forming_15m is not None:
+                cand = _m15_candidate(candles_15m + [forming_15m])
+                provisional = cand is not None
+            if cand is None:
+                cand = _m15_candidate(candles_15m)
             if cand and cand["ts"] != self._last_m15_ts_used:
                 self._thesis_counter += 1
                 self.thesis = Thesis(
@@ -421,10 +480,12 @@ class ScenarioEngine:
                     origin_level=cand["level"], origin_ts=cand["ts"],
                     invalidation_level=cand["invalidation_level"],
                     thesis_id=f"TH-{self._thesis_counter:06d}",
+                    provisional=provisional,
                 )
                 self._last_m15_ts_used = cand["ts"]
                 self._log(ts, f"THESIS OPENED [{self.thesis.thesis_id}]: 15M {cand['event']} "
-                              f"confirmed ({cand['direction']}).")
+                              f"{'forming inside the live candle' if provisional else 'confirmed'} "
+                              f"({cand['direction']}).")
 
         thesis = self.thesis
         m5 = {"level": None, "live": False, "closed": False, "live_price": price}
@@ -479,7 +540,7 @@ class ScenarioEngine:
             # distinguish a hard structural break (SETUP_INVALIDATED) from an
             # opposing-CHoCH rejection: both set status INVALIDATED above,
             # but we re-derive which reason applied for the label.
-            reason = _invalidated(thesis, price, closed_5m) if price is not None else None
+            reason = self._invalid_reason
             scenario = "REJECTION" if reason == "opposing_fast_choch" else "SETUP_INVALIDATED"
         elif thesis is not None and thesis.status == "PULLBACK_WATCH" and fresh_event:
             scenario = "FRESH_PULLBACK_CONTINUATION"
@@ -568,6 +629,8 @@ class ScenarioEngine:
                     "direction": thesis.direction, "origin_event": thesis.origin_event,
                     "origin_level": thesis.origin_level, "origin_ts": thesis.origin_ts,
                     "invalidation_level": thesis.invalidation_level, "status": thesis.status,
+                    "provisional": thesis.provisional,
+                    "invalid_reason": self._invalid_reason,
                     # decision state (live — reset after each FIRE, see module docstring)
                     "m5_event_id": thesis.m5_event_id, "consumed_m5_event_id": thesis.consumed_m5_event_id,
                     "extension_price": thesis.extension_price, "extension_atr_ref": thesis.extension_atr_ref,

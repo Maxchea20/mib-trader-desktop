@@ -43,7 +43,6 @@ function FactCard({ obs }) {
 
 function scenarioLabelForSlot(slot) {
   if (slot == null) return "—";
-  if (slot === 3) return "M5#3 (excluded)";
   return `M5#${slot} (C)`;
 }
 
