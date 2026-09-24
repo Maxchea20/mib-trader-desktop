@@ -16,6 +16,7 @@ import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
+import { HuntLiveCard } from "@/components/trading/HuntLiveCard";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
 import { BacktestHuntModal } from "@/components/trading/BacktestHuntModal";
 import { PaperTradingPanel } from "@/components/trading/PaperTradingPanel";
@@ -238,6 +239,7 @@ function App() {
               <MultiTimeframeRegime htf={analysis?.htf_regime} />
               <div className="lg:col-span-2"><KeyLevelsPanel analysis={analysis} onHover={setHoveredType} /></div>
             </div>
+            <HuntLiveCard hunt={analysis?.hunt} auto={auto} />
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
             <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
