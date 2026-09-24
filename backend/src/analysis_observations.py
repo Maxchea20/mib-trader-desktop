@@ -14,6 +14,7 @@ from .brain.observation_hunt_c import parent_open
 from .brain.observation_hunt_c_fi import evaluate_hunt_c_fi, HUNT_VERSION_C_FI
 from .brain.weather import classify
 from .market_state.builder import build_market_state
+from .market_data import data_access as dao
 
 
 def _live_5ms(candles_5m: List[dict]) -> List[dict]:
@@ -26,7 +27,6 @@ def _live_5ms(candles_5m: List[dict]) -> List[dict]:
 def _map_15(
     candles_15m: List[dict], candles_5m: Optional[List[dict]]
 ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
-    """Prior closed 15m high/low/ts — the bar 5m #3 must close through."""
     if not candles_15m:
         return None, None, None
     last15 = candles_15m[-1]
@@ -42,12 +42,6 @@ def _map_15(
 
 
 def _hunt_breaks(candles_15m: List[dict]) -> List[dict]:
-    """Last swing high/low Hunt treats as the next CHoCH or BOS break.
-
-    C-fast (default 15m structure) is first. Break up through last swing
-    high is BOS if Hunt is already bullish, CHoCH if Hunt is bearish.
-    Break down is the mirror.
-    """
     if not candles_15m or len(candles_15m) < 30:
         return []
     try:
@@ -136,6 +130,21 @@ def collect_observations(
     if hunt_15 and candles_5m:
         fill = candles_5m[-1]
         live = _live_5ms(candles_5m)
+        candles_1m: List[dict] = []
+        try:
+            candles_1m = dao.read_closed_candles("1m", limit=400)
+        except Exception:
+            candles_1m = []
+        aux = {}
+        try:
+            aux = {
+                "mom": obs_mom(hunt_15, "15m"),
+                "vol": obs_vol(hunt_15, "15m"),
+                "sr": obs_sr(hunt_15, "15m"),
+                "fvg": obs_fvg(hunt_15, "15m"),
+            }
+        except Exception:
+            aux = {}
         try:
             hunt = evaluate_hunt_c_fi(
                 hunt_15,
@@ -144,6 +153,8 @@ def collect_observations(
                 candles_4h=candles_4h,
                 candles_1h=candles_1h,
                 candles_5m=candles_5m,
+                candles_1m=candles_1m,
+                aux=aux,
             )
         except Exception as e:
             hunt = {
