@@ -34,7 +34,7 @@ const LiveTradingControls = ({ auto, onSave }) => {
   const sizing = auto?.sizing_preview || {};
   const sizingMode = cfg.sizing_mode || "NORMAL";
   const armed = !!auto?.live_armed;
-  const entryEngineLabel = cfg.entry_engine === "scenario" ? "SCENARIO ENGINE" : "HUNT C-FI";
+  const entryEngineLabel = "SCENARIO ENGINE";
   const [allocationInput, setAllocationInput] = useState(cfg.allocation_pct ?? 20);
   const [maxNotionalInput, setMaxNotionalInput] = useState(cfg.max_live_notional_usd ?? 1000);
   const [refreshing, setRefreshing] = useState(false);
@@ -225,7 +225,6 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe, auto, onSaveAut
   const openTrades = trades.filter((t) => t.status === "OPEN");
   const autoOn = auto?.config?.enabled;
   const mode = auto?.config?.mode || "PAPER";
-  const entryEngine = auto?.config?.entry_engine || "legacy";
   const toggleMode = async () => {
     await saveAuto({ mode: mode === "PAPER" ? "LIVE" : "PAPER" });
     refresh();
@@ -247,10 +246,10 @@ export const PaperTradingPanel = ({ brain, livePrice, timeframe, auto, onSaveAut
             AUTO-TRADE {autoOn ? "ON" : "OFF"}
           </button>
           <span
-            className={`px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${entryEngine === "scenario" ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-300" : "border-[#1d2635] bg-[#0d121b] text-slate-400"}`}
+            className="px-3 py-1.5 rounded-sm border font-mono-t text-[11px] border-cyan-500/60 bg-cyan-500/10 text-cyan-300"
             data-testid="entry-engine-badge"
           >
-            ENGINE {entryEngine === "scenario" ? "SCENARIO ENGINE" : "HUNT C-FI"}
+            ENGINE SCENARIO ENGINE
           </span>
           <button onClick={toggleMode} className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${mode === "PAPER" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300" : "border-amber-500/60 bg-amber-500/10 text-amber-300"}`}>MODE {mode}</button>
           <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-[#1d2635] bg-[#0d121b] text-slate-300 font-mono-t text-[11px]"><Plus className="w-3.5 h-3.5" /> New Trade</button>

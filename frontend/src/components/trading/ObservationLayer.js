@@ -47,8 +47,7 @@ function scenarioLabelForSlot(slot) {
   return `M5#${slot} (C)`;
 }
 
-export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => {
-  const isScenario = auto?.config?.entry_engine === "scenario";
+export const ObservationLayer = ({ observations = [], weather, auto }) => {
   const result = auto?.state?.last_scenario_result;
 
   // Engine-agnostic facts (Market Structure / Breakout / S/R / FVG /
@@ -56,19 +55,12 @@ export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => 
   // come from the same observe() agents scenario_engine.py itself
   // calls internally, not from either engine's decision layer. Only
   // this top strip actually differs by which engine is active.
-  let action, path, why, side;
-  if (isScenario) {
-    const slot = result?.m5_slot;
-    action = result ? (result.action === "ALREADY_ATTEMPTED" ? "HANDLED" : result.action) : "WAIT";
-    path = scenarioLabelForSlot(slot);
-    why = result?.reason || "No active M15 thesis yet.";
-    side = result?.direction || "";
-  } else {
-    path = hunt && hunt.hunt && hunt.hunt.m5_path;
-    why = hunt && (hunt.why_state || [])[0];
-    action = hunt ? hunt.action : "WAIT";
-    side = hunt?.direction || "";
-  }
+  // The scenario engine is the only entry engine; Hunt's own
+  // FIRE/WAIT is not shown here because it never opens a trade.
+  const action = result ? (result.action === "ALREADY_ATTEMPTED" ? "HANDLED" : result.action) : "WAIT";
+  const path = scenarioLabelForSlot(result?.m5_slot);
+  const why = result?.reason || "No active M15 thesis yet.";
+  const side = result?.direction || "";
   const rgb = glowRgb(`${action} ${side}`);
 
   return (
@@ -76,7 +68,7 @@ export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => 
       <div className="flex items-center gap-2 mb-3 px-0.5">
         <span className="font-head font-bold text-slate-200 tracking-wide text-lg">OBSERVATIONS</span>
         <span className="widget-label">
-          Layer 3 · observe() facts + {isScenario ? "scenario path" : "hunt path"}
+          Layer 3 · observe() facts + scenario path
         </span>
       </div>
 
@@ -86,7 +78,7 @@ export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => 
         data-testid="observation-top-strip"
       >
         <div>
-          <div className="widget-label">{isScenario ? "Scenario" : "Hunt"}</div>
+          <div className="widget-label">Scenario</div>
           <div
             className="font-head font-bold text-xl pulse-dot"
             style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}
@@ -95,7 +87,7 @@ export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => 
           </div>
         </div>
         <div>
-          <div className="widget-label">{isScenario ? "M5 slot" : "5m path"}</div>
+          <div className="widget-label">M5 slot</div>
           <div className="font-mono-t text-cyan-400">{path || "—"}</div>
         </div>
         <div>

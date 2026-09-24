@@ -39,11 +39,12 @@ r = json.load(open("entry_timing_c_implementation_result.json"))
 sample = r["paired"][0]   # TH-000002, LONG, real confirmed_at_minute from research
 
 # --- Test 1: classify_m5_slot correctness ---
-check("classify_m5_slot: slot 1", classify_m5_slot(1000, 1000) == 1)
-check("classify_m5_slot: slot 2", classify_m5_slot(1000, 1300) == 2)
-check("classify_m5_slot: slot 3", classify_m5_slot(1000, 1600) == 3)
-check("classify_m5_slot: out of range -> None", classify_m5_slot(1000, 2000) is None)
-check("classify_m5_slot: negative delta -> None", classify_m5_slot(1000, 900) is None)
+# slots are counted from the M15 candle's CLOSE (origin_ts + 900)
+check("classify_m5_slot: slot 1", classify_m5_slot(1000, 1900) == 1)
+check("classify_m5_slot: slot 2", classify_m5_slot(1000, 2200) == 2)
+check("classify_m5_slot: slot 3", classify_m5_slot(1000, 2500) == 3)
+check("classify_m5_slot: out of range -> None", classify_m5_slot(1000, 2800) is None)
+check("classify_m5_slot: inside the M15 candle -> None", classify_m5_slot(1000, 1000) is None)
 check("classify_m5_slot: missing origin -> None", classify_m5_slot(None, 1000) is None)
 
 # --- Test 2: watcher fires correctly on real historical data, matching prior research ---
@@ -60,7 +61,7 @@ for f in step4["mode1_intrabar"]["fires"]:
 origin_ts = th_dbg["origin_ts"]
 direction = sample["direction"]
 level = th_dbg["origin_level"]
-m5_2_open_ts = origin_ts + 300
+m5_2_open_ts = origin_ts + 900 + 300  # M5#2 = 2nd 5m candle after the M15 close
 
 # monkeypatch dao.read_closed_candles used inside the watcher to serve
 # from our already-loaded real candle set (same data, no live DB needed)

@@ -1,4 +1,5 @@
-"""Hunt evaluate loop — same-bar WAIT may flip to FIRE."""
+"""Autotrader evaluate loop. New entries come only from the scenario
+engine (scenario_live_bridge); Hunt C-FI is computed for context only."""
 import time
 from typing import Dict, Optional
 
@@ -6,12 +7,9 @@ from .config import ANALYSIS_LOOKBACK
 from .market_data import data_access as dao
 from . import analysis_service
 from .brain.lifecycle_tick import manage_open_on_5m
-from .brain.weather import side_allowed
 from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
-from .autotrader_exec import (
-    _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
-)
+from .autotrader_exec import _close_live_if_needed
 from .autotrader_live_sync import revive_shadow_if_mexc_open, flatten_mexc
 
 
@@ -32,20 +30,16 @@ def _record_close(reason: str) -> None:
 
 def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
                               live_mode: bool, live_armed: bool) -> Dict:
-    """Scenario-engine entry path, parallel to the legacy FIRE block in
-    evaluate() below. Only reached when CONFIG["entry_engine"] ==
-    "scenario". The shared pre-checks (existing-position lifecycle
+    """Scenario-engine entry path -- the only path that opens new
+    trades. The shared pre-checks (existing-position lifecycle
     management, open_auto / MEXC-still-open guards) already ran in
     evaluate() before this is called.
 
     Deliberately does NOT apply the legacy 4h "weather" gate
-    (brain.weather.side_allowed) -- that is legacy-specific context
-    scenario_engine.py was never validated against this session; adding
-    it here would be a new, untested filter bolted onto the tested
-    engine, not a safety measure. Everything else that IS a shared
-    account-level safety control (cooldown, live/paper gate, MEXC
-    margin/position checks inside the existing exec functions) is reused
-    unchanged.
+    (brain.weather.side_allowed) -- scenario_engine.py was never
+    validated against it. Everything else that IS a shared account-level
+    safety control (cooldown, live/paper gate, MEXC margin/position
+    checks inside the existing exec functions) is reused unchanged.
     """
     from . import scenario_live_bridge
     from .brain import lifecycle
@@ -55,6 +49,8 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
     STATE["last_scenario_result"] = result
     action = result.get("action")
 
+    STATE["last_state"] = action
+    STATE["last_reason"] = result.get("reason")
     if action != "FIRE":
         STATE["last_action"] = f"SCENARIO {action} ({result.get('reason') or ''})"
         return STATE
@@ -178,7 +174,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["last_eval_at"] = int(time.time())
     result = analysis_service.full_analysis(tf)
     hunt = result.get("hunt") or {}
-    weather = result.get("weather") or {}
     nested = hunt.get("hunt") if isinstance(hunt.get("hunt"), dict) else {}
     STATE["last_hunt"] = {
         "action": hunt.get("action"),
@@ -196,11 +191,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         "thesis_invalid": hunt.get("thesis_invalid"),
         "rearm": hunt.get("rearm"),
     }
-    STATE["last_state"] = hunt.get("action")
-    STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
-    already_opened_this_bar = (
-        hunt_5m_ts is not None and STATE.get("last_fired_5m_ts") == hunt_5m_ts
-    )
     STATE["last_hunt_5m_ts"] = hunt_5m_ts
     live_mode = CONFIG.get("mode") == "LIVE"
     live_armed = _live_armed()
@@ -215,54 +205,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             return STATE
     except Exception:
         pass
-    if CONFIG.get("entry_engine", "legacy") != "legacy":
-        # Scenario-engine entry path. Only the legacy FIRE decision below
-        # this point is skipped -- everything above (revive-shadow,
-        # existing-position lifecycle management, open_auto / MEXC-still-
-        # open guards) already ran unconditionally and applies to BOTH
-        # engines equally, so only one can ever open a new trade.
-        return _evaluate_scenario_entry(tf, live_price, live_mode, live_armed)
-    if hunt.get("action") != "FIRE":
-        STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
-        return STATE
-    if already_opened_this_bar:
-        STATE["last_action"] = "ALREADY FIRED THIS 5M"
-        return STATE
-    side = hunt.get("direction")
-    if not hunt.get("entry"):
-        hunt["entry"] = nested.get("level") or nested.get("entry")
-    if not hunt.get("stop"):
-        hunt["stop"] = nested.get("stop")
-    if not hunt.get("target"):
-        hunt["target"] = nested.get("target")
-    if not hunt.get("entry") or not hunt.get("stop") or not hunt.get("target"):
-        STATE["last_action"] = "FIRE BUT NO LEVELS"
-        STATE["last_reason"] = "Hunt printed FIRE without entry/stop/target — not sending"
-        return STATE
-    flag = weather.get("flag")
-    if flag and not side_allowed(flag, side):
-        STATE["last_action"] = "WEATHER_BLOCK"
-        STATE["last_reason"] = f"{flag} blocks {side}"
-        return STATE
-    if _in_cooldown(300):
-        STATE["last_action"] = "COOLDOWN"
-        return STATE
-    if live_mode and live_armed:
-        try:
-            order_result = _open_live_from_hunt(hunt, tf, live_price)
-            STATE["last_fired_5m_ts"] = hunt_5m_ts
-            STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')}"
-        except Exception as e:
-            STATE["last_action"] = "LIVE ORDER FAILED"
-            STATE["last_reason"] = str(e)
-            logger.exception("live order failed")
-        return STATE
-    if live_mode and not live_armed:
-        STATE["last_reason"] = (
-            "LIVE toggle is on but MEXC_LIVE_TRADING_ENABLED is not true — paper fill only. "
-            "Desktop: tray → Show Data Folder → add that line to .env → Restart Trading Engine."
-        )
-    _open_from_hunt(hunt, tf)
-    STATE["last_fired_5m_ts"] = hunt_5m_ts
-    STATE["last_action"] = f"OPEN {side} Hunt C-FI {hunt.get('gate') or ''}"
-    return STATE
+    # The scenario engine is the only entry engine. Hunt C-FI still runs
+    # above for context (last_hunt), but its FIRE never opens a trade.
+    return _evaluate_scenario_entry(tf, live_price, live_mode, live_armed)

@@ -42,11 +42,8 @@ def test_no_event_on_identical_ticks():
 def test_fire_emits_once():
     d.inspect_and_maybe_emit(_state())
     fired = _state(
-        last_hunt={"action": "FIRE", "direction": "LONG", "event": "close_through",
-                   "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
-                   "rearm": False, "why": "M5 close through"},
-        last_action="OPEN LONG Hunt C-FI",
-        last_fired_5m_ts=10,
+        last_scenario_result={"action": "FIRE", "direction": "LONG", "m5_slot": 1},
+        last_action="SCENARIO LIVE OPEN LONG 857647583068246528",
     )
     ev = d.inspect_and_maybe_emit(fired)
     assert ev is not None
@@ -54,14 +51,34 @@ def test_fire_emits_once():
     assert d.inspect_and_maybe_emit(fired) is None
 
 
+def test_hunt_fire_alone_is_not_a_fire_event():
+    """Hunt C-FI never opens a trade, so its FIRE must not show as FIRE."""
+    d.inspect_and_maybe_emit(_state())
+    hunt_only = _state(
+        last_hunt={"action": "FIRE", "direction": "LONG", "event": "close_through",
+                   "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
+                   "rearm": False, "why": "M5 close through"},
+        last_action="SCENARIO WAIT (engine idle)",
+    )
+    ev = d.inspect_and_maybe_emit(hunt_only)
+    assert ev is None or ev["kind"] != d.EVENT_FIRE
+
+
+def test_failed_order_is_reported():
+    d.inspect_and_maybe_emit(_state())
+    failed = _state(
+        last_scenario_result={"action": "FIRE", "direction": "LONG", "m5_slot": 1},
+        last_action="SCENARIO LIVE ORDER FAILED",
+    )
+    ev = d.inspect_and_maybe_emit(failed)
+    assert ev["kind"] == d.EVENT_ORDER_FAILED
+
+
 def test_exit_after_fire():
     d.inspect_and_maybe_emit(_state())
     d.inspect_and_maybe_emit(_state(
-        last_hunt={"action": "FIRE", "direction": "LONG", "event": "x",
-                   "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
-                   "rearm": False, "why": ""},
-        last_action="OPEN LONG Hunt C-FI",
-        last_fired_5m_ts=10,
+        last_scenario_result={"action": "FIRE", "direction": "LONG", "m5_slot": 1},
+        last_action="SCENARIO OPEN LONG FRESH_CLEAN_BREAKOUT",
     ))
     exited = _state(
         last_action="LIFECYCLE_EXIT SL",

@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 EVENT_REVIEW_15M = "REVIEW_15M"
 EVENT_SETUP_ARMED = "SETUP_ARMED"
 EVENT_FIRE = "FIRE"
+EVENT_ORDER_FAILED = "ORDER_FAILED"
 EVENT_EXIT = "EXIT"
 EVENT_PULLBACK = "PULLBACK_TO_LEVEL"
 EVENT_THESIS_WEAK = "THESIS_WEAK"
@@ -64,16 +65,18 @@ def fingerprint(state: Dict) -> Tuple:
     )
 
 
-def _is_fire_action(action: str, hunt_action: Optional[str], sc_action: Optional[str]) -> bool:
+def _is_fire_action(action: str) -> bool:
+    """FIRE means the scenario engine actually opened a trade (live on
+    MEXC, or a paper fill). The Hunt C-FI action is deliberately ignored:
+    it never opens a trade, so showing its FIRE here only misleads."""
     a = (action or "").upper()
-    if hunt_action == "FIRE":
-        return True
-    if sc_action == "FIRE":
-        return True
-    prefixes = (
-        "OPEN ", "LIVE OPEN", "SCENARIO OPEN", "SCENARIO LIVE OPEN",
-    )
-    return any(a.startswith(p) for p in prefixes)
+    return a.startswith("SCENARIO OPEN") or a.startswith("SCENARIO LIVE OPEN")
+
+
+def _is_order_failed(action: str) -> bool:
+    """Scenario engine fired but the order did not go through."""
+    a = (action or "").upper()
+    return a.startswith("SCENARIO LIVE ORDER FAILED") or a.startswith("SCENARIO FIRE BUT SIZING FAILED")
 
 
 def _is_exit_action(action: str, lc_action: Optional[str]) -> bool:
@@ -117,15 +120,14 @@ def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
     action = _action(state)
 
     prev_action = prev[7] if prev else ""
-    prev_hunt_action = prev[0] if prev else None
-    prev_sc_action = prev[8] if prev else None
     prev_invalid = prev[5] if prev else False
     prev_lc = prev[11] if prev else None
 
-    if _is_fire_action(action, h.get("action"), sc.get("action")) and not _is_fire_action(
-        prev_action, prev_hunt_action, prev_sc_action
-    ):
+    if _is_fire_action(action) and not _is_fire_action(prev_action):
         return EVENT_FIRE
+
+    if _is_order_failed(action) and not _is_order_failed(prev_action):
+        return EVENT_ORDER_FAILED
 
     if _is_exit_action(action, lc.get("action")) and not _is_exit_action(prev_action, prev_lc):
         return EVENT_EXIT
@@ -167,7 +169,6 @@ def inspect_and_maybe_emit(state: Dict) -> Optional[Dict]:
     return {
         "kind": kind,
         "fingerprint": fp,
-        "hunt_action": h.get("action"),
         "hunt_event": h.get("event"),
         "hunt_why": h.get("why"),
         "direction": h.get("direction") or sc.get("direction"),

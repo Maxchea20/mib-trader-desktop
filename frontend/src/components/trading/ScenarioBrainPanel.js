@@ -5,10 +5,8 @@ const fmtTime = (ts) =>
 const fmtPrice = (v) => (v != null ? `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 1 })}` : "—");
 
 /**
- * Renders ONLY when the Scenario Engine is the active entry engine
- * (auto.config.entry_engine === "scenario"). Swapped in for BrainHeroPanel
- * in the exact same layout slot, so there is only ever ONE hero visible
- * at a time -- never both legacy and scenario engines shown together.
+ * The decision hero panel. The Scenario Engine is the only entry engine
+ * (the legacy Hunt C-FI hero and its FIRE badge were removed).
  *
  * Everything below is read directly from auto.state.last_scenario_result
  * and auto.state.last_scenario_trade_log, both already produced by

@@ -2,7 +2,7 @@
  * Shared breathing-glow / visible-chip styling.
  *
  * Originally built for the Observation Layer (Layer 3), reused here by
- * BrainHeroPanel/ExplainabilityPanel (Layer 2) for visual consistency
+ * ScenarioBrainPanel/ExplainabilityPanel (Layer 2) for visual consistency
  * across the app -- same TOKEN colors and same .breathe-glow keyframe
  * either way, so the whole page pulses with one shared "alive"
  * language instead of two different glow systems.

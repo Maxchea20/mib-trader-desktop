@@ -5,7 +5,8 @@ import "./AiThesisPanel.css";
 const EVENT_LABEL = {
   REVIEW_15M: "M15 REVIEW",
   SETUP_ARMED: "SETUP ARMED",
-  FIRE: "FIRE",
+  FIRE: "FIRE · ORDER OPENED",
+  ORDER_FAILED: "FIRE · ORDER FAILED",
   EXIT: "EXIT",
   PULLBACK_TO_LEVEL: "PULLBACK TO LEVEL",
   THESIS_WEAK: "THESIS WEAK",
@@ -32,7 +33,7 @@ const visualFromState = (st) => {
   if (st.processing) return "analyzing";
   const ev = String(st.last_event || "");
   if (ev === "FIRE") return "fire";
-  if (ev === "EXIT" || ev === "THESIS_INVALID") return "invalid";
+  if (ev === "EXIT" || ev === "THESIS_INVALID" || ev === "ORDER_FAILED") return "invalid";
   if (ev === "THESIS_WEAK") return "weak";
   if (ev === "SETUP_ARMED" || ev === "PULLBACK_TO_LEVEL") return "setup";
   return "observing";
@@ -120,7 +121,6 @@ export const AiThesisPanel = ({ analysis, auto }) => {
     });
   }, [st.last_event, st.generated_at, processing]);
 
-  const hunt = analysis?.hunt || {};
   const weather = analysis?.weather || {};
   const structure = analysis?.market_state?.structure || {};
   const momentum = (analysis?.agents || []).find((a) => a.agent === "momentum");
@@ -133,8 +133,7 @@ export const AiThesisPanel = ({ analysis, auto }) => {
   const cards = useMemo(() => {
     const rows = [];
     if (structure.regime) rows.push(["M15 REGIME", structure.regime]);
-    if (hunt.action) rows.push(["HUNT", hunt.action]);
-    if (hunt.direction) rows.push(["DIRECTION", hunt.direction]);
+    if (sc?.direction) rows.push(["DIRECTION", sc.direction]);
     if (lastHunt?.path) rows.push(["M5 PATH", lastHunt.path]);
     if (momentum?.direction) {
       rows.push(["MOMENTUM", `${momentum.direction}${momentum.confidence != null ? ` ${momentum.confidence}%` : ""}`]);
@@ -144,7 +143,7 @@ export const AiThesisPanel = ({ analysis, auto }) => {
     if (weather.flag) rows.push(["4H WEATHER", weather.flag]);
     if (lastAction) rows.push(["ENGINE", lastAction]);
     return rows;
-  }, [structure.regime, hunt.action, hunt.direction, lastHunt?.path, momentum, sc, weather.flag, lastAction]);
+  }, [structure.regime, lastHunt?.path, momentum, sc, weather.flag, lastAction]);
 
   return (
     <div className={`panel p-4 jarvis-shell jarvis-shell-${mode}`} data-testid="ai-thesis-panel">
@@ -219,7 +218,7 @@ export const AiThesisPanel = ({ analysis, auto }) => {
           <ul className="space-y-1">
             {events.slice(0, 12).map((row) => (
               <li key={row.id} className="flex items-center justify-between font-mono-t text-[10px]">
-                <span className={`jarvis-event ${row.kind === "FIRE" ? "text-emerald-300" : row.kind === "EXIT" || row.kind === "THESIS_INVALID" ? "text-rose-300" : "text-slate-400"}`}>
+                <span className={`jarvis-event ${row.kind === "FIRE" ? "text-emerald-300" : row.kind === "EXIT" || row.kind === "THESIS_INVALID" || row.kind === "ORDER_FAILED" ? "text-rose-300" : "text-slate-400"}`}>
                   {row.kind === "FIRE" ? "⚡" : "●"} {EVENT_LABEL[row.kind] || row.kind}
                 </span>
                 <span className="text-slate-600">{fmtClock(row.at)}</span>

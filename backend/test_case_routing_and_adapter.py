@@ -29,11 +29,12 @@ from src.autotrader_state import CONFIG  # noqa: E402
 #     immediately, must engage the watcher, same as M5#2 ---
 CONFIG["enabled_m5_slots"] = [1, 2]
 bridge._attempted_thesis_ids.clear()
+bridge._pending_watches.clear()
 
 
 def _fake_tick_slot1(live_price):
     return {
-        "action": "FIRE", "direction": "LONG", "ts": 1000, "entry": 50000.0,
+        "action": "FIRE", "direction": "LONG", "ts": 1800, "entry": 50000.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT1-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "CHoCH"}},
@@ -48,12 +49,13 @@ check("M5#1 enabled: does NOT fire immediately (handed to watcher instead)",
       result["action"] in ("WAIT", "CANCEL", "FIRE"), detail=str(result))
 check("M5#1: m5_slot correctly classified as 1", result["m5_slot"] == 1)
 check("M5#1 enabled: thesis is now tracked by the watcher",
-      "TH-SLOT1-TEST" in bridge._WATCHER._state or result["action"] != "WAIT")
+      "TH-SLOT1-TEST-900" in bridge._WATCHER._state or result["action"] != "WAIT")
 
 # --- M5#1 path, enabled_m5_slots=[2] (M5#1 disabled): must be SKIPPED,
 #     never opened -- confirms the config is a real, per-slot toggle ---
 CONFIG["enabled_m5_slots"] = [2]
 bridge._attempted_thesis_ids.clear()
+bridge._pending_watches.clear()
 bridge._tick_engine = _fake_tick_slot1
 result1b = bridge.evaluate_scenario(50000.0)
 check("M5#1 disabled: SKIPPED, not FIRE", result1b["action"] == "SKIPPED", detail=str(result1b))
@@ -63,11 +65,12 @@ CONFIG["enabled_m5_slots"] = [1, 2]  # restore live default for subsequent tests
 # --- M5#3 path, default config: excluded completely, not by a
 #     dedicated boolean but simply by not being in enabled_m5_slots ---
 bridge._attempted_thesis_ids.clear()
+bridge._pending_watches.clear()
 
 
 def _fake_tick_slot3(live_price):
     return {
-        "action": "FIRE", "direction": "SHORT", "ts": 1600, "entry": 49500.0,
+        "action": "FIRE", "direction": "SHORT", "ts": 2400, "entry": 49500.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT3-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "BOS"}},
@@ -88,6 +91,7 @@ check("M5#3: watcher was never engaged", bridge._WATCHER.active_count() == watch
 #     limitation (the mechanism itself is fully generic) ---
 CONFIG["enabled_m5_slots"] = [1, 2, 3]
 bridge._attempted_thesis_ids.clear()
+bridge._pending_watches.clear()
 bridge._tick_engine = _fake_tick_slot3
 result3b = bridge.evaluate_scenario(49500.0)
 check("M5#3 explicitly enabled: does NOT fire immediately (handed to watcher instead)",
@@ -97,11 +101,12 @@ CONFIG["enabled_m5_slots"] = [1, 2]  # restore live default for subsequent tests
 # --- M5#2 path (contrast case): DOES engage the watcher, does NOT fire
 #     on the same tick it's first seen ---
 bridge._attempted_thesis_ids.clear()
+bridge._pending_watches.clear()
 
 
 def _fake_tick_slot2(live_price):
     return {
-        "action": "FIRE", "direction": "LONG", "ts": 1300, "entry": 50100.0,
+        "action": "FIRE", "direction": "LONG", "ts": 2100, "entry": 50100.0,
         "debug": {"atr15": 200.0,
                   "thesis": {"thesis_id": "TH-SLOT2-TEST", "origin_ts": 900,
                              "origin_level": 49900.0, "origin_event": "CHoCH"}},
@@ -115,7 +120,7 @@ check("M5#2: does NOT fire immediately (handed to watcher instead)",
       result2["action"] in ("WAIT", "CANCEL", "FIRE"), detail=str(result2))
 check("M5#2: m5_slot correctly classified as 2", result2["m5_slot"] == 2)
 check("M5#2: thesis is now tracked by the watcher",
-      "TH-SLOT2-TEST" in bridge._WATCHER._state or result2["action"] != "WAIT")
+      "TH-SLOT2-TEST-900" in bridge._WATCHER._state or result2["action"] != "WAIT")
 
 # --- Lifecycle adapter tests ---
 fire_long = {"direction": LONG, "entry": 50000.0, "atr15": 200.0,
