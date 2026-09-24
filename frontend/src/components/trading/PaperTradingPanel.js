@@ -124,12 +124,12 @@ const LiveTradingControls = ({ auto, onSave }) => {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-1">
         <div>
-          <div className="widget-label mb-1">STOP LOSS (HUNT · PNL)</div>
-          <div className="px-2 py-1.5 bg-[#0d121b] border border-rose-500/30 font-mono-t text-xs text-rose-300 rounded-sm">{auto?.sl_pnl_usd != null ? `${auto.sl_pnl_usd >= 0 ? "+" : ""}${fmt(auto.sl_pnl_usd, 2)} USDT` : "waiting for Hunt levels"}{auto?.sl_price != null ? `  @ ${fmt(auto.sl_price, 1)}` : ""}</div>
+          <div className="widget-label mb-1">STOP LOSS (1.5 ATR)</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-rose-500/30 font-mono-t text-xs text-rose-300 rounded-sm">{auto?.sl_pnl_usd != null ? `${auto.sl_pnl_usd >= 0 ? "+" : ""}${fmt(auto.sl_pnl_usd, 2)} USDT` : "waiting for Scenario ATR"}{auto?.sl_price != null ? `  @ ${fmt(auto.sl_price, 1)}` : ""}</div>
         </div>
         <div>
-          <div className="widget-label mb-1">TAKE PROFIT (HUNT · PNL)</div>
-          <div className="px-2 py-1.5 bg-[#0d121b] border border-emerald-500/30 font-mono-t text-xs text-emerald-300 rounded-sm">{auto?.tp_pnl_usd != null ? `${auto.tp_pnl_usd >= 0 ? "+" : ""}${fmt(auto.tp_pnl_usd, 2)} USDT` : "waiting for Hunt levels"}{auto?.tp_price != null ? `  @ ${fmt(auto.tp_price, 1)}` : ""}</div>
+          <div className="widget-label mb-1">TAKE PROFIT (2.5 ATR)</div>
+          <div className="px-2 py-1.5 bg-[#0d121b] border border-emerald-500/30 font-mono-t text-xs text-emerald-300 rounded-sm">{auto?.tp_pnl_usd != null ? `${auto.tp_pnl_usd >= 0 ? "+" : ""}${fmt(auto.tp_pnl_usd, 2)} USDT` : "waiting for Scenario ATR"}{auto?.tp_price != null ? `  @ ${fmt(auto.tp_price, 1)}` : ""}</div>
         </div>
         <div>
           <div className="widget-label mb-1">EXECUTION</div>
