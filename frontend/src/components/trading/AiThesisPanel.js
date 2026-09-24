@@ -12,6 +12,15 @@ const EVENT_LABEL = {
   THESIS_INVALID: "THESIS INVALID",
 };
 
+const STREAM_KINDS = new Set([
+  "SETUP_ARMED",
+  "FIRE",
+  "EXIT",
+  "PULLBACK_TO_LEVEL",
+  "THESIS_WEAK",
+  "THESIS_INVALID",
+]);
+
 const fmtClock = (ts) => {
   if (!ts) return "—";
   const d = new Date(ts * 1000);
@@ -28,10 +37,16 @@ const fmtAgo = (ts) => {
   return `${Math.floor(mins / 60)}h ago`;
 };
 
-const visualFromState = (st) => {
+const scenarioIsFire = (sc, lastAction) => {
+  const a = String(sc?.action || "").toUpperCase();
+  const la = String(lastAction || "").toUpperCase();
+  return a === "FIRE" || la.startsWith("SCENARIO OPEN") || la.startsWith("SCENARIO LIVE OPEN");
+};
+
+const visualFromState = (st, sc, lastAction) => {
   if (st.processing) return "analyzing";
+  if (scenarioIsFire(sc, lastAction)) return "fire";
   const ev = String(st.last_event || "");
-  if (ev === "FIRE") return "fire";
   if (ev === "EXIT" || ev === "THESIS_INVALID") return "invalid";
   if (ev === "THESIS_WEAK") return "weak";
   if (ev === "SETUP_ARMED" || ev === "PULLBACK_TO_LEVEL") return "setup";
@@ -103,55 +118,54 @@ export const AiThesisPanel = ({ analysis, auto }) => {
   const st = data?.state || {};
   const processing = Boolean(st.processing);
   const aligned = st.aligned_with_brain;
-  const mode = visualFromState(st);
+  const sc = auto?.state?.last_scenario_result || auto?.last_scenario_result;
+  const lastAction = auto?.state?.last_action || auto?.last_action;
+  const mode = visualFromState(st, sc, lastAction);
 
   useEffect(() => {
     const ev = st.last_event;
     const at = st.generated_at;
     if (!ev && !at) return;
-    const key = `${ev || ""}|${at || ""}|${processing ? "1" : "0"}`;
+    if (!STREAM_KINDS.has(ev)) return;
+    if (ev === "FIRE" && !scenarioIsFire(sc, lastAction)) return;
+    const key = `${ev || ""}|${at || ""}`;
     if (key === lastKey.current) return;
     lastKey.current = key;
-    if (!ev) return;
     setEvents((prev) => {
-      const row = { id: key, kind: ev, at: at || Date.now() / 1000, processing };
-      const next = [row, ...prev.filter((x) => x.id !== key && !(x.kind === ev && x.processing))];
+      const row = { id: key, kind: ev, at: at || Date.now() / 1000 };
+      const next = [row, ...prev.filter((x) => x.id !== key)];
       return next.slice(0, 16);
     });
-  }, [st.last_event, st.generated_at, processing]);
+  }, [st.last_event, st.generated_at, sc, lastAction]);
 
   const hunt = analysis?.hunt || {};
   const weather = analysis?.weather || {};
   const structure = analysis?.market_state?.structure || {};
   const momentum = (analysis?.agents || []).find((a) => a.agent === "momentum");
-  const sc = auto?.state?.last_scenario_result || auto?.last_scenario_result;
-  const lastAction = auto?.state?.last_action || auto?.last_action;
   const lastHunt = auto?.state?.last_hunt || auto?.last_hunt;
   const interval = cfg.interval_seconds || 900;
   const nextReview = st.generated_at ? st.generated_at + interval : null;
 
   const cards = useMemo(() => {
     const rows = [];
+    if (sc?.action) rows.push(["SCENARIO", sc.action]);
+    if (sc?.m5_slot != null) rows.push(["M5 SLOT", `#${sc.m5_slot}`]);
+    if (sc?.thesis_id) rows.push(["THESIS", sc.thesis_id]);
+    if (lastAction) rows.push(["ENGINE", lastAction]);
     if (structure.regime) rows.push(["M15 REGIME", structure.regime]);
-    if (hunt.action) rows.push(["HUNT", hunt.action]);
-    if (hunt.direction) rows.push(["DIRECTION", hunt.direction]);
-    if (lastHunt?.path) rows.push(["M5 PATH", lastHunt.path]);
     if (momentum?.direction) {
       rows.push(["MOMENTUM", `${momentum.direction}${momentum.confidence != null ? ` ${momentum.confidence}%` : ""}`]);
     }
-    if (sc?.action) rows.push(["SCENARIO", sc.action]);
-    if (sc?.m5_slot != null) rows.push(["M5 SLOT", `#${sc.m5_slot}`]);
     if (weather.flag) rows.push(["4H WEATHER", weather.flag]);
-    if (lastAction) rows.push(["ENGINE", lastAction]);
     return rows;
-  }, [structure.regime, hunt.action, hunt.direction, lastHunt?.path, momentum, sc, weather.flag, lastAction]);
+  }, [structure.regime, momentum, sc, weather.flag, lastAction]);
 
   return (
     <div className={`panel p-4 jarvis-shell jarvis-shell-${mode}`} data-testid="ai-thesis-panel">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="font-head font-extrabold tracking-[0.22em] text-slate-100 text-sm">MIB AI</div>
-          <div className="widget-label mt-0.5">Market intelligence system</div>
+          <div className="widget-label mt-0.5">Observer only — Scenario events</div>
         </div>
         <div className="text-right">
           <div className="flex items-center justify-end gap-1.5">
@@ -177,7 +191,7 @@ export const AiThesisPanel = ({ analysis, auto }) => {
       <div className="jarvis-read mt-3" data-testid="ai-observation">
         <div className="widget-label mb-2">AI observation</div>
         {st.error && !st.thesis && (
-          <div className="font-mono-t text-[11px] text-rose-300">Couldn&apos;t generate a read yet: {st.error}</div>
+          <div className="font-mono-t text-[11px] text-rose-300">Couldn't generate a read yet: {st.error}</div>
         )}
         {!st.error && !st.thesis && !processing && (
           <div className="font-mono-t text-[11px] text-slate-500">
@@ -195,10 +209,10 @@ export const AiThesisPanel = ({ analysis, auto }) => {
                 }`}
                 data-testid="ai-aligned-badge"
               >
-                {aligned ? "Aligned with Brain" : "Diverges from Brain"}
+                {aligned ? "Aligned with Scenario" : "Diverges from Scenario"}
               </span>
             )}
-            {st.last_event && (
+            {st.last_event && STREAM_KINDS.has(st.last_event) && (
               <div className="font-mono-t text-[10px] text-cyan-300/80 mb-1.5">
                 Wake · {EVENT_LABEL[st.last_event] || st.last_event}
               </div>
@@ -210,12 +224,14 @@ export const AiThesisPanel = ({ analysis, auto }) => {
 
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-mono-t text-[10px] text-slate-500">
         <span>LAST {fmtClock(st.generated_at)} ({fmtAgo(st.generated_at)})</span>
-        {nextReview && <span>NEXT REVIEW ~ {fmtClock(nextReview)}</span>}
+        {nextReview && <span>NEXT NOTE ~ {fmtClock(nextReview)}</span>}
       </div>
 
-      {events.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-[#1d2635]">
-          <div className="widget-label mb-2">Event stream</div>
+      <div className="mt-3 pt-3 border-t border-[#1d2635]">
+        <div className="widget-label mb-2">Event stream (Scenario only)</div>
+        {events.length === 0 ? (
+          <div className="font-mono-t text-[10px] text-slate-600">No Scenario FIRE / setup yet this session.</div>
+        ) : (
           <ul className="space-y-1">
             {events.slice(0, 12).map((row) => (
               <li key={row.id} className="flex items-center justify-between font-mono-t text-[10px]">
@@ -226,11 +242,11 @@ export const AiThesisPanel = ({ analysis, auto }) => {
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="mt-3 pt-3 border-t border-[#1d2635] font-mono-t text-[10px] text-slate-600">
-        Observer only — does not trade and cannot affect any live order.
+        Observer only. 15-minute AI notes are not trades. Isolated only follows the yellow Scenario box.
       </div>
     </div>
   );
