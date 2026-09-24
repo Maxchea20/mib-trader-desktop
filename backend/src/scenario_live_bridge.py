@@ -1,10 +1,9 @@
 """S1 / S2 live bridge. S3 is not wired.
 
-S1: M15 BOS/CHoCH (forming 15m allowed) + M5 BOS/CHoCH in slot 1 or 2
-of THAT same 15m -> M1 C watcher -> FIRE.
-S2: M15 BOS/CHoCH -> extension -> pullback -> fresh M5 -> M1 C watcher -> FIRE.
-    No slot cap on S2.
-S3: module exists, not called live (not backtested).
+S1: M15 BOS/CHoCH + M5 BOS/CHoCH in slot 1 or 2 of THAT 15m -> C watcher.
+S2: M15 BOS/CHoCH -> extension -> pullback -> fresh M5 -> C watcher.
+C: first 1m CLOSE inside that confirming M5 that crosses the level.
+   Not fixed to minute 1 or 3. S3 not live.
 """
 import time
 from typing import Dict, Optional
@@ -59,8 +58,8 @@ def _bridge_thesis_id(thesis_dbg: Dict) -> str:
     return f"{thesis_dbg['thesis_id']}-{thesis_dbg['origin_ts']}"
 
 
-def _m15_open(ts: int) -> int:
-    return int(ts) - int(ts) % M15_SECONDS
+def _m5_open(ts: int) -> int:
+    return int(ts) - int(ts) % 300
 
 
 def classify_m5_slot(origin_ts: Optional[int], event_ts: Optional[int]) -> Optional[int]:
@@ -112,12 +111,10 @@ def evaluate_scenario(live_price: Optional[float]) -> Dict:
     event_ts = int(out["ts"])
     scenario = out.get("scenario")
     setup = SETUP_NAME.get(scenario)
-    if setup == "S1":
-        slot = classify_m5_slot(origin_ts, event_ts)
-        window_open = origin_ts
-    else:
-        window_open = _m15_open(event_ts)
-        slot = classify_m5_slot(window_open, event_ts)
+    slot = classify_m5_slot(origin_ts, event_ts) if setup == "S1" else classify_m5_slot(_m5_open(event_ts) - (_m5_open(event_ts) % M15_SECONDS), event_ts)
+    if setup == "S2":
+        slot = classify_m5_slot(event_ts - event_ts % M15_SECONDS, event_ts)
+    window_open = _m5_open(event_ts)
     log_base = {
         "thesis_id": thesis_id, "attempt_id": attempt_id, "setup": setup,
         "direction": out["direction"],
@@ -142,7 +139,7 @@ def evaluate_scenario(live_price: Optional[float]) -> Dict:
         if slot not in enabled_slots:
             return _skip(attempt_id, f"S1 M5 slot {slot} not in {enabled_slots}", log_base)
     _pending_watches[attempt_id] = {**log_base, "start_ts": time.time()}
-    logger.info(f"[scenario] {setup} {attempt_id} M5#{slot}: M1 C watcher until 15m close")
+    logger.info(f"[scenario] {setup} {attempt_id} M5#{slot}: C watching 5x 1m of M5 {window_open}")
     return _drive_pending_watches(out)
 
 
@@ -166,14 +163,14 @@ def _drive_pending_watches(out: Dict) -> Dict:
         w = _pending_watches[attempt_id]
         if engine_key == w["thesis_id"] and engine_thesis.get("status") == "INVALIDATED":
             why = engine_thesis.get("invalid_reason") or out.get("scenario")
-            return _cancel_pending(attempt_id, f"thesis invalidated while watching M1 C ({why})")
+            return _cancel_pending(attempt_id, f"thesis invalidated while watching C ({why})")
         c_result = _WATCHER.check(attempt_id, w["direction"], w["origin_level"],
                                   w["window_open_ts"], w["start_ts"], slot=w.get("m5_slot"),
                                   origin_ts=w["origin_ts"])
         if c_result is None:
             waiting = waiting or {
                 "action": "WAIT",
-                "reason": f"{w.get('setup') or ''} M5#{w.get('m5_slot')}: M1 C watching until 15m close".strip(),
+                "reason": f"{w.get('setup') or ''} M5#{w.get('m5_slot')}: C watching 1m 1-5 inside this M5".strip(),
                 **w,
             }
             continue
@@ -181,7 +178,8 @@ def _drive_pending_watches(out: Dict) -> Dict:
         if c_result.get("cancelled"):
             logger.warning(f"[scenario] {attempt_id}: CANCELLED -- {c_result['reason']}")
             return {"action": "CANCEL", "reason": c_result["reason"], **w}
-        reason = (f"C: M1 closed beyond {w['origin_level']} ({w.get('setup')}, M5#{w.get('m5_slot')})")
+        reason = (f"C: first 1m close beyond {w['origin_level']} "
+                  f"(minute {c_result.get('confirmed_at_minute')}, {w.get('setup')}, M5#{w.get('m5_slot')})")
         logger.info(f"[scenario] {attempt_id}: FIRE -- {reason}")
         return {
             **w, "action": "FIRE", "entry": c_result["entry_price"], "entry_ts": c_result["entry_ts"],
