@@ -12,7 +12,6 @@ import {
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
-import { ScenarioBrainPanel } from "@/components/trading/ScenarioBrainPanel";
 import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
@@ -68,9 +67,6 @@ function App() {
     try { setSyncStatus(await getSyncStatus()); } catch (e) {}
   }, []);
 
-  // Single source of truth for /autotrade state -- shared by the Brain
-  // hero area (which engine is active, Case-1/C status) and the trade
-  // panel below, instead of each polling the same endpoint separately.
   const [auto, setAuto] = useState(null);
   const loadAuto = useCallback(async () => {
     try { setAuto(await getAutotrade()); } catch (e) {}
@@ -244,11 +240,7 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            {auto?.config?.entry_engine === "scenario" ? (
-              <ScenarioBrainPanel auto={auto} syncStatus={syncStatus} />
-            ) : (
-              <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
-            )}
+            <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
             <AiThesisPanel />
           </section>
         </div>
