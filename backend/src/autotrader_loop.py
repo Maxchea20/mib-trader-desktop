@@ -81,6 +81,8 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         "path": nested.get("m5_path") or hunt.get("v3a_path"),
         "event": hunt.get("event") or nested.get("event"),
         "gate": hunt.get("gate"),
+        "timing": hunt.get("timing"),
+        "timing_state": hunt.get("timing_state"),
         "why": (hunt.get("why_state") or [None])[0],
         "direction": hunt.get("direction"),
         "entry": hunt.get("entry") or nested.get("level") or nested.get("entry"),
@@ -135,11 +137,12 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if _in_cooldown(300):
         STATE["last_action"] = "COOLDOWN"
         return STATE
+    tag = hunt.get("timing") or hunt.get("gate") or ""
     if live_mode and live_armed:
         try:
             order_result = _open_live_from_hunt(hunt, tf, live_price)
             STATE["last_fired_5m_ts"] = hunt_5m_ts
-            STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')}"
+            STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')} {tag}"
         except Exception as e:
             STATE["last_action"] = "LIVE ORDER FAILED"
             STATE["last_reason"] = str(e)
@@ -152,5 +155,5 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         )
     _open_from_hunt(hunt, tf)
     STATE["last_fired_5m_ts"] = hunt_5m_ts
-    STATE["last_action"] = f"OPEN {side} Hunt C-FI {hunt.get('gate') or ''}"
+    STATE["last_action"] = f"OPEN {side} Hunt C-FI {tag}"
     return STATE
