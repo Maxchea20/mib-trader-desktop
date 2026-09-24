@@ -11,6 +11,8 @@ from .observation_hunt import SL_ATR, TP_ATR
 from .observation_hunt_c import slot_of
 
 M5_PIVOT_OVERRIDE = 2
+S1_LOOKBACK_BARS = 5
+M5_BAR_SECONDS = 300
 PULLBACK_ZONE_ATR_MIN = 0.25
 PULLBACK_ZONE_ATR_MAX = 0.50
 NEARBY_SR_ATR = 0.30
@@ -114,6 +116,57 @@ def fresh_m5_event(events: list, direction: str, last_5m_ts: int, consumed: set)
         if found is None:
             found = ev
     return found
+
+
+def fresh_m5_event_s1(events: list, direction: str, last_5m_ts: int, consumed: set):
+    """S1 only: most recent same-dir M5 BOS/CHoCH inside the last 5 completed 5m bars."""
+    lo = int(last_5m_ts) - S1_LOOKBACK_BARS * M5_BAR_SECONDS
+    hi = int(last_5m_ts)
+    inv = _st().get("thesis_invalid")
+    try:
+        inv = float(inv) if inv is not None else None
+    except (TypeError, ValueError):
+        inv = None
+    last_opp = 0
+    for ev in events:
+        et = (ev.event_type or "").upper()
+        if et not in ("BOS", "CHOCH", "CHoCH"):
+            continue
+        ts = ev.timestamp
+        if ts is None:
+            continue
+        if _dir(ev.direction) != direction:
+            last_opp = max(last_opp, int(ts))
+    ranked = []
+    for ev in events:
+        et = (ev.event_type or "").upper()
+        if et not in ("BOS", "CHOCH", "CHoCH"):
+            continue
+        if _dir(ev.direction) != direction:
+            continue
+        ts = ev.timestamp
+        if ts is None:
+            continue
+        ts = int(ts)
+        if ts < lo or ts > hi:
+            continue
+        if event_key(ev) in consumed:
+            continue
+        if last_opp > ts:
+            continue
+        lvl = m5_event_level(ev)
+        if lvl is None:
+            continue
+        if inv is not None:
+            if direction == LONG and lvl < inv:
+                continue
+            if direction == SHORT and lvl > inv:
+                continue
+        ranked.append((ts, 0 if et in ("CHOCH", "CHoCH") else 1, ev))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda x: (-x[0], x[1]))
+    return ranked[0][2]
 
 
 def direction_from_state() -> Optional[str]:
@@ -326,11 +379,12 @@ def tick_timing(
         patch["timing"] = (st.get("c_watch") or {}).get("path")
         return patch
     events = m5_structure_events(candles_5m)
+    ev_s1 = fresh_m5_event_s1(events, side, ts5, st["consumed"])
     ev = fresh_m5_event(events, side, ts5, st["consumed"])
-    s1_ok = slot in (1, 2) and ev is not None and m5_event_level(ev) is not None
+    s1_ok = slot in (1, 2) and ev_s1 is not None and m5_event_level(ev_s1) is not None
     if s1_ok:
-        lvl = m5_event_level(ev)
-        st["consumed"].add(event_key(ev))
+        lvl = m5_event_level(ev_s1)
+        st["consumed"].add(event_key(ev_s1))
         start_c_watch(st, "S1", ts5, lvl, side)
         st["pullback_confirmed"] = False
         st["extension_price"] = None
