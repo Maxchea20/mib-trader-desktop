@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
+import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
 import { ScenarioBrainPanel } from "@/components/trading/ScenarioBrainPanel";
 import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { ObservationLayer } from "@/components/trading/ObservationLayer";
@@ -243,13 +244,18 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            <ScenarioBrainPanel auto={auto} syncStatus={syncStatus} />
+            {auto?.config?.entry_engine === "scenario" ? (
+              <ScenarioBrainPanel auto={auto} syncStatus={syncStatus} />
+            ) : (
+              <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
+            )}
             <AiThesisPanel />
           </section>
         </div>
         <div className="mt-4">
           <ObservationLayer
             observations={analysis?.observations || []}
+            hunt={analysis?.hunt}
             weather={analysis?.weather}
             auto={auto}
           />

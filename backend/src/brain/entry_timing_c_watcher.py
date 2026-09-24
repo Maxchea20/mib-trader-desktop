@@ -108,9 +108,7 @@ class EntryTimingCWatcher:
         slot: which M5 candle of the thesis's life is being watched (1 or
           2 -- M5#3 is never routed here, see scenario_live_bridge.py).
           Determines ONLY which 5-minute window's own M1 candles get
-          checked. origin_ts is the OPEN of the M15 candle that broke
-          structure; slots are counted from that candle's CLOSE, so
-          window_open_ts = origin_ts + 900 + (slot-1)*300. The
+          checked (window_open_ts = origin_ts + (slot-1)*300); the
           confirmation rule itself is identical regardless of slot --
           same unmodified entry_timing_c.find_m5_2_intrabar_entry() call,
           same "first qualifying M1 close" logic, no per-slot tuning.
@@ -124,17 +122,13 @@ class EntryTimingCWatcher:
                                                     field name is unchanged even for M5#1 --
                                                     that file was not touched)
         """
-        window_open_ts = origin_ts + 900 + (slot - 1) * 300
+        window_open_ts = origin_ts + (slot - 1) * 300
         is_new = thesis_id not in self._state
         state = self._state.setdefault(thesis_id, {"checked_ts": set(), "started_at": time.time()})
         if is_new:
             self._persist(thesis_id, direction=direction, origin_ts=origin_ts,
                            origin_level=structural_level, status="watching",
                            reason=f"watch started (M5#{slot})")
-            try:
-                db.save_scenario_watch(thesis_id, m5_slot=slot)
-            except Exception:
-                pass
 
         if time.time() - state["started_at"] > MAX_WAIT_SECONDS:
             self.forget(thesis_id)
