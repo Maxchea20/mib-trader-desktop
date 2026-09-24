@@ -1,18 +1,24 @@
 import React from "react";
 
-export const BrainHeroPanel = ({ hunt, weather }) => {
+export const BrainHeroPanel = ({ hunt, weather, auto }) => {
   const alive = Boolean(hunt && (hunt.ok || hunt.brain_version || hunt.action));
   const action = hunt?.action || (alive ? "WAIT" : "—");
   const side = hunt?.direction || "—";
   const rawPath = hunt?.hunt?.m5_path || hunt?.v3a_path;
   const path = !rawPath || rawPath === "idle" ? (alive ? "waiting" : "—") : rawPath;
-  const level = hunt?.hunt?.level;
+  const level = hunt?.thesis_level || hunt?.hunt?.level;
   const size = hunt?.size || "—";
   const flag = weather?.flag || hunt?.weather_flag || "—";
   const slot = hunt?.slot ?? hunt?.hunt?.slot;
   const armed = hunt?.armed ?? hunt?.hunt?.armed;
   const event = hunt?.event;
   const gate = hunt?.gate;
+  const timing = hunt?.timing || "—";
+  const phase = hunt?.timing_state || "—";
+  const why = (hunt?.why_state || [])[0];
+  const st = auto?.state || auto || {};
+  const equity = st.equity ?? st.available_balance;
+  const openN = st.open_positions ?? 0;
 
   let rgb = "148,163,184";
   if (!alive) rgb = "71,85,105";
@@ -30,14 +36,14 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
     >
       <div className="flex items-center justify-between">
         <span className="widget-label">Hunt Brain</span>
-        <span className="widget-label">C-fast + Internal</span>
+        <span className="widget-label">{gate ? `gate ${gate}` : "Hunt C-FI"}</span>
       </div>
 
       <div className="flex items-center justify-between mt-2 font-mono-t text-[10px]">
         <span className={alive ? "text-emerald-400" : "text-slate-500"}>
           {alive ? "● Hunt C-FI is on" : "○ Brain not answering"}
         </span>
-        <span className="text-slate-400">{gate ? `gate ${gate}` : "Hunt C-FI"}</span>
+        <span className="text-slate-400">{openN > 0 ? `Isolated OPEN ${openN}` : "Isolated FLAT"}</span>
       </div>
 
       <div className="flex items-end justify-between mt-3">
@@ -50,12 +56,13 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
             {action === "WAIT" ? "WAIT" : action === "FIRE" ? "FIRE" : action}
           </div>
           <div className="font-mono-t text-[11px] text-slate-400 mt-2">
-            {action === "FIRE" ? `Take the ${side}` : alive ? "Watching. No trade." : "Brain not answering"}
+            {action === "FIRE" ? `Take the ${side}` : side && side !== "—" && side !== "NEUTRAL" ? `${side} thesis · watching` : alive ? "Watching. No trade." : "Brain not answering"}
           </div>
         </div>
         <div className="text-right">
-          <div className="widget-label">What the 5m is doing</div>
-          <div className="font-mono-t font-bold text-xl text-cyan-400">{path}</div>
+          <div className="widget-label">Timing</div>
+          <div className="font-mono-t font-bold text-xl text-cyan-400">{timing} · {phase}</div>
+          <div className="font-mono-t text-[10px] text-slate-500 mt-1">{path}</div>
         </div>
       </div>
 
@@ -65,12 +72,12 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
           <div className="text-slate-200 mt-0.5">{flag}</div>
         </div>
         <div>
-          <div className="widget-label">Entry level</div>
+          <div className="widget-label">Thesis origin</div>
           <div className="text-slate-200 mt-0.5">{level != null ? Number(level).toFixed(1) : "—"}</div>
         </div>
         <div>
-          <div className="widget-label">Size</div>
-          <div className="text-slate-200 mt-0.5">{action === "FIRE" ? size : "—"}</div>
+          <div className="widget-label">Equity</div>
+          <div className="text-slate-200 mt-0.5">{equity != null ? `$${Number(equity).toFixed(2)}` : size}</div>
         </div>
       </div>
 
@@ -79,6 +86,11 @@ export const BrainHeroPanel = ({ hunt, weather }) => {
         <div>{armed ? "15m setup: ready" : "15m setup: none"}</div>
         <div>{event || "no CHoCH / BOS"}</div>
       </div>
+      {why ? (
+        <div className="mt-2 font-mono-t text-[10px] text-slate-500 truncate" title={String(why)}>
+          {String(why)}
+        </div>
+      ) : null}
     </div>
   );
 };
