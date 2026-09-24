@@ -11,6 +11,8 @@ from .autotrader_sizing import (
     _check_available_margin, _snap_to_tick,
 )
 
+REJECT_COOLDOWN_S = 15 * 60
+
 
 def _hunt_thesis(hunt: Dict, extra: Optional[Dict] = None) -> Dict:
     th = {
@@ -132,8 +134,45 @@ def _wait_mexc_fill(side: str, tries: int = 8) -> Optional[float]:
     return last
 
 
+def _block_live(reason: str) -> None:
+    STATE["live_block_until"] = time.time() + REJECT_COOLDOWN_S
+    STATE["live_block_reason"] = reason
+
+
+def _live_blocked() -> Optional[str]:
+    until = STATE.get("live_block_until") or 0
+    if time.time() < until:
+        return STATE.get("live_block_reason") or "live order cooled down after reject"
+    return None
+
+
+def _fit_qty_to_balance(sizing: Dict, available: float) -> Optional[float]:
+    """Shrink Isolated qty so required margin + 2% buffer fits free USDT."""
+    from .autotrader_state import SAFETY_BUFFER_PCT
+    price = float(sizing.get("price") or 0)
+    cs = float(sizing.get("contract_size") or 0)
+    lev = float(sizing.get("leverage") or 10)
+    if price <= 0 or cs <= 0 or lev <= 0 or available <= 0:
+        return None
+    room = available / (1 + SAFETY_BUFFER_PCT)
+    max_notional = room * lev
+    raw = max_notional / (cs * price)
+    qty = float(int(raw))  # BTC_USDT vol unit is 1 contract
+    if qty < 1:
+        return None
+    sizing["final_quantity"] = qty
+    sizing["final_notional"] = qty * cs * price
+    sizing["required_margin"] = sizing["final_notional"] / lev
+    sizing["capped"] = True
+    sizing["fitted_to_balance"] = True
+    return qty
+
+
 def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
                           extra_thesis: Optional[Dict] = None) -> Dict:
+    blocked = _live_blocked()
+    if blocked:
+        raise RuntimeError(blocked)
     side = hunt.get("direction")
     hunt_entry = float(hunt["entry"])
     hunt_sl = float(hunt["stop"])
@@ -150,12 +189,14 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
     sizing = compute_sizing(override_price=price, entry=price, stop=sl)
     if sizing.get("error"):
         _log_sizing_attempt(sizing, result="REJECTED", reason=sizing["error"])
+        _block_live(sizing["error"])
         raise RuntimeError(f"sizing failed: {sizing['error']}")
     try:
         hold = _mexc_open_position_vol()
     except Exception as e:
         reason = f"cannot confirm MEXC is flat — no live order ({e})"
         _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        _block_live(reason)
         raise RuntimeError(reason)
     if hold > 0:
         reason = "MEXC already has an open position — one trade only"
@@ -164,8 +205,15 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
     margin_check = _check_available_margin(sizing["required_margin"])
     sizing["_margin_check"] = margin_check
     if not margin_check["ok"]:
-        _log_sizing_attempt(sizing, result="REJECTED", reason=margin_check["reason"])
-        raise RuntimeError(margin_check["reason"])
+        avail = margin_check.get("available_balance")
+        fitted = _fit_qty_to_balance(sizing, float(avail or 0))
+        if fitted:
+            margin_check = _check_available_margin(sizing["required_margin"])
+            sizing["_margin_check"] = margin_check
+        if not margin_check["ok"]:
+            _log_sizing_attempt(sizing, result="REJECTED", reason=margin_check["reason"])
+            _block_live(margin_check["reason"])
+            raise RuntimeError(margin_check["reason"])
     price_unit = sizing.get("price_unit") or 0
     price_scale = sizing.get("price_scale") if sizing.get("price_scale") is not None else 2
     submit_price = _snap_to_tick(price, price_unit, price_scale)
@@ -173,7 +221,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
     submit_tp = _snap_to_tick(tp, price_unit, price_scale)
     if not _sl_tp_valid(side, submit_price, submit_sl, submit_tp):
         reason = (
-            f"Hunt SL/TP no longer valid vs live price {submit_price} "
+            f"SL/TP no longer valid vs live price {submit_price} "
             f"(sl={submit_sl} tp={submit_tp} side={side}) — skipped live fill"
         )
         _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
@@ -190,6 +238,7 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
     except Exception as e:
         reason = f"Isolated leverage {lev}x could not be set: {e}"
         _log_sizing_attempt(sizing, result="REJECTED", reason=reason)
+        _block_live(reason)
         raise RuntimeError(reason)
     mexc_side = mexc_private.SIDE_OPEN_LONG if side == "LONG" else mexc_private.SIDE_OPEN_SHORT
     order_result = mexc_private.submit_order(
@@ -203,7 +252,8 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
         sizing, result="SUBMITTED", order_result=order_result,
         submitted={"price": submit_price, "stop_loss_price": submit_sl, "take_profit_price": submit_tp,
                    "vol": vol, "leverage": lev, "open_type": "ISOLATED",
-                   "risk_pct": sizing.get("risk_pct"), "risk_usd": sizing.get("risk_usd")},
+                   "risk_pct": sizing.get("risk_pct"), "risk_usd": sizing.get("risk_usd"),
+                   "fitted_to_balance": sizing.get("fitted_to_balance")},
     )
     fill = _wait_mexc_fill(side) or price
     _open_from_hunt(hunt, tf, thesis={
