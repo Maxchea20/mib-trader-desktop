@@ -205,7 +205,7 @@ function App() {
         onOpenBacktest={() => setBacktestOpen(true)}
       />
       <main className="pt-16 px-3 pb-6 max-w-[1800px] mx-auto">
-        <div className="grid grid-cols-12 gap-3">
+        <div className="grid grid-cols-12 gap-3 items-start">
           <section className="col-span-12 xl:col-span-8 flex flex-col gap-3">
             <div className="flex items-center justify-between px-0.5">
               <div className="flex items-center gap-2">
@@ -241,7 +241,7 @@ function App() {
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
             <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} />
-            <AiThesisPanel />
+            <AiThesisPanel analysis={analysis} auto={auto} />
           </section>
         </div>
         <div className="mt-4">
