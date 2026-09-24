@@ -57,6 +57,8 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
 
     if action != "FIRE":
         STATE["last_action"] = f"SCENARIO {action} ({result.get('reason') or ''})"
+        STATE["last_reason"] = result.get("reason")
+        STATE["last_state"] = action
         return STATE
 
     if _in_cooldown(300):
@@ -74,11 +76,6 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
             opened_ts=result["entry_ts"],
         )
     except Exception as e:
-        # A real FIRE was already recorded into last_scenario_result a
-        # few lines above -- without this, the dashboard would keep
-        # showing "FIRE" indefinitely even though the attempt actually
-        # failed here and no order was ever sent. This is the "UI shows
-        # Fire but nothing reaches MEXC" symptom, confirmed directly.
         STATE["last_scenario_result"]["action"] = "FIRE_FAILED"
         STATE["last_scenario_result"]["reason"] = f"sizing failed: {e}"
         STATE["last_action"] = "SCENARIO FIRE BUT SIZING FAILED"
@@ -102,7 +99,6 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
         "atr15": result.get("atr15"), "scenario_class": result.get("scenario"),
     }
 
-
     STATE["last_scenario_trade_log"] = {
         "thesis_id": result.get("thesis_id"), "direction": side,
         "origin_event": result.get("origin_event"), "origin_level": result.get("origin_level"),
@@ -122,10 +118,9 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
             STATE["last_scenario_trade_log"]["execution_delay_s"] = round(time.time() - t0, 3)
             STATE["last_scenario_trade_log"]["order_result"] = order_result
             STATE["last_action"] = f"SCENARIO LIVE OPEN {side} {order_result.get('data')}"
+            STATE["last_state"] = "FIRE"
+            STATE["last_reason"] = result.get("reason")
         except Exception as e:
-            # Same reasoning as the sizing-failure branch above -- do not
-            # leave last_scenario_result frozen showing "FIRE" when the
-            # live order never actually went through.
             STATE["last_scenario_result"]["action"] = "FIRE_FAILED"
             STATE["last_scenario_result"]["reason"] = f"live order failed: {e}"
             STATE["last_action"] = "SCENARIO LIVE ORDER FAILED"
@@ -139,6 +134,7 @@ def _evaluate_scenario_entry(tf: str, live_price: Optional[float],
         )
     _open_from_hunt(hunt_like, tf, thesis=scenario_thesis)
     STATE["last_action"] = f"SCENARIO OPEN {side} {result.get('scenario')}"
+    STATE["last_state"] = "FIRE"
     return STATE
 
 
@@ -165,11 +161,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
                     logger.exception("MEXC flatten on lifecycle EXIT failed")
                 _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
                 _record_close(rec.get("exit_kind") or "BRAIN_EXIT")
-                # Force a fresh balance capture for the NEXT trade's sizing
-                # instead of reusing a now-stale snapshot -- this trade's
-                # close just changed the real account balance. Existing
-                # "capture if missing" logic in compute_sizing() picks this
-                # up automatically; nothing else needs to change.
                 STATE["normal_base"] = None
                 STATE["normal_base_captured_at"] = None
                 STATE["last_action"] = f"LIFECYCLE_EXIT {rec.get('exit_kind')}"
@@ -208,8 +199,9 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         "thesis_invalid": hunt.get("thesis_invalid"),
         "rearm": hunt.get("rearm"),
     }
-    STATE["last_state"] = hunt.get("action")
-    STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
+    if CONFIG.get("entry_engine") != "scenario":
+        STATE["last_state"] = hunt.get("action")
+        STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
     already_opened_this_bar = (
         hunt_5m_ts is not None and STATE.get("last_fired_5m_ts") == hunt_5m_ts
     )
@@ -228,11 +220,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     except Exception:
         pass
     if CONFIG.get("entry_engine", "legacy") != "legacy":
-        # Scenario-engine entry path. Only the legacy FIRE decision below
-        # this point is skipped -- everything above (revive-shadow,
-        # existing-position lifecycle management, open_auto / MEXC-still-
-        # open guards) already ran unconditionally and applies to BOTH
-        # engines equally, so only one can ever open a new trade.
         return _evaluate_scenario_entry(tf, live_price, live_mode, live_armed)
     if hunt.get("action") != "FIRE":
         STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
