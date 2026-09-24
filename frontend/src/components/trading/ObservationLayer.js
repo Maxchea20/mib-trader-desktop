@@ -15,17 +15,9 @@ function FactCard({ obs }) {
   const ev = (obs.history || []).slice(-3);
   const rgb = glowRgb(obs.state);
   return (
-    <div
-      className="breathe-glow panel p-3"
-      style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.55)` }}
-    >
+    <div className="breathe-glow panel p-3" style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.55)` }}>
       <div className="widget-label">{String(obs.source || "").replace(/_/g, " ")}</div>
-      <div
-        className="font-head font-bold text-lg mt-0.5 pulse-dot"
-        style={{ color: `rgb(${rgb})`, textShadow: `0 0 12px rgba(${rgb},0.55)` }}
-      >
-        {obs.state || "—"}
-      </div>
+      <div className="font-head font-bold text-lg mt-0.5 pulse-dot" style={{ color: `rgb(${rgb})`, textShadow: `0 0 12px rgba(${rgb},0.55)` }}>{obs.state || "—"}</div>
       <div className="font-mono-t text-[10px] text-slate-500 mt-1">{obs.observation_type}</div>
       <div className="flex flex-wrap gap-1 mt-2">
         {(obs.tags || []).slice(0, 8).map((t) => (
@@ -33,35 +25,28 @@ function FactCard({ obs }) {
         ))}
       </div>
       {ev.map((e, i) => (
-        <div key={i} className="font-mono-t text-[10px] text-cyan-400 mt-1">
-          {e.event_type} {e.direction || ""}
-        </div>
+        <div key={i} className="font-mono-t text-[10px] text-cyan-400 mt-1">{e.event_type} {e.direction || ""}</div>
       ))}
     </div>
   );
 }
 
-function scenarioLabelForSlot(slot) {
-  if (slot == null) return "—";
-  if (slot === 3) return "M5#3 (excluded)";
-  return `M5#${slot} (C)`;
+function scenarioLabelForSlot(slot, setup) {
+  if (setup === "S2") return "S2 · C on fresh 5m";
+  if (slot === 1 || slot === 2) return `S1 slot ${slot} · C`;
+  if (slot === 3) return "S1 slot 3 · late — no C";
+  return "forming 15m · waiting slot 1/2";
 }
 
 export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => {
   const isScenario = auto?.config?.entry_engine === "scenario";
   const result = auto?.state?.last_scenario_result;
-
-  // Engine-agnostic facts (Market Structure / Breakout / S/R / FVG /
-  // Volume / Trend / Momentum below) are unchanged either way -- they
-  // come from the same observe() agents scenario_engine.py itself
-  // calls internally, not from either engine's decision layer. Only
-  // this top strip actually differs by which engine is active.
   let action, path, why, side;
   if (isScenario) {
     const slot = result?.m5_slot;
     action = result ? (result.action === "ALREADY_ATTEMPTED" ? "HANDLED" : result.action) : "WAIT";
-    path = scenarioLabelForSlot(slot);
-    why = result?.reason || "No active M15 thesis yet.";
+    path = scenarioLabelForSlot(slot, result?.setup);
+    why = result?.reason || "No forming-15m thesis yet.";
     side = result?.direction || "";
   } else {
     path = hunt && hunt.hunt && hunt.hunt.m5_path;
@@ -70,45 +55,29 @@ export const ObservationLayer = ({ observations = [], hunt, weather, auto }) => 
     side = hunt?.direction || "";
   }
   const rgb = glowRgb(`${action} ${side}`);
-
   return (
     <div data-testid="observation-layer">
       <div className="flex items-center gap-2 mb-3 px-0.5">
         <span className="font-head font-bold text-slate-200 tracking-wide text-lg">OBSERVATIONS</span>
-        <span className="widget-label">
-          Layer 3 · observe() facts + {isScenario ? "scenario path" : "hunt path"}
-        </span>
+        <span className="widget-label">Layer 3 · {isScenario ? "S1/S2 + C" : "hunt path"}</span>
       </div>
-
-      <div
-        className="breathe-glow panel p-3 mb-3 flex flex-wrap gap-6 items-center"
-        style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }}
-        data-testid="observation-top-strip"
-      >
+      <div className="breathe-glow panel p-3 mb-3 flex flex-wrap gap-6 items-center" style={{ ["--glow-rgb"]: rgb, borderColor: `rgba(${rgb},0.65)` }} data-testid="observation-top-strip">
         <div>
           <div className="widget-label">{isScenario ? "Scenario" : "Hunt"}</div>
-          <div
-            className="font-head font-bold text-xl pulse-dot"
-            style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}
-          >
-            {action}
-          </div>
+          <div className="font-head font-bold text-xl pulse-dot" style={{ color: `rgb(${rgb})`, textShadow: `0 0 14px rgba(${rgb},0.7)` }}>{action}</div>
         </div>
         <div>
-          <div className="widget-label">{isScenario ? "M5 slot" : "5m path"}</div>
+          <div className="widget-label">{isScenario ? "S1/S2 slot" : "5m path"}</div>
           <div className="font-mono-t text-cyan-400">{path || "—"}</div>
         </div>
         <div>
-          <div className="widget-label">Weather</div>
+          <div className="widget-label">4H (context only)</div>
           <div className="font-mono-t text-slate-200">{weather && weather.flag ? weather.flag : "—"}</div>
         </div>
         <div className="font-mono-t text-[11px] text-slate-400 max-w-xl">{why}</div>
       </div>
-
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {(observations || []).map((o) => (
-          <FactCard key={o.source} obs={o} />
-        ))}
+        {(observations || []).map((o) => (<FactCard key={o.source} obs={o} />))}
       </div>
     </div>
   );
