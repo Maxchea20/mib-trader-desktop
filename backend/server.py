@@ -314,6 +314,38 @@ async def autotrade_status():
 async def ai_thesis_status():
     return ai_thesis.status()
 
+@api_router.get("/learning/status")
+async def learning_status():
+    try:
+        from src.learning_brain import http_status
+        return await asyncio.to_thread(http_status)
+    except Exception:
+        return {"available": False, "stage": "OFFLINE", "veto": False, "live_impact": "NONE"}
+
+@api_router.get("/learning/models")
+async def learning_models():
+    try:
+        from src.learning_brain import http_models
+        return await asyncio.to_thread(http_models)
+    except Exception:
+        return {"models": []}
+
+@api_router.post("/learning/replay")
+async def learning_replay():
+    try:
+        from src.learning_brain import http_replay
+        return await asyncio.to_thread(http_replay)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@api_router.post("/learning/train")
+async def learning_train():
+    try:
+        from src.learning_brain import http_train
+        return await asyncio.to_thread(http_train)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @api_router.get("/mexc/account")
 async def mexc_account():
     live_armed = os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true"
