@@ -366,6 +366,8 @@ def build(store, sizing, papers, replay_path):
             "exit_reason": exit_reason, "exit_reason_source": reason_src,
             "stop_orders": ";".join(f"{STOP_STATE.get(int(f(x, 'state') or 0), g(x, 'state'))}/"
                                     f"{STOP_TRIGGER_SIDE.get(int(f(x, 'triggerSide') or 0)) or '-'}" for x in pst),
+            "mib_exit_reason_local": (paper or {}).get("exit_reason"),  # MiB's own label, NOT MEXC-proven
+            "mib_closed_at_local": iso(float(paper["closed_at"])) if paper and paper.get("closed_at") else "",
             "notional_usd": f(r, "final_notional"), "leverage": f(s, "leverage"),
             "realised_pnl": realised, "gross_pnl": gross,
             "fee_position": fee_pos, "fee_open_fills": fee_open, "fee_close_fills": fee_close,
