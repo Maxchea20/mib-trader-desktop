@@ -316,8 +316,17 @@ def build(store, sizing, papers, replay_path):
         if not od and o is not None:
             notes.append("no fill rows for opening order (order_deals); used order dealAvgPrice")
 
-        # exit: closing deals on the same position (orders other than the opening one)
-        close_deals = [d for d in deals_by_pos.get(pid, []) if str(g(d, "orderId")) != oid] if pid else []
+        # exit: fills of every other order on this position. Linked both by the
+        # fill's own positionId (if MEXC returns it) and via the closing orders'
+        # orderId (fills may not carry positionId).
+        close_deals, seen = [], set()
+        if pid:
+            close_oids = {str(g(x, "orderId")) for x in orders_by_pos.get(pid, [])} - {oid}
+            for d in deals_by_pos.get(pid, []) + [d for c in close_oids for d in deals_by_order.get(c, [])]:
+                did = str(g(d, "id")) if g(d, "id") is not None else json.dumps(d, sort_keys=True)
+                if str(g(d, "orderId")) != oid and did not in seen:
+                    seen.add(did)
+                    close_deals.append(d)
         exit_vol = sum(f(d, "vol") or 0 for d in close_deals)
         exit_px = (sum((f(d, "price") or 0) * (f(d, "vol") or 0) for d in close_deals) / exit_vol
                    if exit_vol else f(pos, "closeAvgPrice", "newCloseAvgPrice"))
@@ -328,12 +337,22 @@ def build(store, sizing, papers, replay_path):
         pst = stops_by_pos.get(pid, []) if pid else []
         executed = [x for x in pst if int(f(x, "state") or 0) == 3]
         exit_reason, reason_src = None, None
+        trig_raw, trig_agrees = None, None
         if executed:
-            ts_side = STOP_TRIGGER_SIDE.get(int(f(executed[-1], "triggerSide") or 0))
-            if ts_side:
-                exit_reason, reason_src = ts_side, "stop order EXECUTED (triggerSide)"
+            # Which leg fired is decided by the ACTUAL exit price vs the planned
+            # TP / SL we submitted -- not by trusting an enum meaning. MEXC's
+            # triggerSide is kept raw and checked against it.
+            trig_raw = g(executed[-1], "triggerSide")
+            ptp, psl = f(s, "take_profit_price"), f(s, "stop_loss_price")
+            if exit_px is not None and ptp is not None and psl is not None:
+                by_price = "TP" if abs(exit_px - ptp) < abs(exit_px - psl) else "SL"
+                enum_side = STOP_TRIGGER_SIDE.get(int(f(executed[-1], "triggerSide") or 0))
+                trig_agrees = (enum_side == by_price) if enum_side else None
+                exit_reason = by_price
+                reason_src = (f"stop order EXECUTED; leg by exit price nearest planned TP/SL "
+                              f"(MEXC triggerSide={trig_raw})")
             else:
-                exit_reason, reason_src = "STOP_EXECUTED_SIDE_UNKNOWN", "stop order EXECUTED, triggerSide missing"
+                exit_reason, reason_src = "STOP_EXECUTED_LEG_UNKNOWN", "stop order EXECUTED; no exit price or planned levels"
         elif pid:
             close_orders = [x for x in orders_by_pos.get(pid, []) if str(g(x, "orderId")) != oid]
             cats = {ORDER_CATEGORY.get(int(f(x, "category") or 0), f"category {g(x, 'category')}") for x in close_orders}
@@ -353,7 +372,7 @@ def build(store, sizing, papers, replay_path):
         cs = f(r, "contract_size")
         open_notional = fill_vol * cs * fill_px if fill_vol and cs and fill_px else None
         close_notional = exit_vol * cs * exit_px if exit_vol and cs and exit_px else None
-        takers = [d.get("isTaker") for d in od + close_deals if d.get("isTaker") is not None]
+        takers = [g(d, "isTaker", "taker") for d in od + close_deals if g(d, "isTaker", "taker") is not None]
         fee_open = sum(abs(f(d, "fee") or 0) for d in od) if od else None
         fee_close = sum(abs(f(d, "fee") or 0) for d in close_deals) if close_deals else None
         fee_pos = f(pos, "fee", "totalFee")
@@ -391,6 +410,7 @@ def build(store, sizing, papers, replay_path):
             "position_open_avg": f(pos, "openAvgPrice", "newOpenAvgPrice"),
             "exit_time": iso(exit_ts) if exit_ts else "", "exit_price": exit_px,
             "exit_reason": exit_reason, "exit_reason_source": reason_src,
+            "stop_trigger_side_raw": trig_raw, "trigger_side_enum_agrees_with_price": trig_agrees,
             "stop_orders": ";".join(f"{STOP_STATE.get(int(f(x, 'state') or 0), g(x, 'state'))}/"
                                     f"{STOP_TRIGGER_SIDE.get(int(f(x, 'triggerSide') or 0)) or '-'}" for x in pst),
             "mib_exit_reason_local": (paper or {}).get("exit_reason"),  # MiB's own label, NOT MEXC-proven
@@ -630,9 +650,18 @@ def _stats(v):
     return f"n={len(v):<3} sum={sum(v):+9.4f}  avg={sum(v) / len(v):+8.4f}  median={med:+8.4f}"
 
 
-def summary(ledger, not_reached):
+def summary(ledger, not_reached, store=None):
     L = ["================ SUMMARY (USDT, from MEXC position history) ================"]
-    L.append("Exit groups: TP/SL = MEXC stop order EXECUTED (proven). LIFECYCLE / MANUAL = MEXC market close,")
+    if store is not None:
+        L.append("MEXC field names seen (names only, no values):")
+        for t in Store.TABLES:
+            row = store.c.execute(f"SELECT json FROM {t} LIMIT 1").fetchone()
+            L.append(f"  {t:<10}: {', '.join(sorted(json.loads(row[0]).keys())) if row else '-'}")
+    agree = [r.get("trigger_side_enum_agrees_with_price") for r in ledger if r.get("stop_trigger_side_raw") is not None]
+    if agree:
+        L.append(f"TP/SL leg check: MEXC triggerSide enum agrees with exit price in {sum(1 for a in agree if a)}"
+                 f" / {len(agree)} executed stop orders (disagree {sum(1 for a in agree if a is False)})")
+    L.append("Exit groups: TP/SL = MEXC stop order EXECUTED; which leg = exit price nearest the planned TP or SL. LIFECYCLE / MANUAL = market close,")
     L.append("split by MiB's own local exit label (paper_trades.exit_reason).")
     closed = [r for r in ledger if r.get("realised_pnl") is not None]
     groups = {}
@@ -665,6 +694,9 @@ def summary(ledger, not_reached):
     posfee = sum(abs(r.get("fee_position") or 0) for r in sc)
     L.append(f"  sum fill fees {fills:.4f} vs sum position fees {posfee:.4f}  (difference {posfee - fills:+.4f}: "
              "not explained by fills; may be funding or rounding -- not assumed)")
+    rt = [(r.get("fee_open_pct") or 0) + (r.get("fee_close_pct") or 0) for r in sub
+          if r.get("fee_open_pct") is not None and r.get("fee_close_pct") is not None]
+    L.append(f"  round trip (open+close): {_stats(rt)}")
     tk = sum(r.get("taker_fills") or 0 for r in sub)
     mk = sum(r.get("maker_fills") or 0 for r in sub)
     L.append(f"  fills flagged taker: {tk}   maker: {mk}   (only where MEXC returned isTaker)")
@@ -746,7 +778,7 @@ def main():
     (out / "coverage.txt").write_text(rep, encoding="utf-8")
     print(rep)
     if a.summary:
-        sm = summary(ledger, not_reached)
+        sm = summary(ledger, not_reached, store)
         (out / "summary.txt").write_text(sm, encoding="utf-8")
         print("\n" + sm)
     print(f"\nWritten to {out} (git-ignored)")
