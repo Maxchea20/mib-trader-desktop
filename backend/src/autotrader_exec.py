@@ -1,4 +1,4 @@
-"""Live / paper order execution for Hunt autotrader."""
+"""Live / paper order execution for S1/S2 autotrader."""
 import json
 import time
 from typing import Dict, Optional
@@ -14,38 +14,36 @@ from .autotrader_sizing import (
 REJECT_COOLDOWN_S = 15 * 60
 
 
-def _hunt_thesis(hunt: Dict, extra: Optional[Dict] = None) -> Dict:
+def _s1_thesis(s1: Dict, extra: Optional[Dict] = None) -> Dict:
     th = {
-        "thesis_ts": hunt.get("thesis_ts"),
-        "thesis_level": hunt.get("thesis_level"),
-        "thesis_invalid": hunt.get("thesis_invalid"),
-        "rearm": hunt.get("rearm"),
-        "event": hunt.get("event"),
-        "gate": hunt.get("gate"),
-        "direction": hunt.get("direction"),
-        "entry": hunt.get("entry"),
-        "stop": hunt.get("stop"),
-        "target": hunt.get("target"),
+        "thesis_ts": s1.get("thesis_ts"),
+        "thesis_level": s1.get("thesis_level"),
+        "thesis_invalid": s1.get("thesis_invalid"),
+        "event": s1.get("event"),
+        "timing": s1.get("timing"),
+        "direction": s1.get("direction"),
+        "entry": s1.get("entry"),
+        "stop": s1.get("stop"),
+        "target": s1.get("target"),
     }
     if extra:
         th.update(extra)
     return {k: v for k, v in th.items() if v is not None}
 
 
-def _open_from_hunt(hunt: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
-    side = hunt.get("direction")
-    th = _hunt_thesis(hunt, thesis)
-    entry = float(th.get("fill_price") or hunt["entry"])
-    sl = float(th.get("stop") or hunt["stop"])
-    tp = float(th.get("target") or hunt["target"])
-    path = (hunt.get("hunt") or {}).get("m5_path") or hunt.get("v3a_path")
-    gate = hunt.get("gate") or ""
-    why0 = (hunt.get("why_state") or [""])[0] if isinstance(hunt.get("why_state"), list) else (hunt.get("why_state") or "")
+def _open_from_s1(s1: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
+    side = s1.get("direction")
+    th = _s1_thesis(s1, thesis)
+    entry = float(th.get("fill_price") or s1["entry"])
+    sl = float(th.get("stop") or s1["stop"])
+    tp = float(th.get("target") or s1["target"])
+    path = s1.get("timing") or ""
+    why0 = (s1.get("why_state") or [""])[0] if isinstance(s1.get("why_state"), list) else (s1.get("why_state") or "")
     paper_trading.open_trade(
         symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
         notional_usd=float(th.get("notional") or CONFIG["notional_usd"]),
         timeframe=tf, brain_state=side, consensus=0, confidence=0,
-        note=f"Hunt C-FI {gate} {path} {(hunt.get('event') or '')} {why0}",
+        note=f"S1/S2 {path} {(s1.get('event') or '')} {why0}",
         source="AUTO", thesis=th,
     )
 
@@ -168,18 +166,18 @@ def _fit_qty_to_balance(sizing: Dict, available: float) -> Optional[float]:
     return qty
 
 
-def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
-                          extra_thesis: Optional[Dict] = None) -> Dict:
+def _open_live_from_s1(s1: Dict, tf: str, live_price: Optional[float],
+                        extra_thesis: Optional[Dict] = None) -> Dict:
     blocked = _live_blocked()
     if blocked:
         raise RuntimeError(blocked)
-    side = hunt.get("direction")
-    hunt_entry = float(hunt["entry"])
-    hunt_sl = float(hunt["stop"])
-    hunt_tp = float(hunt["target"])
-    price = _fresh_price() or float(live_price or hunt_entry)
-    sl_dist = abs(hunt_entry - hunt_sl)
-    tp_dist = abs(hunt_tp - hunt_entry)
+    side = s1.get("direction")
+    s1_entry = float(s1["entry"])
+    s1_sl = float(s1["stop"])
+    s1_tp = float(s1["target"])
+    price = _fresh_price() or float(live_price or s1_entry)
+    sl_dist = abs(s1_entry - s1_sl)
+    tp_dist = abs(s1_tp - s1_entry)
     if str(side).upper() == "LONG":
         sl = price - sl_dist
         tp = price + tp_dist
@@ -256,19 +254,18 @@ def _open_live_from_hunt(hunt: Dict, tf: str, live_price: Optional[float],
                    "fitted_to_balance": sizing.get("fitted_to_balance")},
     )
     fill = _wait_mexc_fill(side) or price
-    _open_from_hunt(hunt, tf, thesis={
+    _open_from_s1(s1, tf, thesis={
         "venue": "MEXC", "order_id": order_result.get("data"), "vol": vol,
         "notional": sizing.get("final_notional"), "leverage": lev, "side": side,
         "margin_mode": "ISOLATED", "risk_pct": sizing.get("risk_pct"),
         "risk_usd": sizing.get("risk_usd"), "sizing_mode": sizing.get("sizing_mode"),
         "fill_price": fill, "live_price": price, "stop": submit_sl,
-        "target": submit_tp, "hunt_entry": hunt_entry,
-        "thesis_ts": hunt.get("thesis_ts"),
-        "thesis_level": hunt.get("thesis_level"),
-        "thesis_invalid": hunt.get("thesis_invalid"),
-        "rearm": hunt.get("rearm"),
-        "event": hunt.get("event"),
-        "gate": hunt.get("gate"),
+        "target": submit_tp, "s1_entry": s1_entry,
+        "thesis_ts": s1.get("thesis_ts"),
+        "thesis_level": s1.get("thesis_level"),
+        "thesis_invalid": s1.get("thesis_invalid"),
+        "event": s1.get("event"),
+        "timing": s1.get("timing"),
         **(extra_thesis or {}),
     })
     try:
