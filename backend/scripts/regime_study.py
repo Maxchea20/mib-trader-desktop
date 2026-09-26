@@ -229,7 +229,8 @@ def rows_from_replay(path, c15, c5, fee_pct, with_structure):
         gross = res["pnl"] + 2 * old_fee * tr["fill"]
         net = gross - 2 * new_fee * tr["fill"]
         out.append({**f, "t": t, "side": tr["side"], "out": res["out"], "net_pct": 100 * net / tr["fill"],
-                    "net_r": net / tr["sl_dist"] if tr["sl_dist"] else 0.0,
+                    "net_r": max(-3.0, min(3.0, net / tr["sl_dist"])) if tr["sl_dist"] else 0.0,
+                    "tp_hit_loss": res["out"] == "TP" and net <= 0,
                     "mfe_atr": (tr.get("mfe_before_sl") or 0) / tr["atr"], "live_like": bool(tr.get("live_like")),
                     "path": f"{tr.get('gate')}/{tr.get('timing')}"})
     out.sort(key=lambda r: r["t"])
@@ -265,7 +266,7 @@ def summ(g):
             "sl": sum(r["out"] == "SL" for r in g), "mfe": med([r["mfe_atr"] for r in g])}
 
 
-def shift_p(rows, mask, key="net_r", n=400, seed=3):
+def shift_p(rows, mask, key="net_pct", n=400, seed=3):
     """Circular-shift null test. rows are time-sorted; mask[i] marks group A.
     Statistic = mean(key | A) - mean(key | not A). The outcome sequence is
     rotated in time against the (fixed) mask, which keeps the clustering of
@@ -326,7 +327,7 @@ def section_within(rows, L, half_t):
     two sides; report both halves separately."""
     L.append("\n================ 1b. INSIDE THE MIDDLE REGIME: WHAT SEPARATES GOOD FROM BAD FIREs ================")
     L.append("Each feature split at its FIRST-HALF median (all regimes pooled), so the cut is not fitted to outcomes.")
-    L.append("'diff' = expectancy(above) - expectancy(below) in %; p = time-shift null test in risk units (MIDDLE regime).")
+    L.append("'diff' = expectancy(above) - expectancy(below) in %; p = time-shift null test in % units (MIDDLE regime).")
     L.append(f"{'feature':<16}{'cut':>7}{'n>':>5}{'n<=':>5}{'exp>':>8}{'exp<=':>8}{'diff':>8}"
              f"{'p':>8}{'1st half':>9}{'2nd half':>9}{'  also in TREND/CHOP':>21}{'diff R':>8}")
     mid = [r for r in rows if r["regime"] == "MIDDLE"]
@@ -367,7 +368,7 @@ def section_within(rows, L, half_t):
                  f"{fmt(h1, 3):>8}{fmt(h2, 3):>9}{both}{fmt(other, 3):>20}{diff_r:>+8.3f}")
     L.append("  * = p < 0.05 and same sign in % and R units (with ~20 features, ~1 false '*' is expected by chance;")
     L.append("      Bonferroni for 20 features would need p < 0.0025)")
-    L.append("  = = same sign in both halves of the data;  diff R = same comparison in risk units (net / SL distance)")
+    L.append("  = = same sign in both halves of the data;  diff R = same comparison in risk units, capped at +/-3R")
     return res
 
 
@@ -402,7 +403,14 @@ def section_paths(rows, L):
         be = st.mean(r["sl_atr"] / (r["sl_atr"] + r["tp_atr"]) for r in g if r["sl_atr"] + r["tp_atr"] > 0)
         s = summ(g)
         L.append(f"  {p:<18} break-even {100 * be:5.1f}%   actual win {s['win']:5.1f}%   "
-                 f"TP-hit {100 * s['tp'] / s['n']:5.1f}%   edge {s['win'] - 100 * be:+5.1f} pts")
+                 f"TP-hit {100 * s['tp'] / s['n']:5.1f}%   TP-hit minus break-even {100 * s['tp'] / s['n'] - 100 * be:+5.1f} pts")
+    L.append("\nSL/TP geometry defects (entry far from the anchored level):")
+    L.append(f"  {'path':<18}{'n':>5}{'TP<0.5ATR':>11}{'SL<0.5ATR':>11}{'TP hit but lost after fees':>28}")
+    for p in list(PATHS) + ["ALL"]:
+        g = rows if p == "ALL" else paths.get(p, [])
+        if g:
+            L.append(f"  {p:<18}{len(g):>5}{sum(r['tp_atr'] < 0.5 for r in g):>11}{sum(r['sl_atr'] < 0.5 for r in g):>11}"
+                     f"{sum(r['tp_hit_loss'] for r in g):>28}")
     L.append("\nSame path, split by regime (expectancy % / n):")
     for p in PATHS:
         g = paths.get(p, [])
@@ -474,7 +482,7 @@ def section_filters(rows, L, half_t):
             ll = [r for r in rows if r["live_like"]]
             p_ll = shift_p(ll, [keep(r) for r in ll])[1] if ll else None
             L.append(f"    improves in every subset (both % and R units): {'YES' if ok and all(ok) else 'no'}"
-                     f"   time-shift p (kept better than removed, R units): ALL {fmt(p_all, 3)}  live-like {fmt(p_ll, 3)}")
+                     f"   time-shift p (kept better than removed, % units): ALL {fmt(p_all, 3)}  live-like {fmt(p_ll, 3)}")
             sup = bool(ok and all(ok) and p_all is not None and p_all < 0.05 / 8 and p_ll is not None and p_ll < 0.05)
             L.append(f"    SUPPORTED: {'YES' if sup else 'no'}")
         except Exception as e:  # a feature missing entirely
