@@ -1,4 +1,4 @@
-"""Hunt evaluate loop — same-bar WAIT may flip to FIRE."""
+"""S1/S2 evaluate loop — same-bar WAIT may flip to FIRE."""
 import time
 from typing import Dict, Optional
 
@@ -7,10 +7,10 @@ from .market_data import data_access as dao
 from . import analysis_service
 from .brain.lifecycle_tick import manage_open_on_5m
 from .brain.weather import side_allowed
-from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
+from .brain.s1_engine import S1_VERSION
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
-    _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
+    _open_from_s1, _open_live_from_s1, _close_live_if_needed,
 )
 from .autotrader_live_sync import revive_shadow_if_mexc_open, flatten_mexc
 
@@ -67,38 +67,36 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if len(candles) < 30:
         return STATE
     c5 = dao.read_closed_candles("5m", limit=6)
-    hunt_5m_ts = c5[-1]["ts"] if c5 else None
+    s1_5m_ts = c5[-1]["ts"] if c5 else None
     last_ts = candles[-1]["ts"]
     STATE["last_candle_ts"] = last_ts
     STATE["last_eval_at"] = int(time.time())
     result = analysis_service.full_analysis(tf)
-    hunt = result.get("hunt") or {}
+    s1 = result.get("s1") or {}
     weather = result.get("weather") or {}
-    nested = hunt.get("hunt") if isinstance(hunt.get("hunt"), dict) else {}
-    STATE["last_hunt"] = {
-        "action": hunt.get("action"),
-        "version": hunt.get("brain_version") or HUNT_VERSION_C_FI,
-        "path": nested.get("m5_path") or hunt.get("v3a_path"),
-        "event": hunt.get("event") or nested.get("event"),
-        "gate": hunt.get("gate"),
-        "timing": hunt.get("timing"),
-        "timing_state": hunt.get("timing_state"),
-        "why": (hunt.get("why_state") or [None])[0],
-        "direction": hunt.get("direction"),
-        "entry": hunt.get("entry") or nested.get("level") or nested.get("entry"),
-        "stop": hunt.get("stop") or nested.get("stop"),
-        "target": hunt.get("target") or nested.get("target"),
-        "thesis_ts": hunt.get("thesis_ts"),
-        "thesis_level": hunt.get("thesis_level"),
-        "thesis_invalid": hunt.get("thesis_invalid"),
-        "rearm": hunt.get("rearm"),
+    STATE["last_s1"] = {
+        "action": s1.get("action"),
+        "version": s1.get("brain_version") or S1_VERSION,
+        "path": s1.get("timing"),
+        "event": s1.get("event"),
+        "timing": s1.get("timing"),
+        "timing_state": s1.get("timing_state"),
+        "why": (s1.get("why_state") or [None])[0],
+        "direction": s1.get("direction"),
+        "entry": s1.get("entry"),
+        "stop": s1.get("stop"),
+        "target": s1.get("target"),
+        "thesis_ts": s1.get("thesis_ts"),
+        "thesis_level": s1.get("thesis_level"),
+        "thesis_invalid": s1.get("thesis_invalid"),
+        "slot": s1.get("slot"),
     }
-    STATE["last_state"] = hunt.get("action")
-    STATE["last_reason"] = (hunt.get("why_state") or [""])[0]
+    STATE["last_state"] = s1.get("action")
+    STATE["last_reason"] = (s1.get("why_state") or [""])[0]
     already_opened_this_bar = (
-        hunt_5m_ts is not None and STATE.get("last_fired_5m_ts") == hunt_5m_ts
+        s1_5m_ts is not None and STATE.get("last_fired_5m_ts") == s1_5m_ts
     )
-    STATE["last_hunt_5m_ts"] = hunt_5m_ts
+    STATE["last_s1_5m_ts"] = s1_5m_ts
     live_mode = CONFIG.get("mode") == "LIVE"
     live_armed = _live_armed()
     open_auto = _open_auto()
@@ -112,22 +110,16 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             return STATE
     except Exception:
         pass
-    if hunt.get("action") != "FIRE":
-        STATE["last_action"] = f"NO-TRADE ({hunt.get('action') or 'WAIT'})"
+    if s1.get("action") != "FIRE":
+        STATE["last_action"] = f"NO-TRADE ({s1.get('action') or 'WAIT'})"
         return STATE
     if already_opened_this_bar:
         STATE["last_action"] = "ALREADY FIRED THIS 5M"
         return STATE
-    side = hunt.get("direction")
-    if not hunt.get("entry"):
-        hunt["entry"] = nested.get("level") or nested.get("entry")
-    if not hunt.get("stop"):
-        hunt["stop"] = nested.get("stop")
-    if not hunt.get("target"):
-        hunt["target"] = nested.get("target")
-    if not hunt.get("entry") or not hunt.get("stop") or not hunt.get("target"):
+    side = s1.get("direction")
+    if not s1.get("entry") or not s1.get("stop") or not s1.get("target"):
         STATE["last_action"] = "FIRE BUT NO LEVELS"
-        STATE["last_reason"] = "Hunt printed FIRE without entry/stop/target — not sending"
+        STATE["last_reason"] = "S1 printed FIRE without entry/stop/target — not sending"
         return STATE
     flag = weather.get("flag")
     if flag and not side_allowed(flag, side):
@@ -137,11 +129,11 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     if _in_cooldown(300):
         STATE["last_action"] = "COOLDOWN"
         return STATE
-    tag = hunt.get("timing") or hunt.get("gate") or ""
+    tag = s1.get("timing") or ""
     if live_mode and live_armed:
         try:
-            order_result = _open_live_from_hunt(hunt, tf, live_price)
-            STATE["last_fired_5m_ts"] = hunt_5m_ts
+            order_result = _open_live_from_s1(s1, tf, live_price)
+            STATE["last_fired_5m_ts"] = s1_5m_ts
             STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')} {tag}"
         except Exception as e:
             STATE["last_action"] = "LIVE ORDER FAILED"
@@ -153,7 +145,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             "LIVE toggle is on but MEXC_LIVE_TRADING_ENABLED is not true — paper fill only. "
             "Desktop: tray → Show Data Folder → add that line to .env → Restart Trading Engine."
         )
-    _open_from_hunt(hunt, tf)
-    STATE["last_fired_5m_ts"] = hunt_5m_ts
-    STATE["last_action"] = f"OPEN {side} Hunt C-FI {tag}"
+    _open_from_s1(s1, tf)
+    STATE["last_fired_5m_ts"] = s1_5m_ts
+    STATE["last_action"] = f"OPEN {side} S1/S2 {tag}"
     return STATE

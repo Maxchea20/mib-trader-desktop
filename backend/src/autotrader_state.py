@@ -1,4 +1,4 @@
-"""Shared Hunt autotrader CONFIG / STATE."""
+"""Shared S1/S2 autotrader CONFIG / STATE."""
 import json
 import logging
 import os
@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .brain.observation_hunt_c_fi import HUNT_VERSION_C_FI
+from .brain.s1_engine import S1_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ CONFIG = {
     "enabled": True,
     "mode": "PAPER",
     "timeframe": "15m",
-    "hunt_version": HUNT_VERSION_C_FI,
+    "engine_version": S1_VERSION,
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
@@ -36,12 +36,12 @@ CONFIG = {
     "leverage": 10.0,
     "max_live_notional_usd": 1000.0,
     "margin_mode": "ISOLATED",
-    "entry_engine": "legacy",
+    "entry_engine": "s1",
 }
 
 STATE = {
     "last_candle_ts": None,
-    "last_hunt_5m_ts": None,
+    "last_s1_5m_ts": None,
     "last_fired_5m_ts": None,
     "last_state": None,
     "last_action": None,
@@ -51,7 +51,7 @@ STATE = {
     "last_close_reason": None,
     "last_5m_ts": None,
     "last_lifecycle": None,
-    "last_hunt": None,
+    "last_s1": None,
     "normal_base": None,
     "normal_base_captured_at": None,
 }
@@ -75,9 +75,9 @@ def _load_persisted() -> None:
         for k in PERSIST_KEYS:
             if k in data and data[k] is not None:
                 CONFIG[k] = data[k]
-        CONFIG["hunt_version"] = HUNT_VERSION_C_FI
+        CONFIG["engine_version"] = S1_VERSION
         CONFIG["margin_mode"] = "ISOLATED"
-        CONFIG["entry_engine"] = "legacy"
+        CONFIG["entry_engine"] = "s1"
         if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:
             CONFIG["leverage"] = MIN_LIVE_LEVERAGE
         if CONFIG.get("risk_pct") is None:
