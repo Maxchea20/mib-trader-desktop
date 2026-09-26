@@ -1,4 +1,4 @@
-"""AI wake-up detector — Hunt C-FI live events."""
+"""AI wake-up detector — S1/S2 live events."""
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
@@ -19,8 +19,8 @@ def reset() -> None:
     _LAST_FP = None
 
 
-def _hunt(state: Dict) -> Dict:
-    return state.get("last_hunt") or {}
+def _s1(state: Dict) -> Dict:
+    return state.get("last_s1") or {}
 
 
 def _lifecycle(state: Dict) -> Dict:
@@ -32,7 +32,7 @@ def _action(state: Dict) -> str:
 
 
 def fingerprint(state: Dict) -> Tuple:
-    h = _hunt(state)
+    h = _s1(state)
     lc = _lifecycle(state)
     return (
         h.get("action"),
@@ -49,7 +49,7 @@ def fingerprint(state: Dict) -> Tuple:
 def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
     if prev is not None and curr == prev:
         return None
-    h = _hunt(state)
+    h = _s1(state)
     lc = _lifecycle(state)
     action = _action(state)
     prev_h = prev[0] if prev else None
@@ -76,7 +76,7 @@ def inspect_and_maybe_emit(state: Dict) -> Optional[Dict]:
     _LAST_FP = fp
     if not kind:
         return None
-    h = _hunt(state)
+    h = _s1(state)
     return {
         "kind": kind,
         "fingerprint": fp,
