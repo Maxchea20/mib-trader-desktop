@@ -55,6 +55,8 @@ export const getMexcAccount = async () =>
 export const probeMexc = async () => (await client.get("/mexc/probe", { timeout: 40000 })).data;
 export const pingMexc = async () => (await client.post("/mexc/ping", {}, { timeout: 40000 })).data;
 export const getAiThesis = async () => (await client.get("/ai/thesis")).data;
+export const getLearningStatus = async () => (await client.get("/learning/status")).data;
+export const getLearningModels = async () => (await client.get("/learning/models")).data;
 
 export const AGENT_META = {
   market_structure: { name: "Market Structure", focus: "HH / HL / LH / LL · BOS · CHoCH", num: "01" },
