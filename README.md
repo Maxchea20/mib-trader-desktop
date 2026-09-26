@@ -35,5 +35,8 @@ Never run packaged `MIB Trader.exe` and `run_server.py` at the same time.
 
 ## Do not change
 
-Brain / Hunt C-FI / autotrader execution live in Python. The desktop host only
+Brain / S1-S2 / autotrader execution live in Python. The desktop host only
 opens a window and manages the engine process.
+
+Live path: forming 15m BOS/CHoCH → S1/S2 → C 1m close → FIRE → Isolated.
+Hunt C-FI is historical research only (`docs/HUNT_*`, `scripts/run_hunt_*`).

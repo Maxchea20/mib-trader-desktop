@@ -1,9 +1,9 @@
 SAFE TO PULL.
 
-backend/src/autotrader.py is the full Hunt C-FI file again (not a stub).
+backend/src/autotrader.py is the S1/S2 live file (Hunt is not on the Isolated path).
 Tested locally before this commit:
-- 33 passed: Hunt C-FI, lifecycle SI checklist, V3, weather, brain lifecycle
-- thesis freeze on FIRE carries thesis_ts / thesis_level / thesis_invalid
+- S1/S2 engine + lifecycle SI checklist + weather + brain lifecycle
+- FIRE carries thesis_ts / thesis_level / thesis_invalid from the 15m S1 thesis
 - STRUCTURAL_INVALIDATION does not use the 3-bar fail lock; HARD_SL still does
 - live fire still uses MEXC lastPrice + holdAvgPrice fill + Isolated + one position
 
