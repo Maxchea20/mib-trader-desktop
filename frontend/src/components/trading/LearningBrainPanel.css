@@ -1,0 +1,24 @@
+.lb-panel {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(0, 200, 255, 0.05), transparent 55%),
+    #0d121b;
+  border-color: #1d2635;
+}
+.lb-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.lb-led-on {
+  background: #00c8ff;
+  box-shadow: 0 0 8px rgba(0, 200, 255, 0.7);
+}
+.lb-led-off {
+  background: #64748b;
+}
+.lb-card {
+  border: 1px solid #1d2635;
+  background: #080b10;
+  padding: 8px;
+}
