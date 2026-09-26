@@ -1,4 +1,4 @@
-"""Analysis orchestration: agents + Hunt observations + chart market_state."""
+"""Analysis orchestration: agents + S1 observations + chart market_state."""
 from typing import List, Dict
 import numpy as np
 
@@ -131,7 +131,6 @@ def full_analysis(timeframe: str) -> Dict:
     if len(candles) < 30:
         return {"error": "insufficient_data", "timeframe": timeframe, "candles": len(candles)}
     price = float(candles[-1]["close"])
-    # Hunt C is always 15m story + 5m fill, even if the chart TF is 5m/1h/4h.
     c15 = candles if timeframe == "15m" else dao.read_closed_candles("15m", limit=ANALYSIS_LOOKBACK)
     m5_closed = filter_closed(dao.read_candles("5m", limit=ANALYSIS_LOOKBACK * 3), "5m")
     c4 = dao.read_closed_candles("4h", limit=300)
@@ -154,7 +153,7 @@ def full_analysis(timeframe: str) -> Dict:
         "market_state": _market_state_to_dict(market_state),
         "agents": [a.to_dict() for a in agents],
         "observations": pack.get("observations") or [],
-        "hunt": pack.get("hunt"),
+        "s1": pack.get("s1"),
         "weather": pack.get("weather"),
         "agent_weights": settings.weights(),
         "htf_regime": htf,
