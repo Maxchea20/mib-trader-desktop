@@ -60,6 +60,12 @@ ORDER_CATEGORY = {1: "LIMIT", 2: "LIQUIDATION_TAKEOVER", 3: "CLOSE_DELEGATE", 4:
 STOP_STATE = {1: "UNTRIGGERED", 2: "CANCELLED", 3: "EXECUTED", 4: "INVALIDATED", 5: "EXEC_FAILED"}
 STOP_TRIGGER_SIDE = {0: None, 1: "TP", 2: "SL"}
 
+# Mirrors of production rules, used ONLY to label "consistent with" windows:
+COOLDOWN_FAIL_REASONS = ("SL", "BRAIN_EXIT", "FLY", "cancel", "HARD_SL")   # autotrader_loop._in_cooldown
+COOLDOWN_S = 3 * 300                                                       # cooldown_bars_after_failure=3 x 5m
+LIVE_BLOCK_S = 15 * 60                                                     # autotrader_exec.REJECT_COOLDOWN_S
+NO_BLOCK_REJECTS = ("MEXC already has an open position", "SL/TP no longer valid")  # rejects that do not call _block_live
+
 
 # ------------------------------------------------------------------ helpers
 
@@ -239,6 +245,23 @@ def side_of_submitted(s):
     return None
 
 
+def exit_group(mexc_reason, mib_label, pos, o_state):
+    """TP / SL only when MEXC proves a stop-order trigger. A market close is
+    split by MiB's own local label: MANUAL -> MANUAL, any other label ->
+    LIFECYCLE (MiB closed it), no label -> MARKET_CLOSE_UNLABELLED."""
+    if o_state in (4, 5):
+        return "NOT_FILLED"
+    if pos is None:
+        return "OPEN_OR_MISSING"
+    if mexc_reason in ("TP", "SL", "LIQUIDATION", "ADL"):
+        return mexc_reason
+    if (mexc_reason or "").startswith("MARKET_CLOSE"):
+        if (mib_label or "").upper() == "MANUAL":
+            return "MANUAL"
+        return "LIFECYCLE" if mib_label else "MARKET_CLOSE_UNLABELLED"
+    return "UNKNOWN"
+
+
 def build(store, sizing, papers, replay_path):
     positions = {str(g(p, "positionId")): p for p in store.all("positions") if g(p, "positionId") is not None}
     orders = {str(g(o, "orderId", "id")): o for o in store.all("orders") if g(o, "orderId", "id") is not None}
@@ -327,6 +350,10 @@ def build(store, sizing, papers, replay_path):
             notes.append("no TP/SL stop orders found for this position")
 
         # fees + pnl
+        cs = f(r, "contract_size")
+        open_notional = fill_vol * cs * fill_px if fill_vol and cs and fill_px else None
+        close_notional = exit_vol * cs * exit_px if exit_vol and cs and exit_px else None
+        takers = [d.get("isTaker") for d in od + close_deals if d.get("isTaker") is not None]
         fee_open = sum(abs(f(d, "fee") or 0) for d in od) if od else None
         fee_close = sum(abs(f(d, "fee") or 0) for d in close_deals) if close_deals else None
         fee_pos = f(pos, "fee", "totalFee")
@@ -371,6 +398,12 @@ def build(store, sizing, papers, replay_path):
             "notional_usd": f(r, "final_notional"), "leverage": f(s, "leverage"),
             "realised_pnl": realised, "gross_pnl": gross,
             "fee_position": fee_pos, "fee_open_fills": fee_open, "fee_close_fills": fee_close,
+            "contract_size": cs, "exit_vol": exit_vol or None,
+            "open_notional": open_notional, "close_notional": close_notional,
+            "fee_open_pct": 100 * fee_open / open_notional if fee_open is not None and open_notional else None,
+            "fee_close_pct": 100 * fee_close / close_notional if fee_close is not None and close_notional else None,
+            "taker_fills": sum(1 for t in takers if t), "maker_fills": sum(1 for t in takers if not t),
+            "exit_group": exit_group(exit_reason, (paper or {}).get("exit_reason"), pos, o_state),
             "notes": " | ".join(notes),
         })
 
@@ -385,7 +418,7 @@ def build(store, sizing, papers, replay_path):
             "position_open_avg": f(pos, "openAvgPrice", "newOpenAvgPrice"),
             "exit_time": iso(sec(g(pos, "updateTime"))), "exit_price": f(pos, "closeAvgPrice", "newCloseAvgPrice"),
             "realised_pnl": f(pos, "realised"), "gross_pnl": f(pos, "closeProfitLoss"),
-            "fee_position": f(pos, "fee", "totalFee"),
+            "fee_position": f(pos, "fee", "totalFee"), "exit_group": "MEXC_ONLY",
             "notes": "no SUBMITTED line in live_sizing_log for this position (manual trade, or before the log existed)",
         })
 
@@ -411,11 +444,32 @@ def build(store, sizing, papers, replay_path):
 
     replay_stats = None
     if replay_path:
-        replay_stats = replay_compare(replay_path, sizing, ledger, positions, not_reached)
+        replay_stats = replay_compare(replay_path, sizing, ledger, positions, not_reached, papers)
     return ledger, not_reached, replay_stats
 
 
-def replay_compare(path, sizing, ledger, positions, not_reached):
+def consistent_windows(sizing, papers):
+    """Time windows in which the live loop, by its own rules, would not send
+    an order. Built only from MiB's own records. Used to label UNKNOWN FIREs
+    as 'consistent with' -- never as the proven reason."""
+    w = []
+    for p in papers:
+        if p.get("source") != "AUTO" or not p.get("opened_at"):
+            continue
+        a = float(p["opened_at"])
+        b = float(p["closed_at"]) if p.get("closed_at") else float("inf")
+        w.append(("SHADOW_POSITION_OPEN", a, b, f"paper {p.get('id')} open"))
+        if p.get("closed_at") and (p.get("exit_reason") or "") in COOLDOWN_FAIL_REASONS:
+            w.append(("COOLDOWN", b, b + COOLDOWN_S, f"after {p['exit_reason']} close {iso(b)}"))
+    for r in sizing:
+        why = r.get("rejection_reason") or ""
+        if r.get("result") == "REJECTED" and not any(why.startswith(x) for x in NO_BLOCK_REJECTS):
+            t = float(r["timestamp"])
+            w.append(("LIVE_BLOCK_AFTER_REJECT", t, t + LIVE_BLOCK_S, f"reject {iso(t)}: {why[:50]}"))
+    return w
+
+
+def replay_compare(path, sizing, ledger, positions, not_reached, papers):
     """Replay FIREs inside the live period that have no MEXC order. The live
     loop never persists FIREs it drops, so the reason is only filled in when
     a record PROVES it; everything else is UNKNOWN."""
@@ -425,6 +479,11 @@ def replay_compare(path, sizing, ledger, positions, not_reached):
     if not sub:
         return {"error": "no live attempts in sizing log to define the live period"}
     t0, t1 = min(r["timestamp"] for r in sub), max(r["timestamp"] for r in sub)
+    rts = [datetime.strptime(t["time"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp() for t in trades]
+    if not rts:
+        return {"error": "replay file has no trades"}
+    r0, r1 = min(rts), max(rts)
+    wins = consistent_windows(sizing, papers)
     submitted_bars = {}
     for row in ledger:
         if row["kind"] == "MIB_SUBMITTED":
@@ -435,12 +494,14 @@ def replay_compare(path, sizing, ledger, positions, not_reached):
             rejected_bars.setdefault(iso(int(r["timestamp"]) // 300 * 300), []).append(r)
     pos_iv = [(sec(g(p, "createTime")), sec(g(p, "updateTime")), pid) for pid, p in positions.items()
               if g(p, "createTime") and g(p, "updateTime")]
-    stats = {"replay_fires_in_live_period": 0, "matched_to_mexc_order": 0, "rejected_same_bar": 0,
+    stats = {"replay_file": str(path), "replay_covers": f"{iso(r0)} -> {iso(r1)}",
+             "compare_window": f"{iso(max(t0, r0))} -> {iso(min(t1, r1))}",
+             "replay_fires_in_live_period": 0, "matched_to_mexc_order": 0, "rejected_same_bar": 0,
              "position_open_proven": 0, "unknown": 0, "mexc_orders_without_replay_fire": 0}
     replay_keys = set()
     for t in trades:
         ts = datetime.strptime(t["time"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
-        if not (t0 - 300 <= ts <= t1 + 300):
+        if not (max(t0, r0) - 300 <= ts <= min(t1, r1) + 300):
             continue
         stats["replay_fires_in_live_period"] += 1
         bars = [iso(int(ts) // 300 * 300 + k * 300) for k in (-1, 0, 1)]
@@ -461,13 +522,30 @@ def replay_compare(path, sizing, ledger, positions, not_reached):
         else:
             status, why = "REPLAY_FIRE_NOT_SENT", "UNKNOWN"
             stats["unknown"] += 1
-            note = "no record proves why (cooldown / weather / live-block / replay-vs-live difference all possible)"
+            note = "no record proves why"
+        cw = sorted({k for k, a, b, _ in wins if a <= ts <= b}) if status == "REPLAY_FIRE_NOT_SENT" else []
         not_reached.append({"time": t["time"], "fire_5m_bar_utc": bars[1], "side": t["side"], "status": status,
-                            "proven_reason": why, "source": "replay", "notes": note})
+                            "proven_reason": why, "source": "replay", "notes": note,
+                            "consistent_with": "+".join(cw) if status == "REPLAY_FIRE_NOT_SENT" else "",
+                            "consistent_detail": "; ".join(d for k, a, b, d in wins if a <= ts <= b)[:200]
+                            if status == "REPLAY_FIRE_NOT_SENT" else ""})
+    stats["mexc_orders_outside_replay_window"] = 0
+    stats["mexc_orders_matched_by_replay_fire"] = 0
     for row in ledger:
-        if row["kind"] == "MIB_SUBMITTED" and (row["fire_5m_bar_utc"], row["side"]) not in replay_keys:
-            stats["mexc_orders_without_replay_fire"] += 1
-            row["notes"] = (row["notes"] + " | " if row["notes"] else "") + "no replay FIRE within +/-1 5m bar, same side"
+        if row["kind"] != "MIB_SUBMITTED":
+            continue
+        ts = datetime.strptime(row["submit_time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+        if not (r0 - 300 <= ts <= r1 + 300):
+            stats["mexc_orders_outside_replay_window"] += 1
+            row["replay_match"] = "OUTSIDE_REPLAY_WINDOW"
+            continue
+        if (row["fire_5m_bar_utc"], row["side"]) in replay_keys:
+            stats["mexc_orders_matched_by_replay_fire"] += 1
+            row["replay_match"] = "MATCHED"
+            continue
+        row["replay_match"] = "NO_REPLAY_FIRE"
+        stats["mexc_orders_without_replay_fire"] += 1
+        row["notes"] = (row["notes"] + " | " if row["notes"] else "") + "no replay FIRE within +/-1 5m bar, same side"
     return stats
 
 
@@ -541,6 +619,74 @@ def coverage(ledger, not_reached, fetch_errors, store, replay_stats):
     return "\n".join(L)
 
 
+# ------------------------------------------------------------------ --summary
+
+def _stats(v):
+    v = [x for x in v if x is not None]
+    if not v:
+        return "n=0"
+    s2 = sorted(v)
+    med = s2[len(s2) // 2] if len(s2) % 2 else (s2[len(s2) // 2 - 1] + s2[len(s2) // 2]) / 2
+    return f"n={len(v):<3} sum={sum(v):+9.4f}  avg={sum(v) / len(v):+8.4f}  median={med:+8.4f}"
+
+
+def summary(ledger, not_reached):
+    L = ["================ SUMMARY (USDT, from MEXC position history) ================"]
+    L.append("Exit groups: TP/SL = MEXC stop order EXECUTED (proven). LIFECYCLE / MANUAL = MEXC market close,")
+    L.append("split by MiB's own local exit label (paper_trades.exit_reason).")
+    closed = [r for r in ledger if r.get("realised_pnl") is not None]
+    groups = {}
+    for r in closed:
+        groups.setdefault(r.get("exit_group") or "UNKNOWN", []).append(r)
+    order = ["TP", "SL", "LIFECYCLE", "MANUAL", "MARKET_CLOSE_UNLABELLED", "LIQUIDATION", "ADL", "UNKNOWN", "MEXC_ONLY"]
+    for gname in sorted(groups, key=lambda k: order.index(k) if k in order else 99):
+        rows = groups[gname]
+        L.append(f"\n[{gname}]  {len(rows)} positions")
+        L.append(f"  gross (closeProfitLoss): {_stats([r.get('gross_pnl') for r in rows])}")
+        L.append(f"  net   (realised)       : {_stats([r.get('realised_pnl') for r in rows])}")
+        L.append(f"  fees  (position fee)   : {_stats([abs(r['fee_position']) if r.get('fee_position') is not None else None for r in rows])}")
+        if gname == "LIFECYCLE":
+            lab = {}
+            for r in rows:
+                lab[r.get("mib_exit_reason_local")] = lab.get(r.get("mib_exit_reason_local"), 0) + 1
+            L.append(f"  MiB labels             : {lab}")
+    sub = [r for r in ledger if r["kind"] == "MIB_SUBMITTED"]
+    L.append("\n[ALL MiB-submitted, closed]")
+    sc = [r for r in sub if r.get("realised_pnl") is not None]
+    L.append(f"  gross: {_stats([r.get('gross_pnl') for r in sc])}")
+    L.append(f"  net  : {_stats([r.get('realised_pnl') for r in sc])}")
+
+    L.append("\n================ FEE RATE (% of notional = vol x contractSize x fill price) ================")
+    fo = [r["fee_open_pct"] for r in sub if r.get("fee_open_pct") is not None]
+    fc = [r["fee_close_pct"] for r in sub if r.get("fee_close_pct") is not None]
+    L.append(f"  open  fills: {_stats(fo)}   (% per side)")
+    L.append(f"  close fills: {_stats(fc)}   (% per side)")
+    fills = sum((r.get("fee_open_fills") or 0) + (r.get("fee_close_fills") or 0) for r in sc)
+    posfee = sum(abs(r.get("fee_position") or 0) for r in sc)
+    L.append(f"  sum fill fees {fills:.4f} vs sum position fees {posfee:.4f}  (difference {posfee - fills:+.4f}: "
+             "not explained by fills; may be funding or rounding -- not assumed)")
+    tk = sum(r.get("taker_fills") or 0 for r in sub)
+    mk = sum(r.get("maker_fills") or 0 for r in sub)
+    L.append(f"  fills flagged taker: {tk}   maker: {mk}   (only where MEXC returned isTaker)")
+    nb = [r for r in sub if r.get("open_notional")]
+    if nb:
+        L.append(f"  open notional per trade: {_stats([r['open_notional'] for r in nb])}")
+
+    unk = [r for r in not_reached if r.get("status") == "REPLAY_FIRE_NOT_SENT"]
+    if unk:
+        L.append(f"\n================ {len(unk)} UNKNOWN REPLAY FIREs (never sent, reason NOT proven) ================")
+        L.append("'consistent with' = the FIRE falls inside a window where MiB's own rules would hold. NOT proof.")
+        cnt = {}
+        for r in unk:
+            cnt[r.get("consistent_with") or "NONE (still unknown)"] = cnt.get(r.get("consistent_with") or "NONE (still unknown)", 0) + 1
+        for k, v in sorted(cnt.items(), key=lambda x: -x[1]):
+            L.append(f"  {v:>4}  consistent with {k}")
+        L.append(f"\n  {'time (UTC)':<17} {'side':<6} consistent with")
+        for r in unk:
+            L.append(f"  {r['time']:<17} {r['side'] or '':<6} {r.get('consistent_with') or '-'}   {r.get('consistent_detail') or ''}")
+    return "\n".join(L)
+
+
 def write_csv(path, rows):
     if not rows:
         Path(path).write_text("", encoding="utf-8")
@@ -564,6 +710,7 @@ def main():
     ap.add_argument("--since", help="YYYY-MM-DD (default: 2 days before the first sizing-log line)")
     ap.add_argument("--replay", help="tp_research_result.json from tp_research.py (optional)")
     ap.add_argument("--offline", action="store_true", help="do not call MEXC; rebuild ledger from stored rows")
+    ap.add_argument("--summary", action="store_true", help="P&L by exit type, fee rate, unknown FIREs (read-only)")
     ap.add_argument("--out", default=str(OUT_DIR))
     a = ap.parse_args()
 
@@ -598,6 +745,10 @@ def main():
     rep = coverage(ledger, not_reached, fetch_errors, store, replay_stats)
     (out / "coverage.txt").write_text(rep, encoding="utf-8")
     print(rep)
+    if a.summary:
+        sm = summary(ledger, not_reached)
+        (out / "summary.txt").write_text(sm, encoding="utf-8")
+        print("\n" + sm)
     print(f"\nWritten to {out} (git-ignored)")
 
 
