@@ -14,6 +14,8 @@ from .s1_context import evaluate_setup, not_ready
 from .s1_timing import s2_update_pullback, start_c_watch, tick_c, _s2_executable_side
 
 S1_VERSION = "S1_S2_C"
+S1_SLOTS = (1, 2)        # slot 3 belongs to S2 only
+S1_CHOCH_SLOTS = (2,)    # a 15m CHoCH must hold into slot 2 before S1 may arm
 SL_ATR = 1.5
 TP_ATR = 2.5
 _STATE: Dict = {}
@@ -142,7 +144,9 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     ev = fresh_m5_event(events, side, ts5, st["consumed"])
     # M5 confirmation must print after the closed 15m breakout candle (open ts + 900)
     m5_after_close = ev_s1 is not None and s1_ts is not None and int(ev_s1.timestamp) >= s1_ts + 900
-    if setup["ok"] and m5_after_close and m5_event_level(ev_s1) is not None:
+    s1_is_choch = (getattr(ev15c, "event_type", "") or "").upper() == "CHOCH"
+    s1_slot_ok = slot in (S1_CHOCH_SLOTS if s1_is_choch else S1_SLOTS)
+    if setup["ok"] and s1_slot_ok and m5_after_close and m5_event_level(ev_s1) is not None:
         start_c_watch(st, "S1", ts5, m5_event_level(ev_s1), side)
         st["consumed"].add(event_key(ev_s1))
         st["consumed_s1"].add(event_key(ev_s1))
@@ -171,4 +175,7 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     why = "Closed 15m setup is on. Waiting for a fresh M5 BOS/CHoCH after the 15m close (Lookback 5)."
     if not setup["ok"]:
         why = f"S1 closed-15m setup not ready: {setup['reason']}."
+    elif not s1_slot_ok:
+        why = ("Slot 3 belongs to S2; S1 waits for the next 15m." if slot == 3
+               else "15m CHoCH must hold into slot 2 before S1 may arm.")
     out = _wait(why, base); out["timing_state"] = st.get("phase") or "ARMED"; return out

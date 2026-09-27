@@ -95,8 +95,8 @@ def test_s1_setup_stage_has_no_fvg_or_volume():
 def test_engine_gates_s1_window_on_setup():
     text = Path("src/brain/s1_engine.py").read_text(encoding="utf-8")
     assert "evaluate_setup(" in text
-    assert 'if setup["ok"] and m5_after_close and m5_event_level(ev_s1) is not None:' in text
-    assert "slot in (1, 2)" not in text  # no slot gating left in S1
+    assert "S1_SLOTS = (1, 2)" in text and "S1_CHOCH_SLOTS = (2,)" in text  # slot 3 is S2 only; CHoCH waits for slot 2
+    assert 'if setup["ok"] and s1_slot_ok and m5_after_close' in text
     assert "last_15m_structure(candles_15m or [])" in text  # S1 thesis from CLOSED 15m candles
     assert 'fresh_m5_event_s1(events, side, ts5, st["consumed_s1"], inv)' in text
 
@@ -112,3 +112,13 @@ def test_closed_only_failed_check_ignores_live_price():
 def test_not_ready_shape():
     got = C.not_ready("no closed 15m BOS/CHoCH")
     assert got["ok"] is False and got["context"] is None and got["reason"]
+
+
+def test_breakout_validity_has_no_volume_gate_and_failure_zeroes_score():
+    text = Path("src/breakout/__init__.py").read_text(encoding="utf-8")
+    assert "valid = penetration_atr >= 0.5\n" in text
+    assert "vol_z >= 1.0" not in text
+    i = text.index('result.state = "FAILED"')
+    block = text[i:text.index("continue", i)]
+    assert "result.breakout_lifecycle_score = 0.0" in block
+    assert "result.breakout_lifecycle_confidence = 0.0" in block

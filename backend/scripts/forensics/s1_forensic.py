@@ -160,15 +160,17 @@ def take_fire(out, t, fill, c1, wx, side_allowed):
     if flag and not side_allowed(flag, side):
         return None  # WEATHER_BLOCK
     th = out.get("thesis_ts")
+    event = out.get("event")
     if out.get("timing") == "S1" and out.get("s1_thesis_ts") is not None:
         th = out.get("s1_thesis_ts")  # closed-15m S1: delay from its own closed breakout candle
+        event = (out.get("s1_setup") or {}).get("event") or event  # and its own closed 15m event
     try:
         th = int(th) if th is not None else None
     except (TypeError, ValueError):
         th = None
     return {
         "book": "S1", "t": t, "side": side, "gate": out.get("gate"), "kind": "S1",
-        "timing": out.get("timing"), "m5_path": None, "slot": out.get("slot"), "event": out.get("event"),
+        "timing": out.get("timing"), "m5_path": None, "slot": out.get("slot"), "event": event,
         "thesis_ts": th, "delay_min": (t - (th + 900)) / 60 if th is not None else None,
         "engine_entry": float(entry), "stop": float(stop), "target": float(target),
         "atr": float(out.get("atr_15m") or 0.0), "fill": float(c1[-1]["close"]), "bar_5m": fill["ts"],
