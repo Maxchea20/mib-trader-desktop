@@ -230,7 +230,7 @@ function App() {
                 </button>
               </div>
               {candles.length > 0 ? (
-                <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} hunt={analysis?.hunt} />
+                <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} hunt={analysis?.s1 || analysis?.hunt} />
               ) : (
                 <div className="w-full h-full flex items-center justify-center widget-label">Loading local candles…</div>
               )}
@@ -241,7 +241,7 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            <BrainHeroPanel hunt={analysis?.hunt} weather={analysis?.weather} auto={auto} />
+            <BrainHeroPanel s1={analysis?.s1} hunt={analysis?.s1 || analysis?.hunt} weather={analysis?.weather} auto={auto} />
             <LearningBrainPanel />
             <AiThesisPanel analysis={analysis} auto={auto} />
           </section>
