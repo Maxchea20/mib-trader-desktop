@@ -95,13 +95,27 @@ def test_invalidation_price_is_not_an_invalid_event():
     assert ev is None
 
 
+def _s2(timing_state, why):
+    return {"action": "WAIT", "direction": "LONG", "event": "BOS", "thesis_ts": 1,
+            "thesis_level": 100.0, "thesis_invalid": 98.5, "timing": "S2",
+            "timing_state": timing_state, "why": why}
+
+
 def test_pullback_transition():
-    d.inspect_and_maybe_emit(_state())
-    s = _state(
-        last_s1={"action": "WAIT", "direction": "LONG", "event": "tap",
-                   "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
-                   "rearm": False, "why": "wick tap of level"},
-        last_action="NO-TRADE (WAIT)",
-    )
+    d.inspect_and_maybe_emit(_state(last_s1=_s2("S2_EXTENDED", "S2 measuring pullback.")))
+    s = _state(last_s1=_s2("S2_PULLBACK", "S2 waiting fresh M5."))
     ev = d.inspect_and_maybe_emit(s)
     assert ev["kind"] == d.EVENT_PULLBACK
+    assert d.inspect_and_maybe_emit(s) is None  # once per pullback
+
+
+def test_pullback_not_narrated_after_restart():
+    assert d.inspect_and_maybe_emit(_state(last_s1=_s2("S2_PULLBACK", "S2 waiting fresh M5."))) is None
+
+
+def test_pullback_state_changes_do_not_repeat_event():
+    d.inspect_and_maybe_emit(_state(last_s1=_s2("S2_EXTENDED", "x")))
+    assert d.inspect_and_maybe_emit(_state(last_s1=_s2("S2_PULLBACK", "x")))["kind"] == d.EVENT_PULLBACK
+    moved = _s2("S2_PULLBACK", "x")
+    moved["event"] = "CHoCH"  # something else changes while still in the pullback
+    assert d.inspect_and_maybe_emit(_state(last_s1=moved)) is None

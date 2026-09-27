@@ -52,6 +52,7 @@ def fingerprint(state: Dict) -> Tuple:
         lc.get("action"),
         lc.get("exit_kind"),
         _invalidated(h),
+        h.get("timing_state"),
     )
 
 
@@ -75,6 +76,11 @@ def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
         return EVENT_EXIT
     if _invalidated(h) and prev is not None and not prev[8]:
         return EVENT_THESIS_INVALID
+    # S1 confirms an actual S2 pullback (measured retrace after an extended
+    # move) by switching timing_state to S2_PULLBACK. Emit once on entry;
+    # skip right after a restart so the current state is not narrated as new.
+    if h.get("timing_state") == "S2_PULLBACK" and prev is not None and prev[9] != "S2_PULLBACK":
+        return EVENT_PULLBACK
     return None
 
 
