@@ -54,3 +54,16 @@ def test_tick_retest_states():
     st2 = {}
     start_retest_watch(st2, 0, LEVEL, "LONG", ATR)
     assert tick_retest(st2, [c(0, 104, 116, 103, 115)]) == "CANCEL"
+
+
+def test_ttl_cancels_without_entry_and_never_uses_late_candles():
+    rows = [c(0, 104, 108, 103, 107), c(60, 106, 107, 104, 105)]
+    assert retest_entry("LONG", LEVEL, ATR, 0, rows, deadline=120)["cancel"].startswith("TTL")
+    late = [c(0, 104, 108, 103, 107), c(120, 101, 104, 100.5, 103)]  # valid trigger but closes at 180 > 120
+    assert retest_entry("LONG", LEVEL, ATR, 0, late, deadline=120)["cancel"].startswith("TTL")
+    assert retest_entry("LONG", LEVEL, ATR, 0, [c(0, 104, 108, 103, 107)], deadline=600) is None  # still in time
+
+
+def test_entry_inside_ttl_still_fires():
+    rows = [c(0, 101, 104, 100.5, 103)]
+    assert retest_entry("LONG", LEVEL, ATR, 0, rows, deadline=60) == {"entry_ts": 60, "entry_price": 103}

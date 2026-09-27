@@ -16,6 +16,8 @@ from .s1_retest import start_retest_watch, tick_retest
 
 S1_VERSION = "S1_S2_C"
 S1_SLOTS = (1, 2)        # slot 3 belongs to S2 only (slots gate ARMING; the retest entry may come later)
+S1_TTL_S = 30 * 60       # S1 must arm AND enter within 30 min of the 15m breakout candle's close
+S2_ENABLED = True        # set False to run S1 alone (forensic: --no-s2); live default unchanged
 SL_ATR = 1.5
 TP_ATR = 2.5
 _STATE: Dict = {}
@@ -157,9 +159,11 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     # M5 confirmation must print after the closed 15m breakout candle (open ts + 900)
     m5_after_close = ev_s1 is not None and s1_ts is not None and int(ev_s1.timestamp) >= s1_ts + 900
     s1_slot_ok = slot in S1_SLOTS
-    if setup["ok"] and s1_slot_ok and m5_after_close and m5_event_level(ev_s1) is not None:
+    s1_deadline = s1_ts + 900 + S1_TTL_S if s1_ts is not None else None
+    s1_in_time = s1_deadline is not None and ts5 + 300 < s1_deadline
+    if setup["ok"] and s1_slot_ok and s1_in_time and m5_after_close and m5_event_level(ev_s1) is not None:
         # watch 1m candles that close after this 5m bar for a retest of the M5 level
-        start_retest_watch(st, ts5 + 300, m5_event_level(ev_s1), side, _atr15(candles_15m or []))
+        start_retest_watch(st, ts5 + 300, m5_event_level(ev_s1), side, _atr15(candles_15m or []), s1_deadline)
         st["consumed"].add(event_key(ev_s1))
         st["consumed_s1"].add(event_key(ev_s1))
         st["pullback_confirmed"] = False; st["extension_price"] = None; st["extension_atr_ref"] = None
@@ -167,19 +171,19 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
         out["timing_state"] = "C_WATCH"; out["timing"] = "S1"; return out
     mom, vol, sr, fvg = aux.get("mom"), aux.get("vol"), aux.get("sr"), aux.get("fvg")
     atr15 = _atr15(form)
-    if st.get("phase") == "S2_EXTENDED":
+    if S2_ENABLED and st.get("phase") == "S2_EXTENDED":
         if origin:
             s2_update_pullback(st, price, atr15, sr, fvg, origin, side)
         if st.get("pullback_confirmed"):
             st["phase"] = "S2_PULLBACK"
         out = _wait("S2 measuring pullback.", base); out["timing"] = "S2"; out["timing_state"] = st["phase"]; return out
-    if st.get("phase") == "S2_PULLBACK":
+    if S2_ENABLED and st.get("phase") == "S2_PULLBACK":
         if ev is not None and m5_event_level(ev) is not None:
             st["consumed"].add(event_key(ev)); start_c_watch(st, "S2", ts5, m5_event_level(ev), side)
             out = _wait("S2 fresh M5 — C watching.", base); out["timing_state"] = "C_WATCH"; out["timing"] = "S2"; return out
         out = _wait("S2 pullback done — waiting for a new same-direction 5m BOS/CHoCH.", base)
         out["timing"] = "S2"; out["timing_state"] = "S2_PULLBACK"; return out
-    if ev is not None and origin and not _s2_executable_side(price, origin, atr15, mom, vol, sr, side):
+    if S2_ENABLED and ev is not None and origin and not _s2_executable_side(price, origin, atr15, mom, vol, sr, side):
         st["consumed"].add(event_key(ev)); st["phase"] = "S2_EXTENDED"
         st["extension_atr_ref"] = atr15 if atr15 > 0 else None; st["extension_price"] = price; st["pullback_confirmed"] = False
         out = _wait("S2 extension — too far to enter, measuring pullback.", base)
@@ -187,6 +191,8 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     why = "Closed 15m setup is on. Waiting for a fresh M5 BOS/CHoCH after the 15m close (Lookback 5)."
     if not setup["ok"]:
         why = f"S1 closed-15m setup not ready: {setup['reason']}."
+    elif not s1_in_time:
+        why = "S1 TTL passed (30 min after the 15m breakout close); waiting for a new closed 15m BOS."
     elif not s1_slot_ok:
         why = "Slot 3 belongs to S2; S1 waits for the next 15m."
     out = _wait(why, base); out["timing_state"] = st.get("phase") or "ARMED"; return out

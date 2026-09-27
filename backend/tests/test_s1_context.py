@@ -98,7 +98,10 @@ def test_engine_gates_s1_window_on_setup():
     assert "S1_SLOTS = (1, 2)" in text  # slot 3 is S2 only
     assert 'S1 is BOS-only' in text  # a 15m CHoCH never qualifies S1
     assert "start_retest_watch(" in text and "tick_retest(" in text  # S1 enters on retest, S2 keeps tick_c
-    assert 'if setup["ok"] and s1_slot_ok and m5_after_close' in text
+    assert "S1_TTL_S = 30 * 60" in text and "s1_in_time" in text  # arm + enter within 30 min of the 15m close
+    assert "S2_ENABLED = True" in text  # live default: S2 on; the forensic switches it off with --no-s2
+    assert text.count("if S2_ENABLED and ") == 3  # every S2 branch sits behind the switch
+    assert 'if setup["ok"] and s1_slot_ok and s1_in_time and m5_after_close' in text
     assert "last_15m_structure(candles_15m or [])" in text  # S1 thesis from CLOSED 15m candles
     assert 'fresh_m5_event_s1(events, side, ts5, st["consumed_s1"], inv)' in text
 

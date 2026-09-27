@@ -89,8 +89,12 @@ def _key(rows):
     return (len(rows), int(rows[0]["ts"]), int(b["ts"]), float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"]))
 
 
-def replay(S, start, end):
+def replay(S, start, end, s2=True):
     from src.brain import s1_engine
+    if hasattr(s1_engine, "S2_ENABLED"):
+        s1_engine.S2_ENABLED = bool(s2)  # --no-s2: run S1 alone (engine default unchanged)
+    elif not s2:
+        sys.exit("this S1 engine has no S2 switch (S2_ENABLED) -- update the branch")
     from src.brain.weather import classify, side_allowed
     _memo(s1_engine, "m5_structure_events", _key)
     for name in ("last_15m_structure", "last_15m_break"):  # whichever the engine version uses
@@ -203,13 +207,13 @@ def report(F, fee, a, L):
         L.append(f"note: {s['tight']} FIREs had a stop < 0.25 ATR from the entry (netR inflated there; % is reliable)")
 
     if any(f.get("gate") for f in F):
-        L.append("\nS1: FIREs by 15m setup gate (trend context / momentum confidence)")
+        L.append("\nFIREs by path + 15m setup gate (trend context / momentum confidence); S2 is not gated")
         byg = {}
         for f in F:
-            byg.setdefault(str(f.get("gate")), []).append(f)
+            byg.setdefault(f"{f.get('timing')} {f.get('gate')}", []).append(f)
         for k in sorted(byg):
             v = [f["pnl_pct"] for f in byg[k] if f["pnl_pct"] is not None]
-            L.append(f"  gate={k:<16} n={len(v):>4}  net {sum(v):+8.2f}%  "
+            L.append(f"  {k:<22} n={len(v):>4}  net {sum(v):+8.2f}%  "
                      f"exp {st.mean(v) if v else 0:+.3f}%  win {100 * sum(x > 0 for x in v) / len(v) if v else 0:5.1f}%")
     L.append("\nS1: FIREs by timing path / 5m slot / 15m event")
     by = {}
@@ -314,6 +318,7 @@ def main():
     ap.add_argument("--taker-fee", type=float, default=None, help="%% per side; default: your MEXC history, else 0.08")
     ap.add_argument("--mexc-history", default=str(BACKEND / "data" / "mexc_history" / "mexc_history.db"))
     ap.add_argument("--out", default="s1_forensic")
+    ap.add_argument("--no-s2", action="store_true", help="turn S2 off for this replay (S1 alone)")
     ap.add_argument("--baseline", default=None, help="an earlier s1_forensic CSV to compare against (before/after table)")
     a = ap.parse_args()
 
@@ -332,7 +337,8 @@ def main():
     fee = a.taker_fee if a.taker_fee is not None else (tk if tk is not None else 0.08)
     print(f"Fees: taker {fee}%/side ({src_ if a.taker_fee is None else 'from --taker-fee'})")
     print(f"Replaying the current evaluate_s1 {iso(start)} -> {iso(end)} ...")
-    F = replay(S, start, end)
+    print(f"S2: {'OFF (S1 alone)' if a.no_s2 else 'on'}")
+    F = replay(S, start, end, s2=not a.no_s2)
     simulate(F, S["1m"], hz, fee)
 
     L = []
