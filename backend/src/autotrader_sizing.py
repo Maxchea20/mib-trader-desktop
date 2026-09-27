@@ -1,4 +1,4 @@
-"""Sizing + account helpers for Hunt autotrader."""
+"""Sizing + account helpers for S1/S2 autotrader."""
 import json
 import time
 from typing import Dict, List, Optional
@@ -11,12 +11,12 @@ from .autotrader_state import (
 )
 
 
-def _hunt_levels(entry: Optional[float] = None, stop: Optional[float] = None):
-    hunt = STATE.get("last_hunt") or {}
+def _s1_levels(entry: Optional[float] = None, stop: Optional[float] = None):
+    s1 = STATE.get("last_s1") or {}
     if entry is None:
-        entry = hunt.get("entry")
+        entry = s1.get("entry")
     if stop is None:
-        stop = hunt.get("stop")
+        stop = s1.get("stop")
     try:
         entry_f = float(entry) if entry is not None else None
         stop_f = float(stop) if stop is not None else None
@@ -25,21 +25,21 @@ def _hunt_levels(entry: Optional[float] = None, stop: Optional[float] = None):
     return entry_f, stop_f
 
 
-def _hunt_pnl_preview(sizing: Dict) -> Dict:
-    hunt = STATE.get("last_hunt") or {}
+def _s1_pnl_preview(sizing: Dict) -> Dict:
+    s1 = STATE.get("last_s1") or {}
     out = {
-        "sl_price": hunt.get("stop"),
-        "tp_price": hunt.get("target"),
-        "entry_price": hunt.get("entry"),
-        "direction": hunt.get("direction"),
+        "sl_price": s1.get("stop"),
+        "tp_price": s1.get("target"),
+        "entry_price": s1.get("entry"),
+        "direction": s1.get("direction"),
         "sl_pnl_usd": None,
         "tp_pnl_usd": None,
     }
     try:
-        entry = float(hunt["entry"]) if hunt.get("entry") is not None else None
-        sl = float(hunt["stop"]) if hunt.get("stop") is not None else None
-        tp = float(hunt["target"]) if hunt.get("target") is not None else None
-        side = hunt.get("direction")
+        entry = float(s1["entry"]) if s1.get("entry") is not None else None
+        sl = float(s1["stop"]) if s1.get("stop") is not None else None
+        tp = float(s1["target"]) if s1.get("target") is not None else None
+        side = s1.get("direction")
         vol = sizing.get("final_quantity")
         cs = sizing.get("contract_size")
         if entry and sl and tp and vol and cs and side:
@@ -58,7 +58,7 @@ def status() -> Dict:
         from .scenario_pnl import scenario_pnl_preview
         pnl = scenario_pnl_preview(sizing)
     else:
-        pnl = _hunt_pnl_preview(sizing)
+        pnl = _s1_pnl_preview(sizing)
     return {
         "config": CONFIG,
         "state": STATE,
@@ -266,9 +266,9 @@ def compute_sizing(override_price: Optional[float] = None, entry: Optional[float
         result["error"] = "no price available for sizing"
         return result
     if mode == "COMPOUNDING":
-        entry_f, stop_f = _hunt_levels(entry, stop)
+        entry_f, stop_f = _s1_levels(entry, stop)
         if not entry_f or not stop_f:
-            result["error"] = "waiting for Scenario stop to size 2% risk"
+            result["error"] = "waiting for S1 stop to size 2% risk"
             return result
         stop_distance = abs(entry_f - stop_f)
         result["stop_distance"] = stop_distance
