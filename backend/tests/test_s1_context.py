@@ -95,7 +95,9 @@ def test_s1_setup_stage_has_no_fvg_or_volume():
 def test_engine_gates_s1_window_on_setup():
     text = Path("src/brain/s1_engine.py").read_text(encoding="utf-8")
     assert "evaluate_setup(" in text
-    assert "S1_SLOTS = (1, 2)" in text and "S1_CHOCH_SLOTS = (2,)" in text  # slot 3 is S2 only; CHoCH waits for slot 2
+    assert "S1_SLOTS = (1, 2)" in text  # slot 3 is S2 only
+    assert 'S1 is BOS-only' in text  # a 15m CHoCH never qualifies S1
+    assert "start_retest_watch(" in text and "tick_retest(" in text  # S1 enters on retest, S2 keeps tick_c
     assert 'if setup["ok"] and s1_slot_ok and m5_after_close' in text
     assert "last_15m_structure(candles_15m or [])" in text  # S1 thesis from CLOSED 15m candles
     assert 'fresh_m5_event_s1(events, side, ts5, st["consumed_s1"], inv)' in text

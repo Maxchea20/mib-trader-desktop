@@ -12,10 +12,10 @@ from .s1_detect import (
 )
 from .s1_context import evaluate_setup, not_ready
 from .s1_timing import s2_update_pullback, start_c_watch, tick_c, _s2_executable_side
+from .s1_retest import start_retest_watch, tick_retest
 
 S1_VERSION = "S1_S2_C"
-S1_SLOTS = (1, 2)        # slot 3 belongs to S2 only
-S1_CHOCH_SLOTS = (2,)    # a 15m CHoCH must hold into slot 2 before S1 may arm
+S1_SLOTS = (1, 2)        # slot 3 belongs to S2 only (slots gate ARMING; the retest entry may come later)
 SL_ATR = 1.5
 TP_ATR = 2.5
 _STATE: Dict = {}
@@ -111,6 +111,8 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     s1_ts = int(ev15c.timestamp) if ev15c is not None and ev15c.timestamp is not None else None
     if side_c not in (LONG, SHORT) or s1_ts is None:
         setup = not_ready("no closed 15m BOS/CHoCH")
+    elif (ev15c.event_type or "").upper() != "BOS":
+        setup = not_ready("S1 is BOS-only; a 15m CHoCH belongs to S2")
     else:
         setup = evaluate_setup(candles_15m or [], candles_15m or [], ev15c, st15c, side_c, None, aux)
         if setup["ok"] and side_c != side:
@@ -119,8 +121,13 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
             "thesis_ts": st.get("thesis_ts"), "thesis_level": origin, "thesis_invalid": inv,
             "slot": slot, "size": "FULL", "state": STATE_WAIT, "s1_setup": setup,
             "s1_thesis_ts": s1_ts, "gate": f"{setup['context'] or '-'}/{setup['confidence'] or '-'}"}
+    retest = (st.get("c_watch") or {}).get("mode") == "retest"
+    if st.get("phase") == "C_WATCH" and retest and not setup["ok"]:
+        st["phase"] = "ARMED"; st["c_watch"] = None; st["path"] = None
+        out = _wait(f"S1 retest cancelled: {setup['reason']}.", base)
+        out["timing_state"] = "ARMED"; out["timing_miss"] = True; return out
     if st.get("phase") == "C_WATCH":
-        result = tick_c(st, candles_1m or [])
+        result = tick_retest(st, candles_1m or []) if retest else tick_c(st, candles_1m or [])
         if result == "SUCCESS":
             got = (st.get("c_watch") or {}).get("result") or {}
             entry = float(got.get("entry_price") or price)
@@ -132,6 +139,11 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
             out["entry_readiness"] = True
             out["why_state"] = [f"{path} C first closed 1m through M5 line"]
             return out
+        if result == "CANCEL":
+            why = (st.get("c_watch") or {}).get("cancel_reason") or "no retest"
+            st["phase"] = "ARMED"; st["c_watch"] = None; st["path"] = None
+            out = _wait(f"S1 retest cancelled: {why}.", base)
+            out["timing_state"] = "ARMED"; out["timing_miss"] = True; return out
         if result == "MISS":
             st["phase"] = "ARMED"; st["c_watch"] = None; st["path"] = None
             out = _wait("C miss — no 1m close through the M5 line this window.", base)
@@ -144,14 +156,14 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     ev = fresh_m5_event(events, side, ts5, st["consumed"])
     # M5 confirmation must print after the closed 15m breakout candle (open ts + 900)
     m5_after_close = ev_s1 is not None and s1_ts is not None and int(ev_s1.timestamp) >= s1_ts + 900
-    s1_is_choch = (getattr(ev15c, "event_type", "") or "").upper() == "CHOCH"
-    s1_slot_ok = slot in (S1_CHOCH_SLOTS if s1_is_choch else S1_SLOTS)
+    s1_slot_ok = slot in S1_SLOTS
     if setup["ok"] and s1_slot_ok and m5_after_close and m5_event_level(ev_s1) is not None:
-        start_c_watch(st, "S1", ts5, m5_event_level(ev_s1), side)
+        # watch 1m candles that close after this 5m bar for a retest of the M5 level
+        start_retest_watch(st, ts5 + 300, m5_event_level(ev_s1), side, _atr15(candles_15m or []))
         st["consumed"].add(event_key(ev_s1))
         st["consumed_s1"].add(event_key(ev_s1))
         st["pullback_confirmed"] = False; st["extension_price"] = None; st["extension_atr_ref"] = None
-        out = _wait("S1 armed — C watching this 5m.", base)
+        out = _wait("S1 armed — waiting for a 1m retest and rejection of the M5 level.", base)
         out["timing_state"] = "C_WATCH"; out["timing"] = "S1"; return out
     mom, vol, sr, fvg = aux.get("mom"), aux.get("vol"), aux.get("sr"), aux.get("fvg")
     atr15 = _atr15(form)
@@ -176,6 +188,5 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     if not setup["ok"]:
         why = f"S1 closed-15m setup not ready: {setup['reason']}."
     elif not s1_slot_ok:
-        why = ("Slot 3 belongs to S2; S1 waits for the next 15m." if slot == 3
-               else "15m CHoCH must hold into slot 2 before S1 may arm.")
+        why = "Slot 3 belongs to S2; S1 waits for the next 15m."
     out = _wait(why, base); out["timing_state"] = st.get("phase") or "ARMED"; return out
