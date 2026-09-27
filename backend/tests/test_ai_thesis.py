@@ -20,7 +20,7 @@ def test_build_prompt_includes_all_snapshot_fields():
         "fibonacci": "Fib 61% @ 77485.4",
         "fair_value_gaps": "none",
         "agent_status_strip": "trend: SHORT (79%)",
-        "hunt_action": "WAIT", "hunt_why": ["no CHoCH"],
+        "s1_action": "WAIT", "s1_why": ["no CHoCH"],
         "weather_flag": "CHOP", "market_regime": "NEUTRAL",
     }
     prompt = ai_thesis._build_prompt(snap)
@@ -36,8 +36,8 @@ def test_prompt_instructs_independent_read_and_honest_disagreement():
     """Regression guard for the explicit design requirement: the AI must not
     be steered toward agreeing with the Brain by default."""
     prompt = ai_thesis._build_prompt({
-        "timeframe": "15m", "price": 1, "recent_ohlcv": "", "hunt_action": "WAIT",
-        "hunt_why": [], "weather_flag": None, "market_regime": None,
+        "timeframe": "15m", "price": 1, "recent_ohlcv": "", "s1_action": "WAIT",
+        "s1_why": [], "weather_flag": None, "market_regime": None,
         "support_resistance": "none", "fibonacci": "none",
         "fair_value_gaps": "none", "agent_status_strip": "none",
     })

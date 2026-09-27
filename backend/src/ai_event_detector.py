@@ -31,6 +31,14 @@ def _action(state: Dict) -> str:
     return str(state.get("last_action") or "")
 
 
+def _invalidated(h: Dict) -> bool:
+    """S1 reports a real invalidation only through its reason text
+    ("15m thesis invalidated -- price through opposite swing").
+    thesis_invalid itself is the invalidation PRICE, present on every live
+    thesis, so it must not be read as a flag."""
+    return "invalidated" in str(h.get("why") or "").lower()
+
+
 def fingerprint(state: Dict) -> Tuple:
     h = _s1(state)
     lc = _lifecycle(state)
@@ -43,6 +51,7 @@ def fingerprint(state: Dict) -> Tuple:
         _action(state),
         lc.get("action"),
         lc.get("exit_kind"),
+        _invalidated(h),
     )
 
 
@@ -64,7 +73,7 @@ def classify(prev: Optional[Tuple], curr: Tuple, state: Dict) -> Optional[str]:
         prev_lc == "EXIT" or str(prev_action).upper().startswith("LIFECYCLE_EXIT")
     ):
         return EVENT_EXIT
-    if h.get("thesis_invalid") and prev is not None:
+    if _invalidated(h) and prev is not None and not prev[8]:
         return EVENT_THESIS_INVALID
     return None
 

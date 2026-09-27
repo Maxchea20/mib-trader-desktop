@@ -136,7 +136,7 @@ def _gather_snapshot(event: Optional[Dict] = None) -> Optional[Dict]:
     if result.get("error"):
         return None
     agents = result.get("agents") or []
-    hunt = result.get("hunt") or {}
+    s1 = result.get("s1") or {}
     weather = result.get("weather") or {}
     market_state = result.get("market_state") or {}
     structure = (market_state.get("structure") or {}) if isinstance(market_state, dict) else {}
@@ -159,17 +159,17 @@ def _gather_snapshot(event: Optional[Dict] = None) -> Optional[Dict]:
         "fibonacci": _levels_summary(agents, "fibonacci"),
         "fair_value_gaps": _fvg_summary(agents),
         "agent_status_strip": _status_strip_summary(agents),
-        "hunt_action": hunt.get("action"),
-        "hunt_why": hunt.get("why_state"),
-        "hunt_event": hunt.get("event"),
-        "hunt_direction": hunt.get("direction"),
-        "thesis_ts": hunt.get("thesis_ts") or sc.get("origin_ts"),
-        "thesis_level": hunt.get("thesis_level") or sc.get("origin_level"),
-        "thesis_invalid": hunt.get("thesis_invalid"),
+        "s1_action": s1.get("action"),
+        "s1_why": s1.get("why_state"),
+        "s1_event": s1.get("event"),
+        "s1_direction": s1.get("direction"),
+        "thesis_ts": s1.get("thesis_ts") or sc.get("origin_ts"),
+        "thesis_level": s1.get("thesis_level") or sc.get("origin_level"),
+        "thesis_invalid": s1.get("thesis_invalid"),
         "weather_flag": weather.get("flag"),
         "market_regime": structure.get("regime"),
-        "m5_state": (hunt.get("hunt") or {}).get("m5_path") if isinstance(hunt.get("hunt"), dict) else hunt.get("v3a_path"),
-        "slot": sc.get("m5_slot"),
+        "m5_state": " / ".join(str(x) for x in (s1.get("timing"), s1.get("timing_state")) if x) or None,
+        "slot": s1.get("slot") or sc.get("m5_slot"),
         "thesis_id": sc.get("thesis_id"),
         "scenario_action": sc.get("action"),
         "scenario_reason": sc.get("reason"),
@@ -200,12 +200,12 @@ def _build_prompt(snap: Dict) -> str:
         f"Fibonacci: {snap.get('fibonacci')}",
         f"Fair value gaps: {snap.get('fair_value_gaps')}",
         f"Agent strip: {snap.get('agent_status_strip')}",
-        f"Brain action: {snap.get('hunt_action')}",
-        f"Brain event: {snap.get('hunt_event')}",
-        f"Brain direction: {snap.get('hunt_direction')}",
-        f"Brain reasoning: {snap.get('hunt_why')}",
+        f"Brain action: {snap.get('s1_action')}",
+        f"Brain event: {snap.get('s1_event')}",
+        f"Brain direction: {snap.get('s1_direction')}",
+        f"Brain reasoning: {snap.get('s1_why')}",
         f"Thesis ts/level/id: {snap.get('thesis_ts')} / {snap.get('thesis_level')} / {snap.get('thesis_id')}",
-        f"Thesis invalid flag: {snap.get('thesis_invalid')}",
+        f"Thesis invalidation price: {snap.get('thesis_invalid')}",
         f"M5 slot: {snap.get('slot')}",
         f"Scenario action: {snap.get('scenario_action')} ({snap.get('scenario_reason')})",
         f"4H weather flag: {snap.get('weather_flag')}",

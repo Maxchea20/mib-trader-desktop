@@ -9,7 +9,7 @@ from src import ai_event_detector as d
 
 def _state(**kw):
     base = {
-        "last_hunt": {
+        "last_s1": {
             "action": "WAIT",
             "direction": "LONG",
             "event": None,
@@ -42,7 +42,7 @@ def test_no_event_on_identical_ticks():
 def test_fire_emits_once():
     d.inspect_and_maybe_emit(_state())
     fired = _state(
-        last_hunt={"action": "FIRE", "direction": "LONG", "event": "close_through",
+        last_s1={"action": "FIRE", "direction": "LONG", "event": "close_through",
                    "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
                    "rearm": False, "why": "M5 close through"},
         last_action="OPEN LONG Hunt C-FI",
@@ -57,7 +57,7 @@ def test_fire_emits_once():
 def test_exit_after_fire():
     d.inspect_and_maybe_emit(_state())
     d.inspect_and_maybe_emit(_state(
-        last_hunt={"action": "FIRE", "direction": "LONG", "event": "x",
+        last_s1={"action": "FIRE", "direction": "LONG", "event": "x",
                    "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
                    "rearm": False, "why": ""},
         last_action="OPEN LONG Hunt C-FI",
@@ -73,19 +73,32 @@ def test_exit_after_fire():
 
 def test_invalid_thesis():
     d.inspect_and_maybe_emit(_state())
-    s = _state(last_hunt={
-        "action": "WAIT", "direction": "LONG", "event": "broke",
-        "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": True,
-        "rearm": False, "why": "level lost",
+    s = _state(last_s1={
+        "action": "WAIT", "direction": "LONG", "event": None,
+        "thesis_ts": None, "thesis_level": None, "thesis_invalid": None,
+        "why": "15m thesis invalidated — price through opposite swing.",
     })
     ev = d.inspect_and_maybe_emit(s)
     assert ev["kind"] == d.EVENT_THESIS_INVALID
+    assert d.inspect_and_maybe_emit(s) is None  # once per invalidation
+
+
+def test_invalidation_price_is_not_an_invalid_event():
+    """thesis_invalid is the invalidation PRICE on every live S1 thesis;
+    an ordinary state change must not be reported as THESIS_INVALID."""
+    d.inspect_and_maybe_emit(_state(last_s1={
+        "action": "WAIT", "direction": "LONG", "event": "BOS", "thesis_ts": 1,
+        "thesis_level": 100.0, "thesis_invalid": 98.5, "why": "armed"}))
+    ev = d.inspect_and_maybe_emit(_state(last_s1={
+        "action": "WAIT", "direction": "LONG", "event": "CHoCH", "thesis_ts": 2,
+        "thesis_level": 101.0, "thesis_invalid": 99.0, "why": "C watch"}))
+    assert ev is None
 
 
 def test_pullback_transition():
     d.inspect_and_maybe_emit(_state())
     s = _state(
-        last_hunt={"action": "WAIT", "direction": "LONG", "event": "tap",
+        last_s1={"action": "WAIT", "direction": "LONG", "event": "tap",
                    "thesis_ts": 1, "thesis_level": 100.0, "thesis_invalid": False,
                    "rearm": False, "why": "wick tap of level"},
         last_action="NO-TRADE (WAIT)",
