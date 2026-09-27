@@ -160,6 +160,8 @@ def take_fire(out, t, fill, c1, wx, side_allowed):
     if flag and not side_allowed(flag, side):
         return None  # WEATHER_BLOCK
     th = out.get("thesis_ts")
+    if out.get("timing") == "S1" and out.get("s1_thesis_ts") is not None:
+        th = out.get("s1_thesis_ts")  # closed-15m S1: delay from its own closed breakout candle
     try:
         th = int(th) if th is not None else None
     except (TypeError, ValueError):

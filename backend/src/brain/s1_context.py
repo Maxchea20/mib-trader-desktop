@@ -53,7 +53,7 @@ def trend_context(trend_dir: Optional[str], side: str) -> str:
     return ALIGNED if trend_dir == side else COUNTER
 
 
-def qualify_break(event, struct_obs, form: List[dict], price: float, side: str, ctx: str) -> Optional[str]:
+def qualify_break(event, struct_obs, form: List[dict], price: Optional[float], side: str, ctx: str) -> Optional[str]:
     """None when the 15m break qualifies as an S1 setup, else the reason it does not."""
     et = (getattr(event, "event_type", "") or "").upper()
     if ctx == COUNTER and et == "BOS":
@@ -71,7 +71,9 @@ def qualify_break(event, struct_obs, form: List[dict], price: float, side: str, 
     age = (int(form[-1]["ts"]) - ev_ts) // 900
     if age > BREAKOUT_MAX_LIFETIME_BARS:
         return f"15m break is stale ({age} bars > {BREAKOUT_MAX_LIFETIME_BARS})"
-    closes = [float(c["close"]) for c in form if int(c["ts"]) > ev_ts] + [float(price)]
+    closes = [float(c["close"]) for c in form if int(c["ts"]) > ev_ts]
+    if price is not None:
+        closes.append(float(price))
     back = any(c < level for c in closes) if side == LONG else any(c > level for c in closes)
     if back:
         return "15m breakout FAILED (closed back through the broken level)"
@@ -99,8 +101,14 @@ def setup_allowed(ctx: str, conf: str) -> bool:
     return conf == HIGH
 
 
+def not_ready(reason: str) -> Dict[str, Any]:
+    return {"trend": None, "trend_dir": None, "context": None, "event": None, "qualified": False,
+            "reason": reason, "momentum": None, "confidence": None, "ok": False}
+
+
 def evaluate_setup(candles_15m_closed: List[dict], form: List[dict], event, struct_obs,
-                   side: str, price: float, aux: Optional[dict] = None) -> Dict[str, Any]:
+                   side: str, price: Optional[float], aux: Optional[dict] = None) -> Dict[str, Any]:
+    """form = the 15m candles the break was read from (S1: the closed ones); price None = closes only."""
     aux = aux or {}
     trend_obs = aux.get("trend")
     if trend_obs is None:

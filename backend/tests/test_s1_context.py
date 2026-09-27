@@ -95,5 +95,20 @@ def test_s1_setup_stage_has_no_fvg_or_volume():
 def test_engine_gates_s1_window_on_setup():
     text = Path("src/brain/s1_engine.py").read_text(encoding="utf-8")
     assert "evaluate_setup(" in text
-    assert 'slot in (1, 2) and setup["ok"] and ev_s1 is not None' in text
+    assert 'if setup["ok"] and m5_after_close and m5_event_level(ev_s1) is not None:' in text
+    assert "slot in (1, 2)" not in text  # no slot gating left in S1
+    assert "last_15m_structure(candles_15m or [])" in text  # S1 thesis from CLOSED 15m candles
     assert 'fresh_m5_event_s1(events, side, ts5, st["consumed_s1"], inv)' in text
+
+
+def test_closed_only_failed_check_ignores_live_price():
+    form = _bars(4)
+    assert C.qualify_break(_ev(ts=0, level=100.0), NS(flags={}), form, None, "LONG", C.ALIGNED) is None
+    form[3]["close"] = 99.0  # a CLOSED 15m back under the level still fails it
+    r = C.qualify_break(_ev(ts=0, level=100.0), NS(flags={}), form, None, "LONG", C.ALIGNED)
+    assert r and "FAILED" in r
+
+
+def test_not_ready_shape():
+    got = C.not_ready("no closed 15m BOS/CHoCH")
+    assert got["ok"] is False and got["context"] is None and got["reason"]
