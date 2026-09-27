@@ -1,4 +1,4 @@
-"""Walk-forward backtest — hunt + V1b lifecycle + weather (default).
+"""Walk-forward backtest — S1/S2 + V1b lifecycle + weather (default).
 
 Old agent-vote path remains if use_hunt_lifecycle=False.
 """
@@ -114,6 +114,7 @@ class WalkForwardBacktest:
         m5_all = filter_closed(dao.read_candles("5m", limit=need * 4), "5m") if tf == "15m" else []
         c4_all = filter_closed(dao.read_candles("4h", limit=4000), "4h")
         c1_all = filter_closed(dao.read_candles("1h", limit=10000), "1h")
+        c1m_all = filter_closed(dao.read_candles("1m", limit=min(need * 20, 40000)), "1m") if tf == "15m" else []
         if len(candles) < ANALYSIS_LOOKBACK + 30:
             self.result = {"error": "insufficient_data", "timeframe": tf,
                             "have": len(candles), "need": need}
@@ -170,7 +171,7 @@ class WalkForwardBacktest:
                 ]
 
             if self.use_hunt_lifecycle:
-                from .brain.observation_hunt import evaluate_hunt, _fresh
+                from .brain.s1_engine import evaluate_s1
                 from .brain.lifecycle import position_from_fire, reevaluate, EXIT, TRAIL
                 from .brain.weather import classify, side_allowed
                 from .structure.observe import observe as obs_structure
@@ -182,7 +183,10 @@ class WalkForwardBacktest:
                 st_ev = st_dir = None
                 if len(window) >= 60:
                     st = obs_structure(window, tf)
-                    for e in _fresh(st, ts):
+                    for e in (st.history or []):
+                        et = getattr(e, "timestamp", None) or getattr(e, "detection_timestamp", None)
+                        if et is None or int(et) != int(ts):
+                            continue
                         if e.event_type in ("CHoCH", "CHOCH"):
                             st_ev, st_dir = e.event_type, e.direction
                             break
@@ -227,7 +231,9 @@ class WalkForwardBacktest:
                         near = [c for c in m5_window if int(c["ts"]) >= ts + 800]
                         if near:
                             fill = near[0]
-                    fire = evaluate_hunt(window, fill, candles_4h=w4)
+                    horizon = int(ts) + TF_SECONDS[tf]
+                    w1m = [c for c in c1m_all if int(c["ts"]) + 60 <= horizon][-400:]
+                    fire = evaluate_s1(window, fill, candles_5m=m5_window or [fill], candles_1m=w1m)
                     if fire.get("action") == "FIRE":
                         side = fire.get("direction") or fire.get("side")
                         ok = (not self.use_weather) or side_allowed(wx.get("flag"), side)
