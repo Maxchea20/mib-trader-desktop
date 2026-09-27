@@ -8,6 +8,8 @@ Delete the whole folder when the study is done.
   `git show fac4d0e:...` at start-up when git is available.
 * `hunt_3d98c41/` — the same modules from `3d98c41`, Hunt C-FI BEFORE the S1/S2 timing layer
   (run with `--hunt 3d98c41`).
+* `s1_forensic.py` — the CURRENT S1 engine (src/brain/s1_engine.py, unchanged) scored with the same
+  methodology and CSV columns; prints Hunt fresh vs S1 when the Hunt CSVs are in the folder.
 * `hunt_rearm_forensic.py` — replays those modules on `market_data_clean.db`
   as two books (A original, B re-arm disabled) and reports the difference.
 
