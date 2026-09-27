@@ -7,9 +7,10 @@ from ..contract import LONG, SHORT, NEUTRAL, STATE_WAIT
 from ..indicators import arrays, atr as _atr
 from .s1_detect import (
     M15_PIVOT_OVERRIDE, event_key, forming_15m, fresh_m5_event, fresh_m5_event_s1,
-    last_15m_break, m5_event_level, m5_structure_events, parent_open, slot_of,
+    last_15m_structure, m5_event_level, m5_structure_events, parent_open, slot_of,
     _dir, _parent_swings,
 )
+from .s1_context import evaluate_setup
 from .s1_timing import s2_update_pullback, start_c_watch, tick_c, _s2_executable_side
 
 S1_VERSION = "S1_S2_C"
@@ -22,7 +23,7 @@ def reset_s1_state() -> None:
 
 def _empty() -> Dict:
     return {"phase": "WAIT", "path": None, "direction": None, "origin_level": None,
-            "thesis_invalid": None, "thesis_ts": None, "event": None, "consumed": set(),
+            "thesis_invalid": None, "thesis_ts": None, "event": None, "consumed": set(), "consumed_s1": set(),
             "c_watch": None, "extension_price": None, "extension_atr_ref": None,
             "pullback_confirmed": False}
 
@@ -31,6 +32,8 @@ def _st() -> Dict:
         _STATE.update(_empty())
     if not isinstance(_STATE.get("consumed"), set):
         _STATE["consumed"] = set(_STATE.get("consumed") or [])
+    if not isinstance(_STATE.get("consumed_s1"), set):
+        _STATE["consumed_s1"] = set(_STATE.get("consumed_s1") or [])
     return _STATE
 
 def _wipe() -> None:
@@ -71,7 +74,7 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
         return _wait("Need 15m and 5m candles before S1 can look.")
     bar = rows5[-1]
     ts5 = int(bar["ts"]); price = float(bar["close"]); slot = slot_of(ts5)
-    ev15 = last_15m_break(form)
+    ev15, st15 = last_15m_structure(form)
     if ev15 is None:
         _wipe(); out = _wait("No forming 15m BOS/CHoCH — S1 has no side."); out["slot"] = slot; return out
     side = _dir(getattr(ev15, "direction", None))
@@ -99,9 +102,12 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
     if st.get("phase") in ("WAIT", "INVALID", None):
         st["phase"] = "ARMED"; st["pullback_confirmed"] = False
         st["extension_price"] = None; st["extension_atr_ref"] = None; st["c_watch"] = None
+    # 15m Trend -> Structure -> Breakout qualification -> Momentum confidence (gates the S1 window)
+    setup = evaluate_setup(candles_15m or [], form, ev15, st15, side, price, aux)
     base = {"ok": True, "brain_version": S1_VERSION, "direction": side, "event": ev15.event_type,
             "thesis_ts": st.get("thesis_ts"), "thesis_level": origin, "thesis_invalid": inv,
-            "slot": slot, "size": "FULL", "state": STATE_WAIT}
+            "slot": slot, "size": "FULL", "state": STATE_WAIT, "s1_setup": setup,
+            "gate": f"{setup['context']}/{setup['confidence'] or '-'}"}
     if st.get("phase") == "C_WATCH":
         result = tick_c(st, candles_1m or [])
         if result == "SUCCESS":
@@ -122,11 +128,13 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
         out = _wait("C watching 1m closes through the M5 line.", base)
         out["timing_state"] = "C_WATCH"; out["timing"] = (st.get("c_watch") or {}).get("path"); return out
     events = m5_structure_events(rows5)
-    ev_s1 = fresh_m5_event_s1(events, side, ts5, st["consumed"], inv)
+    # S1 only skips 5m events S1 itself used; events S2 consumed (S2 reads volume/FVG/SR) do not block S1
+    ev_s1 = fresh_m5_event_s1(events, side, ts5, st["consumed_s1"], inv)
     ev = fresh_m5_event(events, side, ts5, st["consumed"])
-    if slot in (1, 2) and ev_s1 is not None and m5_event_level(ev_s1) is not None:
+    if slot in (1, 2) and setup["ok"] and ev_s1 is not None and m5_event_level(ev_s1) is not None:
         start_c_watch(st, "S1", ts5, m5_event_level(ev_s1), side)
         st["consumed"].add(event_key(ev_s1))
+        st["consumed_s1"].add(event_key(ev_s1))
         st["pullback_confirmed"] = False; st["extension_price"] = None; st["extension_atr_ref"] = None
         out = _wait("S1 armed — C watching this 5m.", base)
         out["timing_state"] = "C_WATCH"; out["timing"] = "S1"; return out
@@ -150,6 +158,8 @@ def evaluate_s1(candles_15m, candle_5m, candles_5m=None, candles_1m=None, aux=No
         out = _wait("S2 extension — too far to enter, measuring pullback.", base)
         out["timing"] = "S2"; out["timing_state"] = "S2_EXTENDED"; return out
     why = "15m thesis is on. Waiting for slot 1/2 M5 BOS/CHoCH (Lookback 5)."
-    if slot == 3:
+    if not setup["ok"]:
+        why = f"S1 15m setup not ready: {setup['reason']}."
+    elif slot == 3:
         why = "Slot 3 is outside the S1 window. Waiting for the next 15m."
     out = _wait(why, base); out["timing_state"] = st.get("phase") or "ARMED"; return out

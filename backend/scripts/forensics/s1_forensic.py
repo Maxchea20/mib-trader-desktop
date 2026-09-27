@@ -93,7 +93,9 @@ def replay(S, start, end):
     from src.brain import s1_engine
     from src.brain.weather import classify, side_allowed
     _memo(s1_engine, "m5_structure_events", _key)
-    _memo(s1_engine, "last_15m_break", _key)
+    for name in ("last_15m_structure", "last_15m_break"):  # whichever the engine version uses
+        if hasattr(s1_engine, name):
+            _memo(s1_engine, name, _key)
     s1_engine.reset_s1_state()
     aux_cache, wx_cache = {}, {}
     fires, polls = [], 0
@@ -163,7 +165,7 @@ def take_fire(out, t, fill, c1, wx, side_allowed):
     except (TypeError, ValueError):
         th = None
     return {
-        "book": "S1", "t": t, "side": side, "gate": None, "kind": "S1",
+        "book": "S1", "t": t, "side": side, "gate": out.get("gate"), "kind": "S1",
         "timing": out.get("timing"), "m5_path": None, "slot": out.get("slot"), "event": out.get("event"),
         "thesis_ts": th, "delay_min": (t - (th + 900)) / 60 if th is not None else None,
         "engine_entry": float(entry), "stop": float(stop), "target": float(target),
@@ -196,6 +198,15 @@ def report(F, fee, a, L):
     if s and s["tight"]:
         L.append(f"note: {s['tight']} FIREs had a stop < 0.25 ATR from the entry (netR inflated there; % is reliable)")
 
+    if any(f.get("gate") for f in F):
+        L.append("\nS1: FIREs by 15m setup gate (trend context / momentum confidence)")
+        byg = {}
+        for f in F:
+            byg.setdefault(str(f.get("gate")), []).append(f)
+        for k in sorted(byg):
+            v = [f["pnl_pct"] for f in byg[k] if f["pnl_pct"] is not None]
+            L.append(f"  gate={k:<16} n={len(v):>4}  net {sum(v):+8.2f}%  "
+                     f"exp {st.mean(v) if v else 0:+.3f}%  win {100 * sum(x > 0 for x in v) / len(v) if v else 0:5.1f}%")
     L.append("\nS1: FIREs by timing path / 5m slot / 15m event")
     by = {}
     for f in F:
@@ -265,6 +276,30 @@ def compare(F, L):
     L.append("Check the first/last FIRE columns: the comparison is only like-for-like if the periods match.")
 
 
+def compare_baseline(F, path, L):
+    p = Path(path)
+    if not p.is_file():
+        L.append(f"\n(baseline {path} not found -- no before/after table)")
+        return
+    B = sorted(_read_hunt_csv(p), key=lambda f: f["t"])
+    half = B[len(B) // 2]["t"] if B else None
+    hdr = (f"{'':<26}{'FIREs':>6}{'TP':>5}{'SL':>5}{'T/O':>5}{'win%':>6}{'net%':>8}{'exp%':>7}{'netR':>8}"
+           f"{'PF':>6}{'maxDD%':>7}{'maxCL':>6}{'dly med':>8}")
+    L.append(f"\n== BEFORE ({p.name}) vs AFTER (this run) -- halves split at {iso(half) if half else '-'} ==")
+    L.append(hdr)
+    L.append("-" * len(hdr))
+    for scope, pick in (("ALL", lambda f: True), ("LIVE-like", lambda f: f["live_like"])):
+        for lab, fs in (("before", B), ("after", F)):
+            for part, cond in (("", lambda f: True), (" 1st half", lambda f: f["t"] < half), (" 2nd half", lambda f: f["t"] >= half)):
+                s = summarize([f for f in fs if pick(f) and cond(f)])
+                name = f"{scope} {lab}{part}"
+                if not s:
+                    L.append(f"{name:<26} no trades")
+                    continue
+                L.append(f"{name:<26}{s['n']:>6}{s['tp']:>5}{s['sl']:>5}{s['to']:>5}{s['win']:>6.1f}{s['net']:>8.2f}"
+                         f"{s['exp']:>7.3f}{s['netR']:>8.1f}{s['pf']:>6.2f}{s['dd']:>7.2f}{s['cl']:>6}{_n(s['d_med'], '.0f'):>8}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=str(BACKEND / "market_data_clean.db"))
@@ -275,6 +310,7 @@ def main():
     ap.add_argument("--taker-fee", type=float, default=None, help="%% per side; default: your MEXC history, else 0.08")
     ap.add_argument("--mexc-history", default=str(BACKEND / "data" / "mexc_history" / "mexc_history.db"))
     ap.add_argument("--out", default="s1_forensic")
+    ap.add_argument("--baseline", default=None, help="an earlier s1_forensic CSV to compare against (before/after table)")
     a = ap.parse_args()
 
     if not Path(a.db).is_file():
@@ -298,6 +334,8 @@ def main():
     L = []
     report(F, fee, a, L)
     compare(F, L)
+    if a.baseline:
+        compare_baseline(F, a.baseline, L)
     rep = "\n".join(L)
     print("\n" + rep)
     out = Path(a.out)
