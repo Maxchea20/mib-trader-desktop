@@ -14,7 +14,7 @@ version's own fill price), same exits. Nothing is changed in the engine.
 
   python scripts/s1_entry_study.py                     # all 1m data
   python scripts/s1_entry_study.py --start 2026-08-14 --end 2026-09-24
-  python scripts/s1_entry_study.py --maker-fee 0.0     # if your MEXC maker fee is 0
+  python scripts/s1_entry_study.py --maker-fee 0.0     # override the fee read from your MEXC history
 
 HOW THE REPLAY MATCHES LIVE
   At each moment it gives evaluate_s1 only candles CLOSED by then, with the
@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import json
+import random
 import sqlite3
 import statistics as st
 import sys
@@ -304,6 +305,108 @@ def missed(fires, res, L):
             L.append(f"     {nl} FIREs where the line was not behind the entry (limit would be a market order) are excluded")
 
 
+def fee_rates_from_history(path):
+    """Median makerFeeRate / takerFeeRate from the MEXC order history saved by
+    mexc_history_collect.py (read-only). MEXC reports them as fractions
+    (0.0002 = 0.02%); returned as % per side. (None, None, reason) if absent."""
+    p = Path(path)
+    if not p.is_file():
+        return None, None, f"no MEXC history at {p} -- using defaults"
+    try:
+        c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+        rows = [json.loads(r[0]) for r in c.execute("SELECT json FROM orders")]
+        c.close()
+    except Exception as e:
+        return None, None, f"could not read MEXC history ({e}) -- using defaults"
+
+    def pct(key):
+        v = []
+        for o in rows:
+            try:
+                x = float(o.get(key))
+            except (TypeError, ValueError):
+                continue
+            v.append(x * 100 if x < 0.01 else x)
+        return st.median(v) if v else None
+    mk, tk = pct("makerFeeRate"), pct("takerFeeRate")
+    return mk, tk, f"from {len(rows)} MEXC orders in {p.name}"
+
+
+def _day_block_boot(pairs, n=4000, seed=7):
+    """pairs: [(ts, diff)]. Resample whole UTC days with replacement so that
+    clustered, overlapping FIREs are not treated as independent. Returns
+    (mean, lo95, hi95, p_one_sided) for mean diff > 0."""
+    days = {}
+    for t, d in pairs:
+        days.setdefault(t // 86400, []).append(d)
+    blocks = list(days.values())
+    if len(blocks) < 5:
+        return None
+    total = sum(sum(b) for b in blocks)
+    count = sum(len(b) for b in blocks)
+    r = random.Random(seed)
+    means = []
+    for _ in range(n):
+        pick = [blocks[r.randrange(len(blocks))] for _ in blocks]
+        cnt = sum(len(b) for b in pick)
+        means.append(sum(sum(b) for b in pick) / cnt if cnt else 0.0)
+    means.sort()
+    return total / count, means[int(.025 * n)], means[int(.975 * n)], sum(m <= 0 for m in means) / n
+
+
+def significance(fires, res, ll, half, L):
+    """Two honest tests (whole UTC days resampled, so clustered FIREs are not
+    counted as independent evidence):
+      PRICE   -- only FIREs where the limit FILLED: limit P&L minus market P&L
+                 on the very same trade. Pure value of the better entry.
+      vs SKIP -- all FIREs: limit P&L minus fill_rate x market P&L. Compares the
+                 limit with 'market entry on a random fill_rate share of FIREs',
+                 so simply trading less cannot make the limit look better
+                 (a negative-expectancy market baseline would otherwise flatter
+                 any rule that skips trades)."""
+    L.append("\nSIGNIFICANCE (whole days resampled 4000x)")
+    L.append("  PRICE   = same filled trades: limit minus market.  vs SKIP = limit vs market on a random share of FIREs")
+    L.append("           equal to the limit's fill rate (so 'trading less' alone cannot win).")
+    L.append(f"{'subset':<11}{'ver':>8}{'test':>9}{'n':>6}{'days':>6}{'mean diff %':>13}{'95% range':>22}{'p(not better)':>15}")
+    subsets = [("ALL", range(len(fires))), ("1st half", [i for i, f in enumerate(fires) if f["t"] < half]),
+               ("2nd half", [i for i, f in enumerate(fires) if f["t"] >= half]), ("live-like", ll)]
+    for name, idx in subsets:
+        for key in ("B", "C", "B_eq"):
+            same = []
+            for i in idx:
+                a_, b_ = res[i].get("A_same"), res[i].get(key)
+                if a_ and b_ and b_.get("pnl") is not None:
+                    f = fires[i]
+                    same.append((f["t"], 100 * a_["pnl"] / f["entry"], 100 * b_["pnl"] / f["entry"], b_["out"] != "NO_FILL"))
+            if not same:
+                continue
+            fill_rate = sum(1 for x in same if x[3]) / len(same)
+            tests = (("PRICE", [(t, bp - ap) for t, ap, bp, filled in same if filled]),
+                     ("vs SKIP", [(t, bp - fill_rate * ap) for t, ap, bp, filled in same]))
+            lab = {"B": "B", "C": "C", "B_eq": "B@taker"}[key]
+            for tname, pairs in tests:
+                out = _day_block_boot(pairs)
+                if not out:
+                    continue
+                m, lo, hi, p = out
+                days = len({t // 86400 for t, _ in pairs})
+                L.append(f"{name:<11}{lab:>8}{tname:>9}{len(pairs):>6}{days:>6}{m:>+13.3f}"
+                         f"{f'{lo:+.3f} .. {hi:+.3f}':>22}{p:>15.4f}")
+    L.append("Read: 'vs SKIP' is the ONLY decision test -- the limit is worth building only if its 95% range stays")
+    L.append("above 0 there (p < 0.05) in ALL, both halves and live-like; 'B@taker' shows it without the fee saving.")
+    L.append("PRICE and the selection lines are positive BY CONSTRUCTION (a fill only happens after price moved")
+    L.append("against the market entry) -- they size the price difference, they are not evidence of an edge.")
+    # selection: were the FIREs that never came back better or worse than the ones that did (market P&L)?
+    for key in ("B", "C"):
+        filled = [100 * res[i]["A_same"]["pnl"] / fires[i]["entry"] for i in range(len(fires))
+                  if res[i].get("A_same") and res[i].get(key) and res[i][key].get("out") not in (None, "NO_FILL", "NOT_LIMIT")]
+        unfilled = [100 * res[i]["A_same"]["pnl"] / fires[i]["entry"] for i in range(len(fires))
+                    if res[i].get("A_same") and res[i].get(key) and res[i][key].get("out") == "NO_FILL"]
+        if filled and unfilled:
+            L.append(f"  selection {key}: market P&L on FIREs the limit FILLED {st.mean(filled):+.3f}%/FIRE (n={len(filled)}) "
+                     f"vs NOT filled {st.mean(unfilled):+.3f}%/FIRE (n={len(unfilled)})")
+
+
 def live_like(fires, res):
     """One position at a time + cooldown after SL, using A's exits to pick the
     entries; every version is then scored on exactly those entries."""
@@ -325,8 +428,11 @@ def main():
     ap.add_argument("--start")
     ap.add_argument("--end")
     ap.add_argument("--horizon-hours", type=float, default=72.0)
-    ap.add_argument("--taker-fee", type=float, default=0.08, help="% per side (your real MEXC rate)")
-    ap.add_argument("--maker-fee", type=float, default=0.01, help="% per side for the limit entry -- check your MEXC tier")
+    ap.add_argument("--taker-fee", type=float, default=None,
+                    help="% per side; default: read from your MEXC order history, else 0.08")
+    ap.add_argument("--maker-fee", type=float, default=None,
+                    help="% per side for the limit entry; default: read from your MEXC order history, else 0.01")
+    ap.add_argument("--mexc-history", default=str(BACKEND / "data" / "mexc_history" / "mexc_history.db"))
     ap.add_argument("--out", default="s1_entry_study.json")
     a = ap.parse_args()
 
@@ -344,6 +450,12 @@ def main():
     print(f"FIREs (live-eligible): {len(fires)}   with a 5m line recorded: {sum(1 for f in fires if f['line'] is not None)}")
     if not fires:
         sys.exit("no FIREs")
+    mk, tk, src_ = fee_rates_from_history(a.mexc_history)
+    if a.maker_fee is None:
+        a.maker_fee = mk if mk is not None else 0.01
+    if a.taker_fee is None:
+        a.taker_fee = tk if tk is not None else 0.08
+    print(f"Fees: taker {a.taker_fee}%/side, maker {a.maker_fee}%/side  ({src_})")
     res = simulate(fires, S["1m"], hz, a.taker_fee, a.maker_fee)
 
     L = [f"S1 entry study  {iso(fires[0]['t'])} -> {iso(fires[-1]['t'])}   FIREs {len(fires)} "
@@ -367,6 +479,7 @@ def main():
         L.append(f"\nEngine C price vs real market price at FIRE: median gap {st.median(gap):.2f} ATR "
                  f"(p90 {sorted(gap)[int(.9 * (len(gap) - 1))]:.2f}) -- live fills at market, so A uses the market price.")
     missed(fires, res, L)
+    significance(fires, res, ll, half, L)
     rep = "\n".join(L)
     print(rep)
     Path(a.out).write_text(json.dumps({"args": vars(a), "fires": [
