@@ -20,6 +20,11 @@ Nothing in src/ is modified or imported from these copies; production never sees
   cd backend
   python scripts/forensics/hunt_rearm_forensic.py
   python scripts/forensics/hunt_rearm_forensic.py --start 2026-08-01 --end 2026-09-20
+  python scripts/forensics/hunt_rearm_forensic.py --hunt 3d98c41     # Hunt BEFORE S1/S2 timing existed
+
+--hunt 3d98c41 replays the older Hunt C-FI (scripts/forensics/hunt_3d98c41/, live until
+Sep 24 21:16): no S1/S2 timing layer, slot 1/2 FIRE directly from the V2 M5 fill, slot 3
+impulse, weather V1. Same A/B split (same single statement), same execution.
 
 HOW IT MATCHES THE fac4d0e LIVE LOOP
   * Inputs as analysis_observations.collect_observations built them: closed 15m (320),
@@ -67,10 +72,18 @@ sys.path.insert(0, str(BACKEND / "scripts"))
 # reuse the existing replay runner's candle loader, fee reader and day-block bootstrap
 from s1_entry_study import Series, load, iso, to_ts, fee_rates_from_history, _day_block_boot, TF  # noqa: E402
 
+# fac4d0e = last intact Hunt C-FI (slot 1/2 entries through its built-in S1/S2 C timing).
+# 3d98c41 = Hunt C-FI BEFORE the S1/S2 timing layer existed (live Sep 20 -> Sep 24 21:16 UTC+8):
+#           slot 1/2 FIRE straight from the V2 M5 fill, slot 3 impulse, weather V1.
+_CORE = ("observation_hunt", "observation_hunt_c", "observation_hunt_c_fast", "observation_hunt_v3", "observation_hunt_c_fi")
+HUNTS = {
+    "fac4d0e": _CORE + ("hunt_entry_timing", "entry_timing_c", "weather"),
+    "3d98c41": _CORE + ("weather",),
+}
 SNAP = HERE / "hunt_fac4d0e"
-PKG = "src.hunt_fac4d0e"  # virtual package: relative imports '..contract' resolve to production src (unchanged since fac4d0e)
-SNAP_FILES = ("observation_hunt", "observation_hunt_c", "observation_hunt_c_fast", "observation_hunt_v3",
-              "observation_hunt_c_fi", "hunt_entry_timing", "entry_timing_c", "weather")
+PKG = "src.hunt_fac4d0e"  # virtual package: relative imports '..contract' resolve to production src (unchanged since 3d98c41)
+SNAP_FILES = HUNTS["fac4d0e"]
+COMMIT = "fac4d0e"
 LOOKBACK = {"15m": 320, "5m": 959, "1m": 400, "1h": 400, "4h": 300}
 COOLDOWN_S = 3 * 300  # cooldown_bars_after_failure x 5m
 MAX_POLLS = 8
@@ -90,14 +103,14 @@ def verify_snapshot(snap):
     out = []
     for f in SNAP_FILES:
         try:
-            ref = subprocess.run(["git", "show", f"fac4d0e:backend/src/brain/{f}.py"], cwd=str(BACKEND),
+            ref = subprocess.run(["git", "show", f"{COMMIT}:backend/src/brain/{f}.py"], cwd=str(BACKEND),
                                  capture_output=True, timeout=30)
         except Exception as e:
             return [f"git not available ({e}) -- snapshot not verified"]
         if ref.returncode != 0:
-            return ["commit fac4d0e not in this clone (git fetch?) -- snapshot not verified"]
+            return [f"commit {COMMIT} not in this clone (git fetch?) -- snapshot not verified"]
         same = ref.stdout.replace(b"\r\n", b"\n") == (snap / f"{f}.py").read_bytes().replace(b"\r\n", b"\n")
-        out.append(f"{f}.py {'== fac4d0e' if same else 'DIFFERS from fac4d0e'}")
+        out.append(f"{f}.py {'== ' + COMMIT if same else 'DIFFERS from ' + COMMIT}")
     return out
 
 
@@ -118,7 +131,7 @@ def load_books(snap):
     book_b.__file__ = str(snap / "observation_hunt_c_fi.py") + " [BOOK B]"
     sys.modules[name] = book_b
     exec(compile(src_text.replace(REARM_STMT, NO_REARM_STMT), book_b.__file__, "exec"), book_b.__dict__)
-    timing = importlib.import_module(PKG + ".hunt_entry_timing")
+    timing = importlib.import_module(PKG + ".hunt_entry_timing") if "hunt_entry_timing" in SNAP_FILES else None
     weather = importlib.import_module(PKG + ".weather")
     hunt_c = importlib.import_module(PKG + ".observation_hunt_c")
     return book_a, book_b, timing, weather, hunt_c
@@ -156,7 +169,8 @@ def _aux(c15):
 
 
 def replay(book, label, S, start, end, timing, weather, hunt_c):
-    timing.reset_timing_state()
+    if timing is not None:
+        timing.reset_timing_state()
     core_cache, aux_cache, wx_cache = {}, {}, {}
     fires = []
     last_fired_5m = None
@@ -189,15 +203,18 @@ def replay(book, label, S, start, end, timing, weather, hunt_c):
             k5 = (k15, fill["ts"])
             if k5 not in core_cache:  # the core is pure: same candles -> same output
                 core_cache.clear()
+                core = book._evaluate_hunt_c_fi_core if timing is not None else book.evaluate_hunt_c_fi
                 try:
-                    core_cache[k5] = book._evaluate_hunt_c_fi_core(c15, fill, live, c4, c1h, c5)
+                    core_cache[k5] = core(c15, fill, live, c4, c1h, c5)
                 except Exception as e:
                     core_cache[k5] = {"action": "WAIT", "why_state": [f"hunt C-FI error: {e}"], "ok": True}
             prev = None
             for _ in range(MAX_POLLS):  # live polled every few seconds on unchanged candles
                 polls += 1
                 try:
-                    out = book._with_timing(copy.deepcopy(core_cache[k5]), c15, fill, live, c5, c1, aux_cache[k15])
+                    out = copy.deepcopy(core_cache[k5])
+                    if timing is not None:
+                        out = book._with_timing(out, c15, fill, live, c5, c1, aux_cache[k15])
                 except Exception as e:
                     out = {"action": "WAIT", "why_state": [f"hunt C-FI error: {e}"]}
                 if out.get("action") == "FIRE" and fill["ts"] != last_fired_5m:
@@ -206,12 +223,14 @@ def replay(book, label, S, start, end, timing, weather, hunt_c):
                         last_fired_5m = fill["ts"]
                         f["book"] = label
                         fires.append(f)
+                if timing is None:  # no timing layer: output depends on closed candles only
+                    break
                 phase = timing._STATE.get("phase")
                 sig = (out.get("action"), phase, json.dumps(timing._STATE.get("c_watch"), default=str, sort_keys=True))
                 if sig == prev:
                     break
                 prev = sig
-            watching = timing._STATE.get("phase") == "C_WATCH"
+            watching = timing is not None and timing._STATE.get("phase") == "C_WATCH"
         if time.time() > next_note:
             next_note = time.time() + 30
             done = (t - start) / max(1, end - start)
@@ -346,7 +365,7 @@ def row(name, s):
 
 
 def report(A, B, fee, a, L):
-    L.append(f"Hunt C-FI fac4d0e re-arm forensic   taker {fee}%/side both legs, horizon {a.horizon_hours:g}h, "
+    L.append(f"Hunt C-FI {COMMIT} re-arm forensic   taker {fee}%/side both legs, horizon {a.horizon_hours:g}h, "
              "SL/TP distances from Hunt's own levels re-anchored on the market fill")
     L.append("delay = minutes from the close of the 15m thesis candle to the FIRE;  maxCL = longest run of losing trades;")
     L.append("netR uses each trade's own stop distance (can be large when a stop is tight -- see 'tight' note)")
@@ -445,21 +464,29 @@ def main():
     ap.add_argument("--horizon-hours", type=float, default=72.0)
     ap.add_argument("--taker-fee", type=float, default=None, help="%% per side; default: your MEXC history, else 0.08")
     ap.add_argument("--mexc-history", default=str(BACKEND / "data" / "mexc_history" / "mexc_history.db"))
-    ap.add_argument("--out", default="hunt_rearm_forensic")
-    ap.add_argument("--snapshot-dir", default=str(SNAP), help=argparse.SUPPRESS)
+    ap.add_argument("--hunt", choices=sorted(HUNTS), default="fac4d0e",
+                    help="fac4d0e = with Hunt's S1/S2 C timing (default); 3d98c41 = Hunt before S1/S2 timing existed")
+    ap.add_argument("--out", default=None, help="output base name (default hunt_rearm_forensic[_3d98c41])")
+    ap.add_argument("--snapshot-dir", default=None, help=argparse.SUPPRESS)
     a = ap.parse_args()
 
-    snap = Path(a.snapshot_dir)
+    global SNAP, PKG, SNAP_FILES, COMMIT
+    COMMIT, SNAP_FILES = a.hunt, HUNTS[a.hunt]
+    SNAP, PKG = HERE / f"hunt_{a.hunt}", f"src.hunt_{a.hunt}"
+    if a.out is None:
+        a.out = "hunt_rearm_forensic" + ("" if a.hunt == "fac4d0e" else f"_{a.hunt}")
+    snap = Path(a.snapshot_dir) if a.snapshot_dir else SNAP
     if not Path(a.db).is_file():
         sys.exit(f"Database not found: {a.db}")
     print("Snapshot check:")
     for line in verify_snapshot(snap):
         print("  " + line)
     book_a, book_b, timing, weather, hunt_c = load_books(snap)
-    print("Book B = fac4d0e observation_hunt_c_fi.py with this single replacement:")
+    print(f"Book B = {COMMIT} observation_hunt_c_fi.py with this single replacement:")
     print("  - " + REARM_STMT.strip().replace("\n", " ").replace("    ", ""))
     print("  + " + NO_REARM_STMT.strip())
-    _memo_m5_events(timing)
+    if timing is not None:
+        _memo_m5_events(timing)
 
     print(f"Loading candles from {a.db} (read-only) ...")
     S = {tf: Series(load(a.db, a.symbol, tf), tf) for tf in TF}
