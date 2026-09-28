@@ -1,4 +1,4 @@
-"""S1 structure helpers — forming 15m, M5 lookback, C watch, S2 math."""
+"""Shared structure helpers used by the Hunt timing modules."""
 from __future__ import annotations
 from typing import Any, List, Optional
 from ..contract import LONG, SHORT
@@ -7,8 +7,6 @@ from .entry_timing_c import find_m5_2_intrabar_entry
 
 M5_PIVOT_OVERRIDE = 2
 M15_PIVOT_OVERRIDE = 2
-S1_LOOKBACK_BARS = 5
-M5_BAR_SECONDS = 300
 PULLBACK_ZONE_ATR_MIN = 0.25
 PULLBACK_ZONE_ATR_MAX = 0.50
 NEARBY_SR_ATR = 0.30
