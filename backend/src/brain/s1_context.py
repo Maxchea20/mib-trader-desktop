@@ -93,9 +93,14 @@ def momentum_confidence(mom_obs, side: str) -> str:
     return MEDIUM
 
 
+ALIGNED_ONLY = False  # research switch (forensic --aligned-only): S1 only with the 15m trend
+
+
 def setup_allowed(ctx: str, conf: str) -> bool:
     """Momentum is confidence: with the trend it only has to not be against the setup;
     without trend support (neutral or counter-trend CHoCH) it must actively confirm."""
+    if ALIGNED_ONLY and ctx != ALIGNED:
+        return False
     if ctx == ALIGNED:
         return conf in (HIGH, MEDIUM)
     return conf == HIGH

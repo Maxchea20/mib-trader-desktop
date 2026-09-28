@@ -247,6 +247,7 @@ def _read_hunt_csv(p):
                  "pnl_pct": float(r["pnl_pct"]), "R": float(r["R"]) if r.get("R") else None,
                  "delay_min": float(r["delay_min"]) if r.get("delay_min") else None,
                  "atr": float(r["atr"] or 0), "sl_dist": float(r["sl_dist"] or 0),
+                 "fill": float(r["fill"]) if r.get("fill") else None,
                  "live_like": r["live_like"] == "True", "timing": r.get("timing")}
             out.append(f)
     return out
@@ -284,12 +285,20 @@ def compare(F, L):
     L.append("Check the first/last FIRE columns: the comparison is only like-for-like if the periods match.")
 
 
-def compare_baseline(F, path, L):
+def compare_baseline(F, path, L, add_back_fee=None):
+    """add_back_fee (%/side): put a fee-paying baseline on a zero-fee basis (+2x fee per trade)."""
     p = Path(path)
     if not p.is_file():
         L.append(f"\n(baseline {path} not found -- no before/after table)")
         return
     B = sorted(_read_hunt_csv(p), key=lambda f: f["t"])
+    if add_back_fee:
+        for f in B:
+            add = 2 * add_back_fee
+            if f["R"] is not None and f["sl_dist"] and f.get("fill"):
+                f["R"] += add / 100 * f["fill"] / f["sl_dist"]
+            f["pnl_pct"] += add
+        L.append(f"\n(baseline fees removed: +{2 * add_back_fee:.2f}% per trade, so both sides are GROSS)")
     half = B[len(B) // 2]["t"] if B else None
     hdr = (f"{'':<26}{'FIREs':>6}{'TP':>5}{'SL':>5}{'T/O':>5}{'win%':>6}{'net%':>8}{'exp%':>7}{'netR':>8}"
            f"{'PF':>6}{'maxDD%':>7}{'maxCL':>6}{'dly med':>8}")
@@ -319,6 +328,10 @@ def main():
     ap.add_argument("--mexc-history", default=str(BACKEND / "data" / "mexc_history" / "mexc_history.db"))
     ap.add_argument("--out", default="s1_forensic")
     ap.add_argument("--no-s2", action="store_true", help="turn S2 off for this replay (S1 alone)")
+    ap.add_argument("--aligned-only", action="store_true", help="S1 only when the 15m trend is ALIGNED")
+    ap.add_argument("--retest-atr", type=float, default=None, help="S1 retest band in ATR (engine default 0.25)")
+    ap.add_argument("--baseline-fee", type=float, default=None,
+                    help="%%/side fee the baseline CSV paid; added back so a zero-fee run compares like-for-like")
     ap.add_argument("--baseline", default=None, help="an earlier s1_forensic CSV to compare against (before/after table)")
     a = ap.parse_args()
 
@@ -338,14 +351,24 @@ def main():
     print(f"Fees: taker {fee}%/side ({src_ if a.taker_fee is None else 'from --taker-fee'})")
     print(f"Replaying the current evaluate_s1 {iso(start)} -> {iso(end)} ...")
     print(f"S2: {'OFF (S1 alone)' if a.no_s2 else 'on'}")
+    from src.brain import s1_context, s1_retest
+    if a.aligned_only:
+        s1_context.ALIGNED_ONLY = True
+    if a.retest_atr is not None:
+        s1_retest.RETEST_ATR = a.retest_atr
+    print(f"S1: aligned-only={s1_context.ALIGNED_ONLY}  retest band={s1_retest.RETEST_ATR} ATR  "
+          f"extension cancel={s1_retest.MAX_EXTENSION_ATR} ATR")
     F = replay(S, start, end, s2=not a.no_s2)
     simulate(F, S["1m"], hz, fee)
 
     L = []
     report(F, fee, a, L)
+    from src.brain import s1_context, s1_retest, s1_engine
+    L.insert(1, f"settings: S2 {'OFF' if a.no_s2 else 'on'}; S1 aligned-only={s1_context.ALIGNED_ONLY}; "
+                f"retest band {s1_retest.RETEST_ATR} ATR; S1 TTL {getattr(s1_engine, 'S1_TTL_S', 0) // 60} min; fee {fee}%/side")
     compare(F, L)
     if a.baseline:
-        compare_baseline(F, a.baseline, L)
+        compare_baseline(F, a.baseline, L, a.baseline_fee)
     rep = "\n".join(L)
     print("\n" + rep)
     out = Path(a.out)

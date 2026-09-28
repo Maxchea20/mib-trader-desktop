@@ -127,3 +127,14 @@ def test_breakout_validity_has_no_volume_gate_and_failure_zeroes_score():
     block = text[i:text.index("continue", i)]
     assert "result.breakout_lifecycle_score = 0.0" in block
     assert "result.breakout_lifecycle_confidence = 0.0" in block
+
+
+def test_aligned_only_switch():
+    try:
+        C.ALIGNED_ONLY = True
+        assert C.setup_allowed(C.ALIGNED, C.MEDIUM)
+        assert not C.setup_allowed(C.NEUTRAL_CTX, C.HIGH)
+        assert not C.setup_allowed(C.COUNTER, C.HIGH)
+    finally:
+        C.ALIGNED_ONLY = False
+    assert C.setup_allowed(C.NEUTRAL_CTX, C.HIGH)  # default unchanged
