@@ -10,7 +10,7 @@ from .brain.weather import side_allowed
 from .brain.hunt_brain import VERSION as HUNT_VERSION
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
-    _open_from_s1, _open_live_from_s1, _close_live_if_needed,
+    _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
 )
 from .autotrader_live_sync import revive_shadow_if_mexc_open, flatten_mexc
 
@@ -132,7 +132,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     tag = s1.get("timing") or ""
     if live_mode and live_armed:
         try:
-            order_result = _open_live_from_s1(s1, tf, live_price)
+            order_result = _open_live_from_hunt(s1, tf, live_price)
             STATE["last_fired_5m_ts"] = s1_5m_ts
             STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')} {tag}"
         except Exception as e:
@@ -145,7 +145,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
             "LIVE toggle is on but MEXC_LIVE_TRADING_ENABLED is not true — paper fill only. "
             "Desktop: tray → Show Data Folder → add that line to .env → Restart Trading Engine."
         )
-    _open_from_s1(s1, tf)
+    _open_from_hunt(s1, tf)
     STATE["last_fired_5m_ts"] = s1_5m_ts
     STATE["last_action"] = f"OPEN {side} S1/S2 {tag}"
     return STATE
