@@ -1,5 +1,8 @@
 """Brain — final decision engine package (NOT an 11th analysis agent)."""
-from .s1_engine import evaluate_s1, S1_VERSION, SL_ATR, TP_ATR
+from .hunt_brain import evaluate_hunt, reset_hunt_state, VERSION as HUNT_VERSION, SL_ATR, TP_ATR
+# Compatibility exports for older callers; live authority is Hunt.
+evaluate_s1 = evaluate_hunt
+S1_VERSION = HUNT_VERSION
 from .weather import classify as classify_weather, side_allowed, WEATHER_VERSION
 from .lifecycle import (
     LIFECYCLE_VERSION,
