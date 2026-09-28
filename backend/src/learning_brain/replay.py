@@ -7,7 +7,7 @@ from . import observe as obsmod
 def run(max_bars=400):
     from ..market_data import data_access as dao
     from ..market_data.closed_candles import filter_closed
-    from ..brain.s1_engine import evaluate_s1, S1_VERSION
+    from ..brain.hunt_brain import evaluate_hunt, VERSION as S1_VERSION
     from ..brain.weather import classify
     from ..brain.s1_detect import parent_open
     from ..fair_value_gap.observe import observe as obs_fvg
@@ -35,7 +35,7 @@ def run(max_bars=400):
             aux={"mom": obs_mom(window15,"15m"), "vol": obs_vol(window15,"15m"), "sr": obs_sr(window15,"15m"), "fvg": obs_fvg(window15,"15m")}
         except Exception:
             aux={}
-        hunt=evaluate_s1(window15, fill, candles_5m=w5, candles_1m=w1[-400:], aux=aux)
+        hunt=evaluate_hunt(window15, fill, candles_5m=w5, candles_1m=w1[-400:], aux=aux)
         wx=classify(w4, w1h) if w4 else {}
         extra={"price": float(fill["close"]), "bar_ts_15m": ts15, "bar_ts_5m": int(fill["ts"]), "bar_ts_1m": int(w1[-1]["ts"]) if w1 else None}
         if obsmod.observe_hunt(hunt, weather=wx, extra=extra, source="replay", ts=int(fill["ts"])+300):
