@@ -113,72 +113,7 @@ def init_db() -> None:
             );
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS scenario_c_watch (
-                thesis_id    TEXT PRIMARY KEY,
-                direction    TEXT,
-                origin_ts    INTEGER,
-                origin_level REAL,
-                m5_slot      INTEGER,
-                status       TEXT NOT NULL,
-                checked_ts   TEXT,
-                started_at   REAL,
-                updated_at   REAL NOT NULL,
-                entry_ts     INTEGER,
-                entry_price  REAL,
-                reason       TEXT,
-                window_open_ts INTEGER
-            );
-            """
-        )
-        try:
-            conn.execute("ALTER TABLE scenario_c_watch ADD COLUMN window_open_ts INTEGER")
-        except Exception:
-            pass
         conn.commit()
-
-
-def save_scenario_watch(thesis_id: str, **fields) -> None:
-    """Persist one row of Case-1/scenario-entry state."""
-    import time as _t
-    cols = ["direction", "origin_ts", "origin_level", "m5_slot", "status",
-            "checked_ts", "started_at", "entry_ts", "entry_price", "reason",
-            "window_open_ts"]
-    with _lock:
-        conn = _connect()
-        existing = conn.execute(
-            "SELECT * FROM scenario_c_watch WHERE thesis_id=?", (thesis_id,)
-        ).fetchone()
-        merged = {c: fields.get(c, existing[c] if existing else None) for c in cols}
-        conn.execute(
-            """
-            INSERT INTO scenario_c_watch
-                (thesis_id, direction, origin_ts, origin_level, m5_slot, status,
-                 checked_ts, started_at, updated_at, entry_ts, entry_price, reason,
-                 window_open_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(thesis_id) DO UPDATE SET
-                direction=excluded.direction, origin_ts=excluded.origin_ts,
-                origin_level=excluded.origin_level, m5_slot=excluded.m5_slot,
-                status=excluded.status, checked_ts=excluded.checked_ts,
-                started_at=excluded.started_at, updated_at=excluded.updated_at,
-                entry_ts=excluded.entry_ts, entry_price=excluded.entry_price,
-                reason=excluded.reason, window_open_ts=excluded.window_open_ts;
-            """,
-            (thesis_id, merged["direction"], merged["origin_ts"], merged["origin_level"],
-             merged["m5_slot"], merged["status"], merged["checked_ts"], merged["started_at"],
-             _t.time(), merged["entry_ts"], merged["entry_price"], merged["reason"],
-             merged["window_open_ts"]),
-        )
-        conn.commit()
-
-
-def load_all_scenario_watch() -> List[Dict]:
-    with _lock:
-        conn = _connect()
-        rows = conn.execute("SELECT * FROM scenario_c_watch").fetchall()
-    return [dict(r) for r in rows]
 
 
 def upsert_candles(symbol: str, timeframe: str, candles: List[Dict]) -> int:
