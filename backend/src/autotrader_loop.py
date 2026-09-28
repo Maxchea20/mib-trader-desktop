@@ -7,7 +7,7 @@ from .market_data import data_access as dao
 from . import analysis_service
 from .brain.lifecycle_tick import manage_open_on_5m
 from .brain.weather import side_allowed
-from .brain.s1_engine import S1_VERSION
+from .brain.hunt_brain import VERSION as HUNT_VERSION
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
     _open_from_s1, _open_live_from_s1, _close_live_if_needed,
@@ -76,7 +76,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     weather = result.get("weather") or {}
     STATE["last_s1"] = {
         "action": s1.get("action"),
-        "version": s1.get("brain_version") or S1_VERSION,
+        "version": s1.get("brain_version") or HUNT_VERSION,
         "path": s1.get("timing"),
         "event": s1.get("event"),
         "timing": s1.get("timing"),
