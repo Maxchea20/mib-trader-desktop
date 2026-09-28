@@ -11,7 +11,7 @@ from .support_resistance.observe import observe as obs_sr
 from .trend.observe import observe as obs_trend
 from .volume.observe import observe as obs_vol
 from .brain.s1_detect import parent_open
-from .brain.s1_engine import evaluate_s1, S1_VERSION
+from .brain.hunt_brain import evaluate_hunt, VERSION as HUNT_VERSION
 from .brain.weather import classify
 from .market_state.builder import build_market_state
 from .market_data import data_access as dao
@@ -145,7 +145,7 @@ def collect_observations(
         except Exception:
             aux = {}
         try:
-            s1 = evaluate_s1(
+            s1 = evaluate_hunt(
                 rows15,
                 fill,
                 candles_5m=candles_5m,
@@ -156,7 +156,7 @@ def collect_observations(
             s1 = {
                 "action": "WAIT",
                 "why_state": [f"s1 error: {e}"],
-                "brain_version": S1_VERSION,
+                "brain_version": HUNT_VERSION,
                 "ok": True,
             }
         if s1 is not None:
