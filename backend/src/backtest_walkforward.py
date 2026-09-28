@@ -171,7 +171,7 @@ class WalkForwardBacktest:
                 ]
 
             if self.use_hunt_lifecycle:
-                from .brain.s1_engine import evaluate_s1
+                from .brain.hunt_brain import evaluate_hunt
                 from .brain.lifecycle import position_from_fire, reevaluate, EXIT, TRAIL
                 from .brain.weather import classify, side_allowed
                 from .structure.observe import observe as obs_structure
@@ -233,7 +233,7 @@ class WalkForwardBacktest:
                             fill = near[0]
                     horizon = int(ts) + TF_SECONDS[tf]
                     w1m = [c for c in c1m_all if int(c["ts"]) + 60 <= horizon][-400:]
-                    fire = evaluate_s1(window, fill, candles_5m=m5_window or [fill], candles_1m=w1m)
+                    fire = evaluate_hunt(window, fill, candles_5m=m5_window or [fill], candles_1m=w1m)
                     if fire.get("action") == "FIRE":
                         side = fire.get("direction") or fire.get("side")
                         ok = (not self.use_weather) or side_allowed(wx.get("flag"), side)
