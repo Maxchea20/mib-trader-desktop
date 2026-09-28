@@ -324,8 +324,6 @@ def _track_breakout_lifecycle(high, low, close, open_, volume, timestamps) -> "B
                 "Price closed below broken resistance after retest" if long_dir
                 else "Price closed above broken support after retest"
             )
-            result.breakout_lifecycle_score = 0.0
-            result.breakout_lifecycle_confidence = 0.0
             tracked = None
             continue
 
@@ -640,7 +638,7 @@ def analyze(candles, timeframe: str) -> AgentResult:
     )
     strength = confidence
 
-    valid = penetration_atr >= 0.5
+    valid = penetration_atr >= 0.5 or vol_z >= 1.0
 
     age_note = "this candle" if bars_since_origin == 0 else f"{bars_since_origin} candle(s) ago"
     evidence = [
@@ -655,7 +653,7 @@ def analyze(candles, timeframe: str) -> AgentResult:
          if bars_since_origin > 0 else f"Follow-through: awaiting confirmation → 0.0/{W_FOLLOWTHROUGH:.0f}"),
     ]
     if not valid:
-        evidence.append("Marked low-reliability (weak penetration)")
+        evidence.append("Marked low-reliability (weak penetration, no volume confirmation)")
     evidence += _lifecycle_evidence(lifecycle)
 
     key_levels = [{"label": "Breakout Level", "price": round(level, 2), "type": "breakout"}]

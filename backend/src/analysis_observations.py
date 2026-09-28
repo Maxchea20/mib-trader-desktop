@@ -137,7 +137,6 @@ def collect_observations(
         aux = {}
         try:
             aux = {
-                "trend": obs_trend(rows15, "15m"),
                 "mom": obs_mom(rows15, "15m"),
                 "vol": obs_vol(rows15, "15m"),
                 "sr": obs_sr(rows15, "15m"),

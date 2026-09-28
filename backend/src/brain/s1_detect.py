@@ -66,24 +66,19 @@ def _parent_swings(candles_15m: List[dict], lr: int):
     return sh, sl
 
 
-def last_15m_structure(candles_15m: List[dict]):
-    """(latest 15m BOS/CHoCH event, the structure observation it came from) -- (None, None) if none."""
+def last_15m_break(candles_15m: List[dict]):
     if not candles_15m or len(candles_15m) < 30:
-        return None, None
+        return None
     try:
         st = obs_structure(candles_15m, "15m", pivot_window_override=M15_PIVOT_OVERRIDE)
     except Exception:
-        return None, None
+        return None
     last = None
     for ev in st.history or []:
         et = (ev.event_type or "").upper()
         if et in ("BOS", "CHOCH", "CHoCH"):
             last = ev
-    return last, (st if last is not None else None)
-
-
-def last_15m_break(candles_15m: List[dict]):
-    return last_15m_structure(candles_15m)[0]
+    return last
 
 
 def event_key(event: Any) -> tuple:
