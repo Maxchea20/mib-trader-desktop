@@ -31,7 +31,7 @@ def _s1_thesis(s1: Dict, extra: Optional[Dict] = None) -> Dict:
     return {k: v for k, v in th.items() if v is not None}
 
 
-def _open_from_s1(s1: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
+def _open_from_hunt(s1: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
     side = s1.get("direction")
     th = _s1_thesis(s1, thesis)
     entry = float(th.get("fill_price") or s1["entry"])
@@ -166,7 +166,7 @@ def _fit_qty_to_balance(sizing: Dict, available: float) -> Optional[float]:
     return qty
 
 
-def _open_live_from_s1(s1: Dict, tf: str, live_price: Optional[float],
+def _open_live_from_hunt(s1: Dict, tf: str, live_price: Optional[float],
                         extra_thesis: Optional[Dict] = None) -> Dict:
     blocked = _live_blocked()
     if blocked:
@@ -254,7 +254,7 @@ def _open_live_from_s1(s1: Dict, tf: str, live_price: Optional[float],
                    "fitted_to_balance": sizing.get("fitted_to_balance")},
     )
     fill = _wait_mexc_fill(side) or price
-    _open_from_s1(s1, tf, thesis={
+    _open_from_hunt(s1, tf, thesis={
         "venue": "MEXC", "order_id": order_result.get("data"), "vol": vol,
         "notional": sizing.get("final_notional"), "leverage": lev, "side": side,
         "margin_mode": "ISOLATED", "risk_pct": sizing.get("risk_pct"),
