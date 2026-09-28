@@ -1,22 +1,36 @@
 # MiB Trader Desktop
 
-Python engine is the trading source of truth. The window is Tauri (not Chrome).
+Python engine is the trading source of truth. The desktop window is Tauri.
 
-## Daily use (dev)
+## Architecture
 
-Two terminals. **One engine only.**
+Hunt is the single trading brain and the only FIRE authority.
 
 ```
-# 1) engine
+Hunt thesis
+   ├── S1     early forming-15M breakout → C → FIRE
+   ├── S2     extension/pullback → C → FIRE
+   └── SLOT3  confirmed closed-15M breakout → FIRE
+                         |
+                       ONE FIRE
+                         |
+                  autotrader execution
+                         |
+                    MEXC Isolated
+```
+
+S1, S2, SLOT3 and C never place orders themselves.
+
+## Daily use
+
+Engine:
+
+```
 cd backend
 .\.venv\Scripts\python.exe run_server.py
-
-# 2) UI in Chrome (old way) OR the desktop window
-cd frontend
-npm.cmd start
 ```
 
-Desktop window instead of Chrome (engine already running on 8811):
+Desktop development:
 
 ```
 cd desktop
@@ -24,19 +38,14 @@ npm install
 npm run dev
 ```
 
-The host will see 8811 is already up and will **not** start a second engine.
-Window X hides to tray. Tray → **Exit MiB Trader** is the only full quit.
+Do not run a packaged MIB Trader executable and `run_server.py` against the same engine at the same time.
 
-## Packaged Windows app
+## Important
 
-See `desktop/BUILD_INSTRUCTIONS.md`.
-
-Never run packaged `MIB Trader.exe` and `run_server.py` at the same time.
-
-## Do not change
-
-Brain / S1-S2 / autotrader execution live in Python. The desktop host only
-opens a window and manages the engine process.
-
-Live path: forming 15m BOS/CHoCH → S1/S2 → C 1m close → FIRE → Isolated.
-Hunt C-FI is historical research only (`docs/HUNT_*`, `scripts/run_hunt_*`).
+- Market structure calculations use closed candles for historical/structural decisions.
+- S1 uses the current forming 15M objective and current 5M sections.
+- SLOT3 uses a confirmed closed 15M CHoCH/BOS and enters on the next 15M candle.
+- S2 remains a separate extension/pullback timing path.
+- C is 1M entry timing only.
+- Lifecycle owns post-FIRE HOLD/EXIT management.
+- Historical replay must validate the current Hunt architecture before performance conclusions are drawn.
