@@ -71,7 +71,7 @@ def _parent_swings(candles_15m: List[dict], lr: int = 2):
     return sh, sl
 
 
-def _set_thesis(event: Any, candles_15m: List[dict]) -> None:
+def _set_thesis(event: Any, candles_15m: List[dict], preserve_ticket: bool = False) -> None:
     side = side_of(event)
     if side not in (LONG, SHORT):
         return
@@ -86,6 +86,8 @@ def _set_thesis(event: Any, candles_15m: List[dict]) -> None:
     _STATE["event"] = getattr(event, "event_type", None)
     _STATE["thesis_id"] = f"{_STATE['thesis_ts']}-{side}-{round(float(level or 0), 1)}"
     _STATE["objective_15m_ts"] = _STATE["thesis_ts"]
+    if not preserve_ticket:
+        _STATE["fired"] = False
     if not _STATE["fired"]:
         _STATE["phase"] = "ARMED"
 
@@ -187,8 +189,14 @@ def evaluate_hunt(
     confirmed = _closed_thesis_event(candles_15m)
     if confirmed is not None:
         cts = int(getattr(confirmed, "timestamp", 0) or 0)
-        if _STATE.get("thesis_ts") != cts or _STATE.get("direction") != side_of(confirmed):
-            _set_thesis(confirmed, candles_15m)
+        cside = side_of(confirmed)
+        same_objective = (
+            _STATE.get("objective_15m_ts") is not None
+            and int(_STATE.get("objective_15m_ts")) == cts
+            and _STATE.get("direction") == cside
+        )
+        if _STATE.get("thesis_ts") != cts or _STATE.get("direction") != cside:
+            _set_thesis(confirmed, candles_15m, preserve_ticket=same_objective)
 
     side = _STATE.get("direction")
     if side not in (LONG, SHORT):
@@ -244,6 +252,7 @@ def evaluate_hunt(
                     direction=side,
                 )
                 _STATE["event"] = getattr(forming_event, "event_type", None)
+                _STATE["objective_15m_ts"] = parent_open(ts5)
                 return _wait("S1 qualified — current forming 15m BOS; C watching.", side, slot, "C_WATCH")
 
     # S2: extension -> pullback -> new same-direction 5m event -> C.
