@@ -253,7 +253,7 @@ def evaluate_hunt(
                 )
                 _STATE["event"] = getattr(forming_event, "event_type", None)
                 _STATE["objective_15m_ts"] = parent_open(ts5)
-                return _wait("S1 qualified — current forming 15m BOS; C watching.", side, slot, "C_WATCH")
+                return _wait("S1 qualified — current forming 15m CHoCH/BOS; C watching.", side, slot, "C_WATCH")
 
     # S2: extension -> pullback -> new same-direction 5m event -> C.
     events5 = m5_structure_events(rows5)
