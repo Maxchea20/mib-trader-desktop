@@ -293,3 +293,73 @@ def test_forensic_sequence_is_causal_and_classified():
     q2 = sequence(trade, d2, analyze(trade, d2, 1.5, cut, cut_opens), cut, cut_opens)
     for k in ("class", "new_extreme", "pre_peak", "pullback_depth", "between", "warn_min"):
         assert q.get(k) == q2.get(k), k
+
+
+# ---- Conditioned TP research overlay: state machine edge cases -------------
+def _path(*favs, start=60, step=60):
+    return [(start + step * i, f) for i, f in enumerate(favs)]
+
+
+def test_ctp_A_warning_then_new_extreme_holds():
+    from src.trend_break.conditioned import state_machine
+    # +1.5R reached at t=120; warning at 240; new extreme (1.9 > 1.7) at 360; a 5M failure at 420 must NOT exit
+    path = _path(1.0, 1.5, 1.6, 1.7, 1.5, 1.9, 1.8)
+    sm = state_machine(path, 120, {240}, {420: ["M5_opp_CHoCH"]})
+    assert sm["exit_j"] is None and [k for k, _ in sm["log"]] == ["warn", "cancel"]
+
+
+def test_ctp_B_warning_no_extreme_then_5m_failure_exits_first_available():
+    from src.trend_break.conditioned import state_machine
+    path = _path(1.0, 1.5, 1.6, 1.7, 1.5, 1.4, 1.3)
+    sm = state_machine(path, 120, {240}, {360: ["M5_opp_BOS"], 420: ["M15_opp_CHoCH"]})
+    assert sm["exit_j"] == 5 and sm["trigger_avail"] == 360 and sm["trigger"] == ["M5_opp_BOS"]
+
+
+def test_ctp_C_weak_momentum_alone_never_exits():
+    from src.trend_break.conditioned import state_machine
+    sm = state_machine(_path(1.0, 1.5, 1.6, 1.2, 0.5, 0.0), 120, {240}, {})
+    assert sm["exit_j"] is None
+
+
+def test_ctp_5m_event_before_or_at_warning_does_not_count():
+    from src.trend_break.conditioned import state_machine
+    sm = state_machine(_path(1.0, 1.5, 1.6, 1.4, 1.3), 120, {240}, {180: ["M5_opp_BOS"], 240: ["M5_opp_CHoCH"]})
+    assert sm["exit_j"] is None            # the failure is not strictly AFTER the warning
+
+
+def test_ctp_D_tie_same_candle_trigger_first_and_flagged():
+    from src.trend_break.conditioned import state_machine
+    # candle closing at 360 makes a new extreme (1.9) AND a 5M failure is available at 360
+    sm = state_machine(_path(1.0, 1.5, 1.6, 1.7, 1.65, 1.9), 120, {240}, {360: ["M5_opp_CHoCH"]})
+    assert sm["exit_j"] == 5 and sm["tie_with_new_extreme"] is True
+
+
+def test_ctp_rewarn_after_cancel_can_exit_later():
+    from src.trend_break.conditioned import state_machine
+    path = _path(1.0, 1.5, 1.6, 1.7, 1.9, 1.8, 1.7, 1.6)
+    sm = state_machine(path, 120, {240, 420}, {480: ["M5_opp_CHoCH"]})
+    assert sm["exit_j"] == 7 and [k for k, _ in sm["log"]] == ["warn", "cancel", "warn"]
+
+
+def test_ctp_needs_1_5r_first():
+    from src.trend_break.conditioned import state_machine
+    sm = state_machine(_path(1.0, 1.2, 1.3, 1.4), 9999, {180}, {240: ["M5_opp_CHoCH"]})
+    assert sm["exit_j"] is None
+
+
+def test_ctp_overlay_is_causal_and_exits_at_next_open():
+    from src.trend_break.conditioned import overlay
+    from src.trend_break.diagnostics import diagnose_trade
+    m1, trade = _forensic_fixture()
+    rows, opens = _rows_opens(m1)
+    d = diagnose_trade(trade, m1)
+    r = overlay(trade, d, rows, opens, 1.5)
+    assert r["base_outcome"] == "SL"
+    if r["outcome"] == "CTP":
+        assert r["exit_ts"] == r["trigger_avail"] and r["exit_ts"] <= d["exit_ts"]
+        nxt = next(c for c in m1 if c["ts"] == r["exit_ts"])
+        assert r["exit_price"] == nxt["open"]
+    cut = {tf: [c for c in rows[tf] if c["ts"] + {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}[tf] <= d["exit_ts"] + 60] for tf in rows}
+    cut_opens = {k: [c["ts"] for c in v] for k, v in cut.items()}
+    r2 = overlay(trade, diagnose_trade(trade, cut["1m"]), cut, cut_opens, 1.5)
+    assert (r["outcome"], r.get("exit_ts"), round(r["r"], 9)) == (r2["outcome"], r2.get("exit_ts"), round(r2["r"], 9))

@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--forensics", action="store_true", help="structural WHY analysis of eventual-SL trades (analysis only)")
     ap.add_argument("--forensics-milestone", type=float, default=1.5)
     ap.add_argument("--forensics-csv", default="trend_break_forensics.csv")
+    ap.add_argument("--conditioned-tp", action="store_true", help="research overlay: Conditioned TP on the same trades (analysis only)")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
@@ -90,6 +91,10 @@ def main():
                    "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl), "atr": d.atr, "i": i,
                    "break_level": d.break_level, "invalid_level": d.invalid_level, "setup_ts": d.trend_break_ts,
                    "setup_tf": d.setup_tf, "break_line": d.break_1h, "fire_ts": now}
+    if a.conditioned_tp:
+        from src.trend_break.conditioned import report as conditioned_report
+        print(conditioned_report(trades, rows, opens, 1.5))
+        return
     if a.forensics:
         from src.trend_break.forensics import report as forensic_report
         print(forensic_report(trades + ([pos] if pos else []), rows, opens, a.forensics_milestone, a.forensics_csv))
