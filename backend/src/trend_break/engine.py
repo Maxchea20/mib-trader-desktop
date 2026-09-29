@@ -45,7 +45,11 @@ EXPIRED = "EXPIRED"
 class TrendBreakConfig:
     setup_tf: str = "1h"                    # "1h" (1D+4H master) or "15m" (1D+4H+1H master)
     length: int = 14
-    master_length: int = 14                 # swing lookback for 1D/4H/1H structure (independent of the trendline length)
+    master_length: int = 14                 # default swing lookback for 1D/4H/1H structure
+    master_lengths: Dict[str, int] = field(default_factory=dict)  # per-timeframe override, e.g. {"1d": 5, "4h": 8}
+
+    def master_len(self, tf: str) -> int:
+        return int(self.master_lengths.get(tf, self.master_length))
     slope_mult: float = 1.0
     atr_period: int = 14
     atr_tf: str = "15m"
@@ -142,12 +146,12 @@ _ST_CACHE: Dict[tuple, Dict] = {}
 
 
 def _structure(rows: Sequence[dict], tf: str, cfg: TrendBreakConfig) -> Dict:
-    key = (tf, len(rows), rows[0]["ts"], rows[-1]["ts"], cfg.master_length)
+    key = (tf, len(rows), rows[0]["ts"], rows[-1]["ts"], cfg.master_len(tf))
     hit = _ST_CACHE.get(key)
     if hit is None:
         if len(_ST_CACHE) > 64:
             _ST_CACHE.clear()
-        hit = _ST_CACHE[key] = tl.structure_direction(rows, cfg.master_length)
+        hit = _ST_CACHE[key] = tl.structure_direction(rows, cfg.master_len(tf))
     return hit
 
 
@@ -209,7 +213,7 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
         if tf not in masters:
             continue
         rows = data[tf]
-        if len(rows) >= 2 * cfg.master_length + 2:
+        if len(rows) >= 2 * cfg.master_len(tf) + 2:
             st = _structure(rows, tf, cfg)
             setattr(d, attr, st["direction"])
             d.master_detail[tf] = st
