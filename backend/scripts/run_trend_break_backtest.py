@@ -40,6 +40,10 @@ def main():
     ap.add_argument("--why-sl", action="store_true", help="why the SL trades failed (all SL vs all TP, from FIRE; analysis only)")
     ap.add_argument("--why-csv", default="trend_break_why_sl.csv")
     ap.add_argument("--db", default=None, help="run on a different market database (e.g. research_binance.db)")
+    ap.add_argument("--save-trades", default=None, help="write the fired trades to this JSON file")
+    ap.add_argument("--load-trades", default=None, help="skip the engine loop and analyse trades saved earlier")
+    ap.add_argument("--trades-from", type=int, default=None, help="keep only trades fired at/after this Unix time")
+    ap.add_argument("--trades-to", type=int, default=None, help="keep only trades fired before this Unix time")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
@@ -53,13 +57,32 @@ def main():
                             master_length=a.master_length,
                             **({'min_confidence': a.min_confidence} if a.min_confidence is not None else {}),
                             master_lengths={k.strip(): int(v) for k, v in (x.split('=') for x in a.master_lengths.split(',') if x)})
-    rows = {tf: db.get_candles(SYMBOL, tf, limit=100000) for tf in TF_SEC}
+    def load(tf):
+        lo = 0
+        if tf in ("1m", "5m") and a.start:
+            lo = a.start - 7 * 86400                      # warm-up before the requested start
+        hi = a.end if a.end else 4_000_000_000
+        cur = db._connect().execute(
+            "SELECT ts,open,high,low,close,volume FROM candles WHERE symbol=? AND timeframe=? AND ts>=? AND ts<=? ORDER BY ts",
+            (SYMBOL, tf, lo, hi))
+        return [{"ts": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4], "volume": r[5]} for r in cur]
+    rows = {tf: load(tf) for tf in TF_SEC}
     opens = {tf: [c["ts"] for c in rows[tf]] for tf in rows}
     m1 = rows["1m"]
+    print(f"[data] " + "  ".join(f"{tf}:{len(rows[tf])}" for tf in TF_SEC), flush=True)
+    import json, time as _time
+    _t0 = _time.time()
     trades, fired_setups, pos = [], set(), None
     last_state = {}   # break_ts -> (direction, last setup_state seen)
     skipped_in_pos = set()
-    for i, bar in enumerate(m1):
+    if a.load_trades:
+        trades = json.load(open(a.load_trades))
+        for t in trades:                                   # re-derive the candle index for this data slice
+            t["i"] = bisect.bisect_left(opens["1m"], t["fire_ts"] - 60)
+        print(f"[trades] loaded {len(trades)} from {a.load_trades}")
+    for i, bar in enumerate([] if a.load_trades else m1):
+        if i % 20000 == 0 and i:
+            print(f"  ... {i}/{len(m1)} ({100 * i // len(m1)}%)  {_time.time() - _t0:.0f}s  trades={len(trades)}", flush=True)
         now = bar["ts"] + 60
         if (a.start and now < a.start) or (a.end and now > a.end):
             continue
@@ -99,6 +122,14 @@ def main():
                    "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl), "atr": d.atr, "i": i,
                    "break_level": d.break_level, "invalid_level": d.invalid_level, "setup_ts": d.trend_break_ts,
                    "setup_tf": d.setup_tf, "break_line": d.break_1h, "fire_ts": now}
+    if a.save_trades and not a.load_trades:
+        json.dump(trades, open(a.save_trades, "w"))
+        print(f"[trades] saved {len(trades)} to {a.save_trades}")
+    if a.trades_from or a.trades_to:
+        n0 = len(trades)
+        trades = [t for t in trades if (not a.trades_from or t["fire_ts"] >= a.trades_from)
+                  and (not a.trades_to or t["fire_ts"] < a.trades_to)]
+        print(f"[trades] date filter kept {len(trades)} of {n0}")
     if a.why_sl:
         from src.trend_break.forensics import why_sl_report
         print(why_sl_report(trades, rows, opens, a.why_csv))
