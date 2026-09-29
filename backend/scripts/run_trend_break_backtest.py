@@ -29,6 +29,8 @@ def main():
     opens = {tf: [c["ts"] for c in rows[tf]] for tf in rows}
     m1 = rows["1m"]
     trades, fired_setups, pos = [], set(), None
+    last_state = {}   # break_ts -> (direction, last setup_state seen)
+    skipped_in_pos = set()
     for i, bar in enumerate(m1):
         now = bar["ts"] + 60
         if (a.start and now < a.start) or (a.end and now > a.end):
@@ -43,12 +45,15 @@ def main():
                 pos["r"] = -1.0 if hit_sl else cfg.tp_atr / cfg.sl_atr
                 trades.append(pos)
                 pos = None
+            skipped_in_pos.add(bar["ts"] // 3600)
             continue
         win = {}
         for tf, lim in LIMITS.items():
             end = bisect.bisect_right(opens[tf], now - TF_SEC[tf])
             win[tf] = rows[tf][max(0, end - lim):end]
         d = evaluate(win, config=cfg, now_ts=now)
+        if d.break_detected:
+            last_state[d.trend_break_ts] = (d.direction, d.setup_state, d.reason)
         if d.fire and d.trend_break_ts not in fired_setups:
             fired_setups.add(d.trend_break_ts)
             pos = {"ts": now, "side": d.direction, "entry": d.entry, "sl": d.sl, "tp": d.tp,
@@ -56,6 +61,14 @@ def main():
     wins = sum(1 for t in trades if t["exit"] == "TP")
     print(f"trades={len(trades)} wins={wins} losses={len(trades)-wins} "
           f"R={sum(t['r'] for t in trades):.1f} open={'yes' if pos else 'no'}")
+    from collections import Counter
+    print(f"\nFUNNEL: distinct 1H breaks seen = {len(last_state)}")
+    for st, n in Counter(v[1] for v in last_state.values()).most_common():
+        print(f"  {st:26s} {n}")
+    print("\nBLOCKED reasons (non-fired):")
+    for r, n in Counter(v[2][:70] for v in last_state.values() if v[1] != 'FIRE' and v[1] != 'DONE').most_common(8):
+        print(f"  {n:4d}  {r}")
+    print()
     for t in trades:
         print(t)
 
