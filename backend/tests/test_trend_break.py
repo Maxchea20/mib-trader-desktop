@@ -375,3 +375,24 @@ def test_why_sl_report_runs_on_sl_only_and_mixed_groups():
     assert "SECTION 2" in txt and "SECTION 5" in txt
     assert abs(_fisher_p(10, 0, 0, 10) - 1.08e-5) < 1e-5          # strong association -> tiny p
     assert _fisher_p(5, 5, 5, 5) == 1.0
+
+
+def test_backfill_1m_walks_back_is_idempotent_and_stops_at_history_wall():
+    import importlib.util, sqlite3
+    spec = importlib.util.spec_from_file_location("bf", os.path.join(os.path.dirname(__file__), "..", "scripts", "backfill_1m.py"))
+    bf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bf)
+    con = sqlite3.connect(":memory:")
+    bf.ensure_table(con)
+    HIST_START = 1_000_000 - 1_000_000 % 60           # the API's history wall
+    def fake_fetch(start, end):
+        lo = max(start, HIST_START)
+        return [("BTC_USDT", "1m", t, 1.0, 2.0, 0.5, 1.5, 3.0) for t in range(lo - lo % 60, end - end % 60, 60) if t >= HIST_START]
+    now = HIST_START + 60 * 6000
+    bf.save(con, fake_fetch(now - 60 * 100, now))
+    log = []
+    n1 = bf.walk_back(con, fake_fetch, target_start=HIST_START - 60 * 12000, sleep=0, log=log.append)
+    lo, hi, cnt = bf.bounds(con)
+    assert lo == HIST_START and hi == now - 60 and cnt == 6000       # reached the wall, no duplicates
+    assert any("history limit" in x for x in log)
+    assert bf.walk_back(con, fake_fetch, target_start=HIST_START - 60 * 12000, sleep=0, log=lambda *_: None) == 0   # re-run adds nothing
