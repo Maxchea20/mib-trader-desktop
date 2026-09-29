@@ -28,11 +28,13 @@ def main():
     ap.add_argument("--end", type=int)
     ap.add_argument("--no-align", action="store_true")
     ap.add_argument("--no-master", action="store_true", help="1D/4H/1H are reported but never block a setup")
+    ap.add_argument("--master-length", type=int, default=14, help="swing lookback for 1D/4H/1H structure")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
     cfg = TrendBreakConfig(require_master_alignment=not a.no_align, setup_tf=a.setup_tf,
-                            use_master_filter=not a.no_master)
+                            use_master_filter=not a.no_master,
+                            master_length=a.master_length)
     rows = {tf: db.get_candles(SYMBOL, tf, limit=100000) for tf in TF_SEC}
     opens = {tf: [c["ts"] for c in rows[tf]] for tf in rows}
     m1 = rows["1m"]
