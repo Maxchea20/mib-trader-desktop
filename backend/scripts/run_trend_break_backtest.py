@@ -15,6 +15,10 @@ from src.config import SYMBOL  # noqa: E402
 from src.trend_break import evaluate, TrendBreakConfig  # noqa: E402
 from src.trend_break.engine import TF_SEC  # noqa: E402
 
+# furthest stage a break reached (EXPIRED is only the fallback once nothing else happened)
+RANK = {"EXPIRED": 0, "MASTER_DIRECTION": 1, "TREND_BREAK_1H": 2, "BREAK_15M_CONFIRMATION": 3,
+        "BREAK_5M_CONFIRMATION": 4, "WAIT_PULLBACK": 5, "1M_ENTRY_OPPORTUNITY": 6,
+        "CANCELLED": 7, "DONE": 8, "FIRE": 9}
 LIMITS = {"1d": 120, "4h": 200, "1h": 300, "15m": 300, "5m": 300, "1m": 700}
 
 
@@ -53,7 +57,9 @@ def main():
             win[tf] = rows[tf][max(0, end - lim):end]
         d = evaluate(win, config=cfg, now_ts=now)
         if d.break_detected:
-            last_state[d.trend_break_ts] = (d.direction, d.setup_state, d.reason)
+            cur = last_state.get(d.trend_break_ts)
+            if cur is None or RANK.get(d.setup_state, 0) >= RANK.get(cur[1], 0):
+                last_state[d.trend_break_ts] = (d.direction, d.setup_state, d.reason)
         if d.fire and d.trend_break_ts not in fired_setups:
             fired_setups.add(d.trend_break_ts)
             pos = {"ts": now, "side": d.direction, "entry": d.entry, "sl": d.sl, "tp": d.tp,
@@ -63,10 +69,10 @@ def main():
           f"R={sum(t['r'] for t in trades):.1f} open={'yes' if pos else 'no'}")
     from collections import Counter
     print(f"\nFUNNEL: distinct 1H breaks seen = {len(last_state)}")
-    for st, n in Counter(v[1] for v in last_state.values()).most_common():
+    for st, n in Counter('FIRED' if k in fired_setups else v[1] for k, v in last_state.items()).most_common():
         print(f"  {st:26s} {n}")
     print("\nBLOCKED reasons (non-fired):")
-    for r, n in Counter(v[2][:70] for v in last_state.values() if v[1] != 'FIRE' and v[1] != 'DONE').most_common(8):
+    for r, n in Counter(v[2][:70] for k, v in last_state.items() if k not in fired_setups).most_common(8):
         print(f"  {n:4d}  {r}")
     print()
     for t in trades:
