@@ -143,6 +143,8 @@ def manage_open_on_5m(state: Dict[str, Any], open_trade: Optional[Dict[str, Any]
     """
     if not open_trade:
         return None
+    if _thesis(open_trade).get("engine") == "TREND_BREAK":
+        return None  # V1: fixed 1.5/3.0 ATR SL/TP, no trailing or brain exits
     try:
         from ..market_data import data_access as dao
         from .. import paper_trading

@@ -1,6 +1,7 @@
-"""Collect AnalysisObservation adapters + S1/S2 snapshot for the API/UI."""
+"""Collect AnalysisObservation adapters + the Trend Break decision for the API/UI."""
 from __future__ import annotations
 
+import time
 from typing import Dict, List, Optional, Tuple
 
 from .breakout.observe import observe as obs_breakout
@@ -11,7 +12,8 @@ from .support_resistance.observe import observe as obs_sr
 from .trend.observe import observe as obs_trend
 from .volume.observe import observe as obs_vol
 from .brain.s1_detect import parent_open
-from .brain.hunt_brain import evaluate_hunt, VERSION as HUNT_VERSION
+from . import trend_break
+from .trend_break import VERSION as TREND_BREAK_VERSION
 from .brain.weather import classify
 from .market_state.builder import build_market_state
 from .market_data import data_access as dao
@@ -127,45 +129,30 @@ def collect_observations(
     s1 = None
     weather = None
     rows15 = candles_15m if candles_15m else (candles if timeframe == "15m" else None)
-    if rows15 and candles_5m:
-        fill = candles_5m[-1]
-        candles_1m: List[dict] = []
-        try:
-            candles_1m = dao.read_closed_candles("1m", limit=400)
-        except Exception:
-            candles_1m = []
-        aux = {}
-        try:
-            aux = {
-                "mom": obs_mom(rows15, "15m"),
-                "vol": obs_vol(rows15, "15m"),
-                "sr": obs_sr(rows15, "15m"),
-                "fvg": obs_fvg(rows15, "15m"),
-            }
-        except Exception:
-            aux = {}
-        try:
-            s1 = evaluate_hunt(
-                rows15,
-                fill,
-                candles_5m=candles_5m,
-                candles_1m=candles_1m,
-                aux=aux,
-            )
-        except Exception as e:
-            s1 = {
-                "action": "WAIT",
-                "why_state": [f"s1 error: {e}"],
-                "brain_version": HUNT_VERSION,
-                "ok": True,
-            }
-        if s1 is not None:
-            s1["structure_events_15m"] = _events_15m(rows15)
-            s1["breaks"] = _s1_breaks(rows15)
-            map_high, map_low, map_ts = _map_15(rows15, candles_5m)
-            s1["map_high"] = map_high
-            s1["map_low"] = map_low
-            s1["map_ts"] = map_ts
+    try:
+        tb_candles = {
+            "1d": dao.read_closed_candles("1d", limit=120),
+            "4h": candles_4h or dao.read_closed_candles("4h", limit=200),
+            "1h": candles_1h or dao.read_closed_candles("1h", limit=300),
+            "15m": rows15 or dao.read_closed_candles("15m", limit=300),
+            "5m": candles_5m or dao.read_closed_candles("5m", limit=300),
+            "1m": dao.read_closed_candles("1m", limit=700),
+        }
+        s1 = trend_break.evaluate(tb_candles, now_ts=time.time()).to_signal()
+    except Exception as e:
+        s1 = {
+            "action": "WAIT",
+            "why_state": [f"trend break error: {e}"],
+            "brain_version": TREND_BREAK_VERSION,
+            "ok": True,
+        }
+    if s1 is not None and rows15:
+        s1["structure_events_15m"] = _events_15m(rows15)
+        s1["breaks"] = _s1_breaks(rows15)
+        map_high, map_low, map_ts = _map_15(rows15, candles_5m)
+        s1["map_high"] = map_high
+        s1["map_low"] = map_low
+        s1["map_ts"] = map_ts
     if candles_4h:
         try:
             weather = classify(candles_4h, candles_1h or [])

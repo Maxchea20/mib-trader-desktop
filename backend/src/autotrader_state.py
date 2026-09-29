@@ -1,4 +1,4 @@
-"""Shared Hunt/S1/S2/SLOT3 autotrader CONFIG / STATE."""
+"""Shared Trend Break autotrader CONFIG / STATE."""
 import json
 import logging
 import os
@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .brain.hunt_brain import VERSION as HUNT_VERSION
+from .trend_break import VERSION as ENGINE_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ CONFIG = {
     "enabled": True,
     "mode": "PAPER",
     "timeframe": "15m",
-    "engine_version": HUNT_VERSION,
+    "engine_version": ENGINE_VERSION,
     "notional_usd": 1000.0,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
@@ -75,7 +75,7 @@ def _load_persisted() -> None:
         for k in PERSIST_KEYS:
             if k in data and data[k] is not None:
                 CONFIG[k] = data[k]
-        CONFIG["engine_version"] = HUNT_VERSION
+        CONFIG["engine_version"] = ENGINE_VERSION
         CONFIG["margin_mode"] = "ISOLATED"
         CONFIG["entry_engine"] = "hunt"
         if float(CONFIG.get("leverage") or 0) < MIN_LIVE_LEVERAGE:

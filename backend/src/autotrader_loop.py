@@ -1,4 +1,4 @@
-"""S1/S2 evaluate loop — same-bar WAIT may flip to FIRE."""
+"""Trend Break evaluate loop — the engine decides FIRE; this only runs the pipe guards."""
 import time
 from typing import Dict, Optional
 
@@ -7,7 +7,7 @@ from .market_data import data_access as dao
 from . import analysis_service
 from .brain.lifecycle_tick import manage_open_on_5m
 from .brain.weather import side_allowed
-from .brain.hunt_brain import VERSION as HUNT_VERSION
+from .trend_break import VERSION as ENGINE_VERSION
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
     _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
@@ -76,7 +76,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     weather = result.get("weather") or {}
     STATE["last_s1"] = {
         "action": s1.get("action"),
-        "version": s1.get("brain_version") or HUNT_VERSION,
+        "version": s1.get("brain_version") or ENGINE_VERSION,
         "path": s1.get("timing"),
         "event": s1.get("event"),
         "timing": s1.get("timing"),
@@ -94,7 +94,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     STATE["last_state"] = s1.get("action")
     STATE["last_reason"] = (s1.get("why_state") or [""])[0]
     already_opened_this_bar = (
-        s1_5m_ts is not None and STATE.get("last_fired_5m_ts") == s1_5m_ts
+        s1.get("thesis_ts") is not None and STATE.get("last_fired_setup_ts") == s1.get("thesis_ts")
     )
     STATE["last_s1_5m_ts"] = s1_5m_ts
     live_mode = CONFIG.get("mode") == "LIVE"
@@ -114,12 +114,12 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         STATE["last_action"] = f"NO-TRADE ({s1.get('action') or 'WAIT'})"
         return STATE
     if already_opened_this_bar:
-        STATE["last_action"] = "ALREADY FIRED THIS 5M"
+        STATE["last_action"] = "TREND BREAK SETUP ALREADY FIRED"
         return STATE
     side = s1.get("direction")
     if not s1.get("entry") or not s1.get("stop") or not s1.get("target"):
         STATE["last_action"] = "FIRE BUT NO LEVELS"
-        STATE["last_reason"] = "S1 printed FIRE without entry/stop/target — not sending"
+        STATE["last_reason"] = "Trend Break FIRE without entry/stop/target — not sending"
         return STATE
     flag = weather.get("flag")
     if flag and not side_allowed(flag, side):
@@ -134,6 +134,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         try:
             order_result = _open_live_from_hunt(s1, tf, live_price)
             STATE["last_fired_5m_ts"] = s1_5m_ts
+            STATE["last_fired_setup_ts"] = s1.get("thesis_ts")
             STATE["last_action"] = f"LIVE OPEN {side} Isolated order {order_result.get('data')} {tag}"
         except Exception as e:
             STATE["last_action"] = "LIVE ORDER FAILED"
@@ -147,5 +148,6 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         )
     _open_from_hunt(s1, tf)
     STATE["last_fired_5m_ts"] = s1_5m_ts
-    STATE["last_action"] = f"OPEN {side} S1/S2 {tag}"
+    STATE["last_fired_setup_ts"] = s1.get("thesis_ts")
+    STATE["last_action"] = f"OPEN {side} TREND_BREAK"
     return STATE

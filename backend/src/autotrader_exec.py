@@ -1,4 +1,4 @@
-"""Live / paper order execution for S1/S2 autotrader."""
+"""Live / paper order execution for the Trend Break autotrader."""
 import json
 import time
 from typing import Dict, Optional
@@ -22,6 +22,7 @@ def _s1_thesis(s1: Dict, extra: Optional[Dict] = None) -> Dict:
         "event": s1.get("event"),
         "timing": s1.get("timing"),
         "direction": s1.get("direction"),
+        "engine": s1.get("engine"),
         "entry": s1.get("entry"),
         "stop": s1.get("stop"),
         "target": s1.get("target"),
@@ -43,7 +44,7 @@ def _open_from_hunt(s1: Dict, tf: str, thesis: Optional[Dict] = None) -> None:
         symbol=SYMBOL, side=side, entry_price=entry, sl_price=sl, tp_price=tp,
         notional_usd=float(th.get("notional") or CONFIG["notional_usd"]),
         timeframe=tf, brain_state=side, consensus=0, confidence=0,
-        note=f"S1/S2 {path} {(s1.get('event') or '')} {why0}",
+        note=f"{path} {(s1.get('event') or '')} {why0}",
         source="AUTO", thesis=th,
     )
 
