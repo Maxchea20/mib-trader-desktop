@@ -185,3 +185,36 @@ def test_structure_direction_is_persistent_and_causal():
         a = tl.structure_direction(up[:cut])["direction"]
         b = tl.structure_direction(up[:cut] + up[cut:cut + 3])["direction"]
         assert a == b or a == "NEUTRAL"       # extra bars alone don't rewrite history
+
+
+def _c(ts, o, h, l, c):
+    return {"ts": ts, "open": o, "high": h, "low": l, "close": c}
+
+
+def _trade(side="LONG", entry=100.0, risk=10.0):
+    s = 1 if side == "LONG" else -1
+    return {"side": side, "entry": entry, "_risk": risk, "sl": entry - s * risk, "tp": entry + s * 2 * risk,
+            "atr": risk / 1.5, "i": 0, "ts": 0, "exit": None}
+
+
+def test_diag_near_tp_then_sl_and_normal_tp():
+    from src.trend_break.diagnostics import diagnose_trade
+    # entry candle idx0, then: +1.8R (118), pullback, then SL (-1R = 90)
+    path = [_c(0, 100, 100, 100, 100), _c(60, 100, 118, 101, 117), _c(120, 117, 117, 108, 109),
+            _c(180, 109, 109, 95, 96), _c(240, 96, 96, 89, 90)]
+    d = diagnose_trade(_trade(), path)
+    assert d["outcome"] == "SL" and d["final_r"] == -1.0
+    assert d["milestones"][1.5] and d["milestones"][1.75] and not d["milestones"][1.9]
+    assert d["milestones"][1.75]["bars_to_exit"] == 3 and d["mfe"] == pytest.approx(1.8)
+    # straight to TP
+    d2 = diagnose_trade(_trade(), [path[0], _c(60, 100, 121, 99, 120)])
+    assert d2["outcome"] == "TP" and d2["milestones"][2.0]
+
+
+def test_diag_same_candle_tp_and_sl_counts_as_sl_like_backtest():
+    from src.trend_break.diagnostics import diagnose_trade
+    d = diagnose_trade(_trade(), [_c(0, 100, 100, 100, 100), _c(60, 100, 125, 85, 100)])
+    assert d["outcome"] == "SL" and d["sl_candle_touched_tp"] and not d["milestones"][1.0]
+    # SHORT mirror
+    d3 = diagnose_trade(_trade("SHORT"), [_c(0, 100, 100, 100, 100), _c(60, 100, 101, 82, 83), _c(120, 83, 111, 83, 110)])
+    assert d3["outcome"] == "SL" and d3["milestones"][1.75]

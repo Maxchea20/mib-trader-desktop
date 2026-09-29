@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--master-length", type=int, default=14, help="swing lookback for 1D/4H/1H structure")
     ap.add_argument("--master-lengths", default="", help="per-timeframe override, e.g. 1d=5,4h=8,1h=8")
     ap.add_argument("--min-confidence", type=float, default=None, help="override engine min_confidence (default 0.30)")
+    ap.add_argument("--diagnose", action="store_true", help="path diagnostic for every fired trade (analysis only)")
+    ap.add_argument("--diag-csv", default="trend_break_diagnostic.csv")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
@@ -83,6 +85,10 @@ def main():
                    "struct": (d.structure_confidence or {}).get("state"),
                    "align": d.master_alignment, "stop_pct": abs(d.entry - d.sl) / d.entry * 100,
                    "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl), "atr": d.atr, "i": i}
+    if a.diagnose:
+        from src.trend_break.diagnostics import report
+        print(report(trades + ([pos] if pos else []), m1, a.diag_csv))
+        return
     wins = sum(1 for t in trades if t["exit"] == "TP")
     print(f"trades={len(trades)} wins={wins} losses={len(trades)-wins} "
           f"R={sum(t['r'] for t in trades):.1f} open={'yes' if pos else 'no'}")
