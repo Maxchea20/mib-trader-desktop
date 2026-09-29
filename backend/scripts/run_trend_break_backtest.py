@@ -27,6 +27,7 @@ def main():
     ap.add_argument("--start", type=int)
     ap.add_argument("--end", type=int)
     ap.add_argument("--no-align", action="store_true")
+    ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
     cfg = TrendBreakConfig(require_master_alignment=not a.no_align, setup_tf=a.setup_tf)
@@ -60,7 +61,8 @@ def main():
         if d.break_detected:
             cur = last_state.get(d.trend_break_ts)
             if cur is None or RANK.get(d.setup_state, 0) >= RANK.get(cur[1], 0):
-                last_state[d.trend_break_ts] = (d.direction, d.setup_state, d.reason)
+                last_state[d.trend_break_ts] = (d.direction, d.setup_state, d.reason,
+                                                d.master_1d_direction, d.master_4h_direction, d.master_1h_direction)
         if d.fire and d.trend_break_ts not in fired_setups:
             fired_setups.add(d.trend_break_ts)
             pos = {"ts": now, "side": d.direction, "entry": d.entry, "sl": d.sl, "tp": d.tp,
@@ -75,6 +77,23 @@ def main():
     print("\nBLOCKED reasons (non-fired):")
     for r, n in Counter(v[2][:70] for k, v in last_state.items() if k not in fired_setups).most_common(8):
         print(f"  {n:4d}  {r}")
+    blocked = sorted((k, v) for k, v in last_state.items()
+                     if k not in fired_setups and v[1] == "MASTER_DIRECTION")
+    print(f"\nBLOCKED BY MASTER DIRECTION: {len(blocked)} of {len(last_state)} breaks")
+    print(f"  {'break side':10s} {'1D':8s} {'4H':8s} {'1H':8s} {'count':>5s}")
+    for (sd, m1d, m4h, m1h), n in Counter((v[0], v[3], v[4], v[5]) for _, v in blocked).most_common():
+        print(f"  {sd:10s} {m1d:8s} {m4h:8s} {m1h:8s} {n:5d}")
+    if a.blocked_csv:
+        import csv, datetime
+        with open(a.blocked_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["break_ts", "break_time_utc", "side", "final_state", "1d", "4h", "1h", "reason"])
+            for k, v in sorted(last_state.items()):
+                if k in fired_setups:
+                    continue
+                w.writerow([k, datetime.datetime.utcfromtimestamp(k).isoformat(), v[0], v[1],
+                            v[3], v[4], v[5], v[2]])
+        print(f"wrote {a.blocked_csv}")
     print()
     for t in trades:
         print(t)
