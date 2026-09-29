@@ -8,9 +8,10 @@ Per timeframe, independently:
     The lower (ascending) line is anchored at the pivot low:
     value(t) = pivot_price + slope * (t - i).
   * slope = ATR(period)[confirm bar] / length * mult, frozen for that line.
-  * A break is the first CLOSED candle that crosses the projected line
-    (close above the upper line / close below the lower line).  A line
-    yields at most one break; a newer confirmed pivot replaces the line.
+  * A break is the first CLOSED candle after the pivot confirmation bar whose
+    close is above the projected upper line / below the projected lower line
+    (0 -> 1 edge of the up/down state).  The state resets to 0 on each newly
+    confirmed pivot, and that confirmation bar is not itself tested.
 
 Nothing here reads a bar beyond the one being processed, so replaying a
 prefix of history gives the same events as running live.
@@ -96,39 +97,42 @@ def compute(candles: Sequence[dict], length: int = 14, mult: float = 1.0,
     atrs = atr_series(candles, atr_period)
     upper: Optional[Line] = None
     lower: Optional[Line] = None
-    up_done = lo_done = False
+    upos = dnos = 0          # 1 once a close has crossed the line since its pivot
     events: List[Break] = []
 
     for t in range(n):
         i = t - length
         a = atrs[t]
+        ph = pl = False
         if i >= length and a is not None:
             slope = a / length * mult
             h = hi[i]
             if h > max(hi[i - length:i]) and h >= max(hi[i + 1:t + 1]):
                 upper = Line("upper", i, int(candles[i]["ts"]), h, t, slope)
-                up_done = False
+                ph = True
             l = lo[i]
             if l < min(lo[i - length:i]) and l <= min(lo[i + 1:t + 1]):
                 lower = Line("lower", i, int(candles[i]["ts"]), l, t, slope)
-                lo_done = False
-            fresh_up = upper is not None and upper.confirm_index == t
-            fresh_lo = lower is not None and lower.confirm_index == t
-        else:
-            fresh_up = fresh_lo = False
+                pl = True
 
-        if upper is not None and not up_done and t >= 1:
-            v, pv = upper.value_at_index(t), upper.value_at_index(t - 1)
+        # upos := ph ? 0 : close > upper - slope_ph * length ? 1 : upos
+        if ph:
+            upos = 0
+        elif upper is not None:
+            v = upper.value_at_index(t)
             if cl[t] > v:
-                up_done = True
-                if cl[t - 1] <= pv:
+                if upos == 0:
                     events.append(Break(LONG, t, int(candles[t]["ts"]), cl[t], v, upper))
-        if lower is not None and not lo_done and t >= 1:
-            v, pv = lower.value_at_index(t), lower.value_at_index(t - 1)
+                upos = 1
+        # dnos := pl ? 0 : close < lower + slope_pl * length ? 1 : dnos
+        if pl:
+            dnos = 0
+        elif lower is not None:
+            v = lower.value_at_index(t)
             if cl[t] < v:
-                lo_done = True
-                if cl[t - 1] >= pv:
+                if dnos == 0:
                     events.append(Break(SHORT, t, int(candles[t]["ts"]), cl[t], v, lower))
+                dnos = 1
 
     last_atr = next((x for x in reversed(atrs) if x is not None), 0.0)
     return TrendlineResult(events, upper, lower, float(last_atr or 0.0), n - 1)

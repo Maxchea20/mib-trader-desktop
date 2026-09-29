@@ -37,7 +37,7 @@ def test_pivot_needs_right_side_closed():
     # a pivot at index i is only usable from bar i+14
     res = tl.compute(rows)
     for e in res.events:
-        assert e.index >= e.line.confirm_index >= e.line.pivot_index + 14
+        assert e.index > e.line.confirm_index >= e.line.pivot_index + 14
 
 
 def test_wick_through_line_is_not_a_break():
@@ -105,3 +105,45 @@ def test_real_data_fire_levels_from_actual_entry():
     assert d.tp == pytest.approx(d.entry + s * 3.0 * d.atr)
     sig = d.to_signal()
     assert sig["action"] == "FIRE" and sig["stop"] == d.sl and sig["target"] == d.tp
+
+
+def _reference(rows, length=14, mult=1.0):
+    """Bar-by-bar transliteration of the reference indicator's recursion."""
+    atr = tl.atr_series(rows, length)
+    hi = [r["high"] for r in rows]; lo = [r["low"] for r in rows]; cl = [r["close"] for r in rows]
+    upper = lower = slope_ph = slope_pl = 0.0
+    upos = dnos = 0
+    out = []
+    started_up = started_dn = False
+    for t in range(len(rows)):
+        i = t - length
+        ph = pl = False
+        if i >= length and atr[t] is not None:
+            slope = atr[t] / length * mult
+            if hi[i] > max(hi[i - length:i]) and hi[i] >= max(hi[i + 1:t + 1]):
+                ph, slope_ph, upper, started_up = True, slope, hi[i], True
+            if lo[i] < min(lo[i - length:i]) and lo[i] <= min(lo[i + 1:t + 1]):
+                pl, slope_pl, lower, started_dn = True, slope, lo[i], True
+        if not ph:
+            upper -= slope_ph
+        if not pl:
+            lower += slope_pl
+        prev_u, prev_d = upos, dnos
+        upos = 0 if ph else (1 if cl[t] > upper - slope_ph * length else upos)
+        dnos = 0 if pl else (1 if cl[t] < lower + slope_pl * length else dnos)
+        if upos > prev_u and started_up:
+            out.append((t, "LONG", upper - slope_ph * length))
+        if dnos > prev_d and started_dn:
+            out.append((t, "SHORT", lower + slope_pl * length))
+    return out
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_matches_reference_indicator_recursion(seed):
+    rows = _series(500, seed=seed)
+    got = [(e.index, e.direction, e.line_value) for e in tl.compute(rows).events]
+    ref = _reference(rows)
+    assert [(a, b) for a, b, _ in got] == [(a, b) for a, b, _ in ref]
+    for (_, _, x), (_, _, y) in zip(got, ref):
+        assert x == pytest.approx(y, rel=1e-9)
+    assert len(got) > 3
