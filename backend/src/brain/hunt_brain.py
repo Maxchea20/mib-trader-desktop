@@ -240,7 +240,7 @@ def evaluate_hunt(
     if slot in (1, 2) and forming_event is not None:
         developing_side = _dir(getattr(forming_event, "direction", None))
         event_type = (getattr(forming_event, "event_type", None) or "").upper()
-        if developing_side == side and event_type == "BOS" and same_parent_15m(forming_event, rows5):
+        if developing_side == side and event_type in ("BOS", "CHOCH") and same_parent_15m(forming_event, rows5):
             level = m5_event_level(forming_event)
             if level is not None:
                 start_c_watch(
@@ -259,11 +259,11 @@ def evaluate_hunt(
     events5 = m5_structure_events(rows5)
     ev5 = fresh_m5_event(events5, side, ts5, _STATE["consumed"])
     atr15 = _atr15(candles_15m)
-    mom, vol, sr, fvg = aux.get("mom"), aux.get("vol"), aux.get("sr"), aux.get("fvg")
+    mom, sr = aux.get("mom"), aux.get("sr")
 
     if _STATE.get("phase") == "S2_EXTENDED":
         if _STATE.get("thesis_level") is not None:
-            update_pullback(_STATE, price, atr15, sr, fvg, float(_STATE["thesis_level"]), side)
+            update_pullback(_STATE, price, atr15, sr, float(_STATE["thesis_level"]), side)
         if _STATE.get("pullback_confirmed"):
             _STATE["phase"] = "S2_PULLBACK"
         return _wait("S2 measuring pullback.", side, slot, _STATE["phase"])
@@ -279,7 +279,7 @@ def evaluate_hunt(
         return _wait("S2 pullback confirmed — waiting for a new same-direction 5m event.", side, slot, "S2_PULLBACK")
 
     if ev5 is not None and _STATE.get("thesis_level") is not None:
-        executable = s2_executable(price, float(_STATE["thesis_level"]), atr15, mom, vol, sr, side)
+        executable = s2_executable(price, float(_STATE["thesis_level"]), atr15, mom, sr, side)
         if not executable:
             _STATE["consumed"].add(event_key(ev5))
             _STATE["phase"] = "S2_EXTENDED"

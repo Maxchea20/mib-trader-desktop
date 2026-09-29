@@ -7,7 +7,6 @@ EXECUTABLE_DISTANCE_ATR_EXHAUST_MULT = 0.6
 PULLBACK_ZONE_ATR_MIN = 0.25
 PULLBACK_ZONE_ATR_MAX = 0.50
 NEARBY_SR_ATR = 0.30
-NEARBY_FVG_ATR = 0.30
 
 
 def s2_executable(price, origin, atr15, mom, vol, sr, side) -> bool:
@@ -30,12 +29,10 @@ def s2_executable(price, origin, atr15, mom, vol, sr, side) -> bool:
             room = None
 
     blocked_by_sr = room is not None and room <= NEARBY_SR_ATR
-    vol_tags = set(getattr(vol, "tags", None) or [])
-    absorption = any("ABSORPTION" in str(t) for t in vol_tags)
-    return (distance_atr <= threshold) and not blocked_by_sr and not absorption
+    return (distance_atr <= threshold) and not blocked_by_sr
 
 
-def update_pullback(state: dict, price: float, atr15: float, sr, fvg, origin: float, side: str) -> bool:
+def update_pullback(state: dict, price: float, atr15: float, sr, origin: float, side: str) -> bool:
     if state.get("extension_atr_ref") is None and atr15 > 0:
         state["extension_atr_ref"] = atr15
     if state.get("extension_price") is None:
@@ -65,14 +62,7 @@ def update_pullback(state: dict, price: float, atr15: float, sr, fvg, origin: fl
         except Exception:
             near_sr = False
 
-    near_fvg = False
-    if fvg is not None:
-        for lv in (getattr(fvg, "levels", None) or []):
-            if lv.price is not None and abs(lv.price - price) <= NEARBY_FVG_ATR * live_atr:
-                near_fvg = True
-                break
-
-    if near_origin or near_sr or near_fvg:
+    if near_origin or near_sr:
         state["pullback_confirmed"] = True
         return True
     return False
