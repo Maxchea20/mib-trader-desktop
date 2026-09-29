@@ -153,7 +153,7 @@ def analyze(trade: dict, diag: dict, m: float, rows, opens) -> Optional[Dict]:
     seq = sorted([(v["avail"], k, v.get("price")) for k, v in ordered] +
                  [(a["avail"], a["label"], a["price"]) for a in aligned])
     return {"t_ref": t_ref, "t_end": t_end, "events": ev, "first": first, "first5": first5, "seq": seq,
-            "snap": snap, "aligned_n": len(aligned)}
+            "snap": snap, "aligned_n": len(aligned), "aligned": aligned}
 
 
 def report(trades: List[dict], rows, opens, m: float = 1.5, csv_path: Optional[str] = None) -> str:
@@ -264,6 +264,8 @@ def report(trades: List[dict], rows, opens, m: float = 1.5, csv_path: Optional[s
         elif not a["first5"]:
             p(f"  trade {n} ({_fmt_t(t['fire_ts'])} {t['side']}): only 1M-level events: {', '.join(a['events'])}")
 
+    out.extend(sequence_report(fails, wins, rows, opens, m))
+
     if csv_path:
         import csv
         with open(csv_path, "w", newline="") as f:
@@ -278,3 +280,138 @@ def report(trades: List[dict], rows, opens, m: float = 1.5, csv_path: Optional[s
                            [a["first"][0] if a["first"] else "", a["first5"][0] if a["first5"] else ""])
         p(f"\nper-trade events written to {csv_path}")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# What happens AFTER the first 1M opposite CHoCH ("early warning")
+# ---------------------------------------------------------------------------
+FIVE_PLUS = ("M5_opp_BOS", "M5_opp_CHoCH", "M15_opp_BOS", "M15_opp_CHoCH", "LOST_5m", "LOST_15m",
+             "LINE_LOST_setup", "ENGINE_INVALID", "H1_opp_TL_break", "H1_dir_lost")
+
+
+def _mom(rows, opens, tf, t, n, atr, s):
+    k = bisect_right(opens[tf], t - SEC[tf]) - 1
+    if k - n < 0 or not atr:
+        return None
+    return s * (float(rows[tf][k]["close"]) - float(rows[tf][k - n]["close"])) / atr
+
+
+def sequence(trade: dict, diag: dict, a: dict, rows, opens) -> Dict:
+    """Track momentum / continuation / structure after the +m R point and after the first 1M CHoCH."""
+    side, entry, risk, atr = trade["side"], trade["entry"], trade["_risk"], trade["atr"]
+    s = 1.0 if side == "LONG" else -1.0
+    t_ref, t_end = a["t_ref"], a["t_end"]
+    exit_is_sl = diag["outcome"] == "SL"
+    path = []                                   # (avail, favR, advR) of every 1M candle after entry up to exit
+    for c in rows["1m"][trade["i"] + 1:]:
+        avail = int(c["ts"]) + 60
+        if int(c["ts"]) > t_end:
+            break
+        if exit_is_sl and int(c["ts"]) == t_end:
+            continue                            # SL candle: nothing in it is credited (SL-first rule)
+        h, l = float(c["high"]), float(c["low"])
+        fav = ((h - entry) if s > 0 else (entry - l)) / risk
+        adv = ((l - entry) if s > 0 else (entry - h)) / risk
+        path.append((avail, fav, adv))
+    after_ref = [x for x in path if x[0] > t_ref]
+    out: Dict = {"mfe_after_ref": max([x[1] for x in after_ref] or [0.0]),
+                 "low_after_ref": (-1.0 if exit_is_sl else min([x[2] for x in after_ref] or [1.5])),
+                 "minutes_after_ref": (t_end - t_ref) / 60.0}
+    w = a["events"].get("M1_opp_CHoCH")
+    out["warning"] = bool(w)
+    out["mom1_ref"] = _mom(rows, opens, "1m", t_ref, 10, atr, s)
+    out["mom5_ref"] = _mom(rows, opens, "5m", t_ref, 3, atr, s)
+    if not w:
+        out["class"] = "N: no 1M CHoCH warning -- continued to the exit"
+        return out
+    tw = w["avail"]
+    pre_peak = max([x[1] for x in path if x[0] <= tw] or [0.0])
+    new = next((x for x in path if x[0] > tw and x[1] > pre_peak + 1e-9), None)
+    win_end = new[0] if new else t_end
+    seg = [x for x in path if tw < x[0] <= win_end]
+    out.update({"warn_min": (tw - t_ref) / 60.0, "pre_peak": pre_peak,
+                "new_extreme": bool(new), "min_to_new_extreme": ((new[0] - tw) / 60.0 if new else None),
+                "level_before_new": (min([x[2] for x in seg]) if seg else None),
+                "pullback_depth": (pre_peak - min([x[2] for x in seg]) if seg else 0.0),
+                "peak_after_warning": diag["peak_ts"] is not None and diag["peak_ts"] + 60 > tw,
+                "mom1_warn": _mom(rows, opens, "1m", tw, 10, atr, s), "mom5_warn": _mom(rows, opens, "5m", tw, 3, atr, s)})
+    m1s = [_mom(rows, opens, "1m", x[0], 10, atr, s) for x in seg if x[0] <= tw + 1800]
+    m1s = [x for x in m1s if x is not None]
+    out["mom1_min_after_warn_30m"] = min(m1s) if m1s else None
+    between = {k: v for k, v in a["events"].items() if k in FIVE_PLUS and tw < v["avail"] <= win_end}
+    out["between"] = sorted(between, key=lambda k: between[k]["avail"])
+    out["aligned_after_warn"] = sum(1 for x in a["aligned"] if tw < x["avail"] <= win_end and x["label"].startswith(("M1", "M5")))
+    if new:
+        out["class"] = ("A2: warning -> 5M+ structure damaged -> still made a new extreme" if between
+                        else "A: warning -> pullback -> 5M+ structure intact -> new extreme")
+    else:
+        out["class"] = ("B: warning -> no new extreme -> 5M+ structure failed -> SL" if between
+                        else "C: warning -> no new extreme -> no 5M+ failure -> decay to SL")
+    return out
+
+
+def sequence_report(fails, wins, rows, opens, m) -> List[str]:
+    out: List[str] = []
+    p = out.append
+    S = {}
+    for grp in (fails, wins):
+        for t, d, a in grp:
+            S[id(t)] = sequence(t, d, a, rows, opens)
+
+    def f(x, nd=2):
+        return "-" if x is None else f"{x:.{nd}f}"
+
+    p(f"\nSECTION 5 -- what happened AFTER the +{m}R point in each eventual-SL trade")
+    p(f"{'#':>2} {'fire (UTC)':11s} {'S':>1} {'warn+min':>8} {'preWpeak':>8} {'newExt?':>7} {'pullback':>8} "
+      f"{'lowBefNew':>9} {'alignAtt':>8} {'5M+ before new/SL':30s} {'mom1 ref/warn/min30':>22}  class")
+    for n, (t, d, a) in enumerate(fails, 1):
+        q = S[id(t)]
+        p(f"{n:>2} {_fmt_t(t['fire_ts']):11s} {t['side'][:1]:>1} {f(q.get('warn_min'), 0):>8} {f(q.get('pre_peak')):>8} "
+          f"{('yes' if q.get('new_extreme') else 'no'):>7} {f(q.get('pullback_depth')):>8} {f(q.get('level_before_new')):>9} "
+          f"{q.get('aligned_after_warn', 0):>8} {','.join(q.get('between', [])) or '-':30s} "
+          f"{f(q.get('mom1_ref'))}/{f(q.get('mom1_warn'))}/{f(q.get('mom1_min_after_warn_30m')):>6}  {q['class']}")
+    p("  (pullback = pre-warning peak R minus lowest R before a new extreme, or before the SL; momentum = 10-bar 1M net move in ATR)")
+
+    p(f"\nSECTION 6 -- eventual SL vs eventual TP after +{m}R")
+
+    def col(group, key):
+        return [S[id(t)][key] for t, _, _ in group if S[id(t)].get(key) is not None]
+
+    p(f"{'':52s} {'eventual SL':>12s} {'eventual TP':>12s}")
+    p(f"{'trades':52s} {len(fails):>12d} {len(wins):>12d}")
+    p(f"{'had a 1M opposite CHoCH (warning)':52s} {sum(S[id(t)]['warning'] for t, _, _ in fails):>12d} {sum(S[id(t)]['warning'] for t, _, _ in wins):>12d}")
+    for name, key in ((f"median minutes after +{m}R until exit", "minutes_after_ref"),
+                      (f"median max favourable R after +{m}R", "mfe_after_ref"),
+                      (f"median lowest R after +{m}R", "low_after_ref"),
+                      (f"median momentum(1M) at +{m}R", "mom1_ref")):
+        p(f"{name:52s} {f(_med(col(fails, key))):>12s} {f(_med(col(wins, key))):>12s}")
+    fw = [(t, d, a) for t, d, a in fails if S[id(t)]["warning"]]
+    ww = [(t, d, a) for t, d, a in wins if S[id(t)]["warning"]]
+    p("  -- among trades that HAD the 1M CHoCH warning --")
+    for name, key in (("median minutes: +R point -> warning", "warn_min"), ("median pre-warning peak (R)", "pre_peak"),
+                      ("median pullback depth after warning (R)", "pullback_depth"),
+                      ("median lowest R before new extreme / SL", "level_before_new"),
+                      ("median momentum(1M) at warning", "mom1_warn"),
+                      ("median min momentum(1M) in 30 min after warning", "mom1_min_after_warn_30m"),
+                      ("median aligned 1M/5M structure attempts after warning", "aligned_after_warn")):
+        p(f"{name:52s} {f(_med(col(fw, key))):>12s} {f(_med(col(ww, key))):>12s}")
+    p(f"{'made a new extreme after the warning':52s} {sum(S[id(t)]['new_extreme'] for t, _, _ in fw):>9d}/{len(fw):<2d} {sum(S[id(t)]['new_extreme'] for t, _, _ in ww):>9d}/{len(ww):<2d}")
+    p(f"{'MFE occurred after the warning':52s} {sum(S[id(t)]['peak_after_warning'] for t, _, _ in fw):>9d}/{len(fw):<2d} {sum(S[id(t)]['peak_after_warning'] for t, _, _ in ww):>9d}/{len(ww):<2d}")
+    for key in FIVE_PLUS:
+        a_ = sum(key in S[id(t)].get("between", []) for t, _, _ in fw)
+        b_ = sum(key in S[id(t)].get("between", []) for t, _, _ in ww)
+        p(f"{'  ' + key + ' between warning and new extreme/exit':52s} {a_:>9d}/{len(fw):<2d} {b_:>9d}/{len(ww):<2d}")
+
+    p("\nSECTION 7 -- sequence class (after the 1M CHoCH warning) by eventual outcome")
+    classes = sorted({S[id(t)]["class"] for grp in (fails, wins) for t, _, _ in grp})
+    p(f"{'class':78s} {'SL':>4s} {'TP':>4s}")
+    for c in classes:
+        p(f"{c:78s} {sum(S[id(t)]['class'] == c for t, _, _ in fails):>4d} {sum(S[id(t)]['class'] == c for t, _, _ in wins):>4d}")
+
+    p("\nSECTION 8 -- winners that DID show the warning (each row is one trade)")
+    for t, d, a in ww:
+        q = S[id(t)]
+        p(f"  {_fmt_t(t['fire_ts'])} {t['side'][:1]}  warn +{q['warn_min']:.0f}m  pullback {q['pullback_depth']:.2f}R  "
+          f"low {f(q['level_before_new'])}R  new extreme after {f(q['min_to_new_extreme'], 0)}m  5M+ between: "
+          f"{','.join(q['between']) or '-'}  aligned attempts {q['aligned_after_warn']}  class {q['class'][:2]}")
+    return out

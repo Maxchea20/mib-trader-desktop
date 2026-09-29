@@ -276,3 +276,20 @@ def test_forensics_uses_only_candles_closed_before_exit():
     assert {k: v["avail"] for k, v in a["events"].items()} == {k: v["avail"] for k, v in a2["events"].items()}
     assert all(v["avail"] <= a["t_end"] for v in a["events"].values())
     assert all(v["avail"] > a["t_ref"] for v in a["events"].values())
+
+
+def test_forensic_sequence_is_causal_and_classified():
+    from src.trend_break.diagnostics import diagnose_trade
+    from src.trend_break.forensics import analyze, sequence
+    m1, trade = _forensic_fixture()
+    rows, opens = _rows_opens(m1)
+    d = diagnose_trade(trade, m1)
+    a = analyze(trade, d, 1.5, rows, opens)
+    q = sequence(trade, d, a, rows, opens)
+    assert q["class"][0] in "ABCN" and q["minutes_after_ref"] > 0
+    cut = {tf: [c for c in rows[tf] if c["ts"] + {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}[tf] <= d["exit_ts"] + 60] for tf in rows}
+    cut_opens = {k: [c["ts"] for c in v] for k, v in cut.items()}
+    d2 = diagnose_trade(trade, cut["1m"])
+    q2 = sequence(trade, d2, analyze(trade, d2, 1.5, cut, cut_opens), cut, cut_opens)
+    for k in ("class", "new_extreme", "pre_peak", "pullback_depth", "between", "warn_min"):
+        assert q.get(k) == q2.get(k), k
