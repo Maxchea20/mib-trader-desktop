@@ -50,6 +50,10 @@ def main():
         if pos:
             hi, lo = float(bar["high"]), float(bar["low"])
             s = 1 if pos["side"] == "LONG" else -1
+            fav = (hi - pos["entry"]) if s > 0 else (pos["entry"] - lo)
+            adv = (pos["entry"] - lo) if s > 0 else (hi - pos["entry"])
+            pos["mfe"] = max(pos["mfe"], fav / pos["_risk"])
+            pos["mae"] = max(pos["mae"], adv / pos["_risk"])
             hit_sl = lo <= pos["sl"] if s > 0 else hi >= pos["sl"]
             hit_tp = hi >= pos["tp"] if s > 0 else lo <= pos["tp"]
             if hit_sl or hit_tp:
@@ -72,7 +76,11 @@ def main():
         if d.fire and d.trend_break_ts not in fired_setups:
             fired_setups.add(d.trend_break_ts)
             pos = {"ts": now, "side": d.direction, "entry": d.entry, "sl": d.sl, "tp": d.tp,
-                   "break_ts": d.trend_break_ts, "conf": d.confidence}
+                   "break_ts": d.trend_break_ts, "conf": d.confidence,
+                   "q15": (d.m15_quality or {}).get("label"), "q5": (d.m5_quality or {}).get("label"),
+                   "struct": (d.structure_confidence or {}).get("state"),
+                   "align": d.master_alignment, "stop_pct": abs(d.entry - d.sl) / d.entry * 100,
+                   "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl)}
     wins = sum(1 for t in trades if t["exit"] == "TP")
     print(f"trades={len(trades)} wins={wins} losses={len(trades)-wins} "
           f"R={sum(t['r'] for t in trades):.1f} open={'yes' if pos else 'no'}")
@@ -100,6 +108,26 @@ def main():
                 w.writerow([k, datetime.datetime.utcfromtimestamp(k).isoformat(), v[0], v[1],
                             v[3], v[4], v[5], v[2]])
         print(f"wrote {a.blocked_csv}")
+    def bucket(title, keyf):
+        groups = {}
+        for t in trades:
+            groups.setdefault(keyf(t), []).append(t)
+        print(f"\n{title}")
+        print(f"  {'group':22s} {'n':>4s} {'win%':>6s} {'R':>7s} {'avgMFE':>7s} {'avgMAE':>7s}")
+        for k in sorted(groups, key=str):
+            g = groups[k]
+            w = sum(1 for t in g if t["exit"] == "TP")
+            print(f"  {str(k):22s} {len(g):4d} {100*w/len(g):5.0f}% {sum(t['r'] for t in g):7.1f} "
+                  f"{sum(t['mfe'] for t in g)/len(g):7.2f} {sum(t['mae'] for t in g)/len(g):7.2f}")
+    if trades:
+        bucket("BY SIDE", lambda t: t["side"])
+        bucket("BY CONFIDENCE", lambda t: "<0.5" if t["conf"] < .5 else "0.5-0.7" if t["conf"] < .7 else "0.7-0.85" if t["conf"] < .85 else ">=0.85")
+        bucket("BY 15M/setup QUALITY", lambda t: t["q15"])
+        bucket("BY 5M QUALITY", lambda t: t["q5"])
+        bucket("BY CHoCH/BOS GAUGE", lambda t: t["struct"])
+        bucket("BY MASTER ALIGNMENT", lambda t: t["align"])
+        bucket("BY STOP SIZE (% of price)", lambda t: "<0.15%" if t["stop_pct"] < .15 else "0.15-0.3%" if t["stop_pct"] < .3 else "0.3-0.5%" if t["stop_pct"] < .5 else ">=0.5%")
+        bucket("BY HOUR UTC (4h blocks)", lambda t: f"{(t['ts'] % 86400)//14400*4:02d}-{(t['ts'] % 86400)//14400*4+4:02d}h")
     print()
     for t in trades:
         print(t)
