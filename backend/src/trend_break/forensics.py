@@ -415,3 +415,165 @@ def sequence_report(fails, wins, rows, opens, m) -> List[str]:
           f"low {f(q['level_before_new'])}R  new extreme after {f(q['min_to_new_extreme'], 0)}m  5M+ between: "
           f"{','.join(q['between']) or '-'}  aligned attempts {q['aligned_after_warn']}  class {q['class'][:2]}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# WHY did the SL trades fail?  (all SL trades vs all TP trades, from FIRE)
+# ---------------------------------------------------------------------------
+def _fisher_p(a, b, c, d):
+    """Two-sided Fisher exact p for the 2x2 table [[a, b], [c, d]] (pure python)."""
+    from math import comb
+    r1, r2, c1, n = a + b, c + d, a + c, a + b + c + d
+    def pr(x):
+        return comb(r1, x) * comb(r2, c1 - x) / comb(n, c1)
+    p0 = pr(a)
+    lo, hi = max(0, c1 - r2), min(r1, c1)
+    return min(1.0, sum(pr(x) for x in range(lo, hi + 1) if pr(x) <= p0 * (1 + 1e-9)))
+
+
+def _from_fire(trade, diag):
+    d = dict(diag)
+    d["milestones"] = {0.0: {"reach_ts": trade["fire_ts"] - 60, "reach_bar": 0}}
+    return d
+
+
+def why_sl_report(trades: List[dict], rows, opens, csv_path: Optional[str] = None) -> str:
+    out: List[str] = []
+    p = out.append
+    trades = [t for t in trades if t.get("exit")]
+    diags = [diagnose_trade(t, rows["1m"]) for t in trades]
+    S, W = [], []
+    for t, d in zip(trades, diags):
+        a = analyze(t, _from_fire(t, d), 0.0, rows, opens)
+        rec = {"t": t, "d": d, "a": a}
+        (S if d["outcome"] == "SL" else W).append(rec)
+    p("=" * 78)
+    p(f"WHY THE SL TRADES FAILED  ({len(S)} SL vs {len(W)} TP; every measure is causal from FIRE; analysis only)")
+    p("=" * 78)
+
+    # ---- 1. how fast / how far
+    p("\nSECTION 1 -- how far did the SL trades ever get, and how fast did they die")
+    mins = lambda r: (r["a"]["t_end"] - r["t"]["fire_ts"]) / 60.0
+    ms_ = sorted(mins(r) for r in S)
+    mw_ = sorted(mins(r) for r in W)
+    q = lambda x, f: (x[min(len(x) - 1, int(f * len(x)))] if x else None)
+    fm = lambda v, nd=0: "-" if v is None else f"{v:.{nd}f}"
+    p(f"  minutes FIRE -> exit   SL: median {fm(_med(ms_))}  25% {fm(q(ms_, .25))}  75% {fm(q(ms_, .75))}   |   "
+      f"TP: median {fm(_med(mw_))}  25% {fm(q(mw_, .25))}  75% {fm(q(mw_, .75))}")
+    edges = [(-9, .25), (.25, .5), (.5, 1.0), (1.0, 1.5), (1.5, 2.0)]
+    p(f"  {'peak R reached before the SL':30s} {'count':>6s} {'% of SL':>8s} {'median min to SL':>17s}")
+    for lo, hi in edges:
+        g = [r for r in S if lo <= r["d"]["mfe"] < hi]
+        p(f"  {('<%.2fR' % hi) if lo < 0 else ('%.2f-<%.2fR' % (lo, hi)):30s} {len(g):>6d} {100 * len(g) / max(1, len(S)):>7.1f}% {fm(_med([mins(r) for r in g])):>17s}")
+    early = [r for r in S if mins(r) <= 20]
+    p(f"  SL hit within 20 min of FIRE: {len(early)} ({100 * len(early) / len(S):.0f}% of SL); within 60 min: {sum(1 for r in S if mins(r) <= 60)}")
+
+    # ---- 2. taxonomy
+    p("\nSECTION 2 -- mechanism of failure (each SL trade in exactly one bucket, first matching row wins)")
+    LEVEL = ("LOST_5m", "LOST_15m", "LINE_LOST_setup")
+    FIVE = ("M5_opp_BOS", "M5_opp_CHoCH", "M15_opp_BOS", "M15_opp_CHoCH")
+    tax: Dict[str, List[dict]] = {}
+    for r in S:
+        mfe, ev, mn = r["d"]["mfe"], r["a"]["events"], mins(r)
+        if mn <= 20:
+            k = "1. spike stop-out (SL within 20 min of FIRE)"
+        elif mfe >= 1.0:
+            k = "6. worked well (peak >= 1.0R) then failed"
+        elif mfe >= 0.5:
+            k = "5. worked a little (peak 0.5-1.0R) then failed"
+        elif any(x in ev for x in LEVEL):
+            k = "2. never worked; price closed back through the breakout level"
+        elif any(x in ev for x in FIVE):
+            k = "3. never worked; 5M/15M structure reversed against it"
+        else:
+            k = "4. never worked; drifted to the stop (no 5M+ structure event)"
+        tax.setdefault(k, []).append(r)
+    for k in sorted(tax):
+        g = tax[k]
+        p(f"  {k:70s} {len(g):>3d}  ({100 * len(g) / len(S):.0f}%)  median {fm(_med([mins(x) for x in g]))} min to SL")
+
+    # ---- 3. entry state
+    p("\nSECTION 3 -- entry-time conditions: eventual SL vs eventual TP  (Fisher exact, UNADJUSTED for many looks)")
+    def feats(r):
+        t, a = r["t"], r["a"]
+        sn = a["snap"]
+        dist = (t["entry"] - t["break_level"]) / t["atr"] * (1 if t["side"] == "LONG" else -1)
+        since = (t["fire_ts"] - t["setup_ts"] - SEC[t["setup_tf"]]) / 60.0
+        h = (t["fire_ts"] % 86400) // 14400 * 4
+        return {
+            "SHORT": t["side"] == "SHORT",
+            "1H trendline agrees at FIRE": sn.get("h1_at_fire") == t["side"],
+            "last 5M structure event aligned": (sn.get("last_M5") or "").startswith("aligned"),
+            "last 15M structure event aligned": (sn.get("last_M15") or "").startswith("aligned"),
+            "last 1M structure event aligned": (sn.get("last_M1") or "").startswith("aligned"),
+            "confidence >= 0.70": t["conf"] >= 0.7,
+            "CHoCH/BOS gauge = BOS": t["struct"] == "BOS",
+            "CHoCH/BOS gauge = NONE": t["struct"] == "NONE",
+            "master 1D/4H/1H fully aligned": t["align"] == "ALIGNED",
+            "entry within 0.5 ATR of break level": abs(dist) <= 0.5,
+            "entry > 1.0 ATR beyond break level": dist > 1.0,
+            ">60 min between break and FIRE": since > 60,
+            "stop < 0.25% of price": t["stop_pct"] < 0.25,
+            "FIRE 20:00-24:00 UTC": h == 20,
+            "FIRE 00:00-04:00 UTC": h == 0,
+        }
+    FS = [feats(r) for r in S]
+    FW = [feats(r) for r in W]
+    p(f"  {'condition':38s} {'SL':>7s} {'TP':>7s} {'win% if present':>16s} {'win% if absent':>15s} {'p':>7s}")
+    rowsf = []
+    for k in FS[0]:
+        a_ = sum(f[k] for f in FS); c_ = sum(f[k] for f in FW)
+        b_, d_ = len(FS) - a_, len(FW) - c_
+        wp = 100 * c_ / (a_ + c_) if a_ + c_ else 0
+        wa = 100 * d_ / (b_ + d_) if b_ + d_ else 0
+        rowsf.append((k, a_, c_, wp, wa, _fisher_p(a_, b_, c_, d_)))
+    for k, a_, c_, wp, wa, pv in sorted(rowsf, key=lambda x: x[5]):
+        p(f"  {k:38s} {a_:>4d}/{len(FS):<2d} {c_:>4d}/{len(FW):<2d} {wp:>15.0f}% {wa:>14.0f}% {pv:>7.3f}")
+    p(f"  (with {len(rowsf)} conditions tested, expect about {len(rowsf) * 0.05:.1f} at p<0.05 by chance alone)")
+
+    # ---- 4. early behaviour after FIRE, exposure matched
+    p("\nSECTION 4 -- behaviour in the first minutes after FIRE, trades still open at that time (fair exposure)")
+    for T in (15, 30, 60):
+        sl_o = [r for r in S if mins(r) > T]
+        tp_o = [r for r in W if mins(r) > T]
+        def cnt(g, keys):
+            return sum(1 for r in g if any(k in r["a"]["events"] and (r["a"]["events"][k]["avail"] - r["t"]["fire_ts"]) / 60 <= T for k in keys))
+        p(f"  still open at {T:>2d} min: SL {len(sl_o):>2d} / TP {len(tp_o):>2d}   "
+          f"opposite 1M CHoCH by then {cnt(sl_o, ('M1_opp_CHoCH',)):>2d}/{len(sl_o):<2d} vs {cnt(tp_o, ('M1_opp_CHoCH',)):>2d}/{len(tp_o):<2d};  "
+          f"opposite 5M {cnt(sl_o, ('M5_opp_BOS', 'M5_opp_CHoCH')):>2d}/{len(sl_o):<2d} vs {cnt(tp_o, ('M5_opp_BOS', 'M5_opp_CHoCH')):>2d}/{len(tp_o):<2d};  "
+          f"level lost {cnt(sl_o, LEVEL + ('LOST_1m',)):>2d}/{len(sl_o):<2d} vs {cnt(tp_o, LEVEL + ('LOST_1m',)):>2d}/{len(tp_o):<2d}")
+
+    # ---- 5. noise or wrong direction?  what did price do AFTER the stop
+    p("\nSECTION 5 -- after the stop: wrong direction, or stopped by noise?  (diagnostic only; no rule)")
+    m1 = rows["1m"]
+    res = {"recovered to the TP level before a further -1R": 0, "kept going against (hit -2R first)": 0, "chopped (neither within 6h)": 0}
+    for r in S:
+        t, d = r["t"], r["d"]
+        s = 1 if t["side"] == "LONG" else -1
+        k0 = next((k for k in range(t["i"] + 1, len(m1)) if int(m1[k]["ts"]) == d["exit_ts"]), None)
+        outcome = "chopped (neither within 6h)"
+        if k0 is not None:
+            for c in m1[k0 + 1:k0 + 361]:
+                lo = ((float(c["low"]) - t["entry"]) if s > 0 else (t["entry"] - float(c["high"]))) / t["_risk"]
+                hi = ((float(c["high"]) - t["entry"]) if s > 0 else (t["entry"] - float(c["low"]))) / t["_risk"]
+                if lo <= -2.0:
+                    outcome = "kept going against (hit -2R first)"; break
+                if hi >= 2.0:
+                    outcome = "recovered to the TP level before a further -1R"; break
+        res[outcome] += 1
+    for k, v in res.items():
+        p(f"  {k:52s} {v:>3d}  ({100 * v / len(S):.0f}% of SL)")
+    mae = sorted(r["d"]["mae"] for r in W)
+    p(f"  winners' worst drawdown before TP (R): median {fm(_med(mae), 2)}; >=0.5R in {sum(1 for x in mae if x >= 0.5)}/{len(mae)}; >=0.8R in {sum(1 for x in mae if x >= 0.8)}/{len(mae)}")
+
+    if csv_path:
+        import csv
+        with open(csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["fire_time", "side", "outcome", "peak_R", "minutes_to_exit", "bucket"] + list(FS[0]))
+            inv = {id(r): k for k, g in tax.items() for r in g}
+            for r, ft in list(zip(S, FS)) + list(zip(W, FW)):
+                w.writerow([_fmt_t(r["t"]["fire_ts"]), r["t"]["side"], r["d"]["outcome"], round(r["d"]["mfe"], 3),
+                            round(mins(r), 1), inv.get(id(r), "")] + [int(v) for v in ft.values()])
+        p(f"\nper-trade rows written to {csv_path}")
+    return "\n".join(out)

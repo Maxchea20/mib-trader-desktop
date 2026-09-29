@@ -363,3 +363,15 @@ def test_ctp_overlay_is_causal_and_exits_at_next_open():
     cut_opens = {k: [c["ts"] for c in v] for k, v in cut.items()}
     r2 = overlay(trade, diagnose_trade(trade, cut["1m"]), cut, cut_opens, 1.5)
     assert (r["outcome"], r.get("exit_ts"), round(r["r"], 9)) == (r2["outcome"], r2.get("exit_ts"), round(r2["r"], 9))
+
+
+def test_why_sl_report_runs_on_sl_only_and_mixed_groups():
+    from src.trend_break.forensics import why_sl_report, _fisher_p
+    m1, trade = _forensic_fixture()
+    trade.update({"conf": 0.6, "struct": "BOS", "align": "CONFLICT", "stop_pct": 0.3, "setup_ts": m1[1500]["ts"],
+                  "exit": "SL"})
+    rows, opens = _rows_opens(m1)
+    txt = why_sl_report([trade], rows, opens)
+    assert "SECTION 2" in txt and "SECTION 5" in txt
+    assert abs(_fisher_p(10, 0, 0, 10) - 1.08e-5) < 1e-5          # strong association -> tiny p
+    assert _fisher_p(5, 5, 5, 5) == 1.0

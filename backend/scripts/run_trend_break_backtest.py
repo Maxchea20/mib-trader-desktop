@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--forensics-milestone", type=float, default=1.5)
     ap.add_argument("--forensics-csv", default="trend_break_forensics.csv")
     ap.add_argument("--conditioned-tp", action="store_true", help="research overlay: Conditioned TP on the same trades (analysis only)")
+    ap.add_argument("--why-sl", action="store_true", help="why the SL trades failed (all SL vs all TP, from FIRE; analysis only)")
+    ap.add_argument("--why-csv", default="trend_break_why_sl.csv")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
@@ -91,6 +93,10 @@ def main():
                    "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl), "atr": d.atr, "i": i,
                    "break_level": d.break_level, "invalid_level": d.invalid_level, "setup_ts": d.trend_break_ts,
                    "setup_tf": d.setup_tf, "break_line": d.break_1h, "fire_ts": now}
+    if a.why_sl:
+        from src.trend_break.forensics import why_sl_report
+        print(why_sl_report(trades, rows, opens, a.why_csv))
+        return
     if a.conditioned_tp:
         from src.trend_break.conditioned import report as conditioned_report
         print(conditioned_report(trades, rows, opens, 1.5))
