@@ -39,9 +39,15 @@ def main():
     ap.add_argument("--conditioned-tp", action="store_true", help="research overlay: Conditioned TP on the same trades (analysis only)")
     ap.add_argument("--why-sl", action="store_true", help="why the SL trades failed (all SL vs all TP, from FIRE; analysis only)")
     ap.add_argument("--why-csv", default="trend_break_why_sl.csv")
+    ap.add_argument("--db", default=None, help="run on a different market database (e.g. research_binance.db)")
     ap.add_argument("--blocked-csv", help="write every non-fired setup to this CSV")
     ap.add_argument("--setup-tf", default="1h", choices=["1h", "15m"])
     a = ap.parse_args()
+    if a.db:
+        import os
+        db._DB_PATH = os.path.abspath(a.db)
+        os.environ["MARKET_DB_PATH"] = db._DB_PATH
+        print(f"[db] OVERRIDE using {db._DB_PATH}")
     cfg = TrendBreakConfig(require_master_alignment=not a.no_align, setup_tf=a.setup_tf,
                             use_master_filter=not a.no_master,
                             master_length=a.master_length,

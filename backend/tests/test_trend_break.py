@@ -396,3 +396,26 @@ def test_backfill_1m_walks_back_is_idempotent_and_stops_at_history_wall():
     assert lo == HIST_START and hi == now - 60 and cnt == 6000       # reached the wall, no duplicates
     assert any("history limit" in x for x in log)
     assert bf.walk_back(con, fake_fetch, target_start=HIST_START - 60 * 12000, sleep=0, log=lambda *_: None) == 0   # re-run adds nothing
+
+
+def test_research_db_builder_parses_and_aggregates_consistently():
+    import importlib.util, io, zipfile
+    spec = importlib.util.spec_from_file_location("brd", os.path.join(os.path.dirname(__file__), "..", "scripts", "build_research_db.py"))
+    brd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(brd)
+    t0 = 1_700_006_400 - 1_700_006_400 % 86400            # aligned to a UTC day
+    lines = ["open_time,open,high,low,close,volume,close_time,quote_volume,count,tb,tq,ignore"]
+    for i in range(1500):                                  # 25 hours of 1m
+        p = 100 + i * 0.01
+        lines.append(f"{(t0 + 60 * i) * 1000},{p},{p + 0.5},{p - 0.5},{p + 0.1},1.0,0,0,0,0,0,0")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("x.csv", "\n".join(lines))
+    rows = brd.parse_zip(buf.getvalue())
+    assert len(rows) == 1500 and rows[0][0] == t0                       # header skipped, ms -> s
+    h1 = brd.aggregate(rows, 3600)
+    assert len(h1) == 25 and h1[0][0] == t0 and h1[0][5] == 60.0        # complete hours only, volume summed
+    assert h1[0][2] == max(r[2] for r in rows[:60]) and h1[0][4] == rows[59][4]
+    d1 = brd.aggregate(rows, 86400)
+    assert len(d1) == 1                                                  # only the one complete day
+    assert len(brd.aggregate(rows[:100], 3600)) == 1                     # partial hour at the edge is dropped

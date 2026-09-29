@@ -135,6 +135,32 @@ def walk_forward(con, fetch, sleep=0.25, log=print, now=None):
     return total
 
 
+def find_gaps(con, symbol=SYMBOL, min_gap=180):
+    prev, gaps = None, []
+    for (ts,) in con.execute("select ts from candles where symbol=? and timeframe='1m' order by ts", (symbol,)):
+        if prev is not None and ts - prev > min_gap:
+            gaps.append((prev, ts))
+        prev = ts
+    return gaps
+
+
+def fill_gaps(con, fetch, sleep=0.25, log=print):
+    total = 0
+    for a, b in find_gaps(con):
+        start = a
+        while start < b:
+            end = min(b, start + CHUNK)
+            rows = fetch(start, end)
+            before = con.total_changes
+            if rows:
+                save(con, rows)
+            total += con.total_changes - before
+            log(f"gap {time.strftime('%Y-%m-%d %H:%M', time.gmtime(start))}: {len(rows)} returned")
+            start = end
+            time.sleep(sleep)
+    return total
+
+
 def verify(con, log=print):
     lo, hi, n = bounds(con)
     if lo is None:
@@ -158,6 +184,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=365, help="how far back from NOW to go")
     ap.add_argument("--forward", action="store_true", help="also fill from the newest row up to now")
+    ap.add_argument("--fill-gaps", action="store_true", help="download the missing minutes inside the existing range")
     ap.add_argument("--verify", action="store_true", help="only report coverage and gaps")
     ap.add_argument("--db", default=None, help="database path (default: the one the backtest uses)")
     a = ap.parse_args()
@@ -170,7 +197,11 @@ def main():
     if not a.verify:
         fetch = make_fetcher()
         target = int(time.time()) - a.days * 86400
-        n = walk_back(con, fetch, target)
+        n = 0
+        if a.fill_gaps:
+            n += fill_gaps(con, fetch)
+        else:
+            n += walk_back(con, fetch, target)
         if a.forward:
             n += walk_forward(con, fetch)
         print(f"done: {n} new candles")
