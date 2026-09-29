@@ -23,23 +23,50 @@ CHUNK = 1999 * 60          # stay under the 2000-candle-per-request limit
 
 
 def make_fetcher(symbol=SYMBOL, retries=4):
-    import requests
-    sess = requests.Session()
-    url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}"
+    """Use the app's own MEXC connection method (Google DNS + IP-forced HTTPS with correct SNI),
+    because the normal route to contract.mexc.com times out on this machine."""
+    import http.client
+    import json
+    from src.market_data.mexc_market_data import (MEXC_HOST, MexcHTTPSConnection, resolve_mexc_ips)
+
+    ips = resolve_mexc_ips()
+    print(f"[mexc] resolved {MEXC_HOST} -> {ips}")
+
+    def get(path):
+        last = None
+        for ip in ips:
+            conn = None
+            try:
+                conn = MexcHTTPSConnection(ip=ip, hostname=MEXC_HOST, timeout=20)
+                conn.request("GET", path, headers={"Host": MEXC_HOST, "User-Agent": "MIB-Trader/1.0",
+                                                   "Accept": "application/json", "Connection": "close"})
+                r = conn.getresponse()
+                body = r.read()
+                if r.status != 200:
+                    raise RuntimeError(f"HTTP {r.status}: {body[:200]!r}")
+                return json.loads(body.decode("utf-8"))
+            except Exception as e:  # noqa: BLE001
+                last = e
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+        raise RuntimeError(f"could not reach MEXC via {ips}: {last}")
 
     def fetch(start, end):
+        path = f"/api/v1/contract/kline/{symbol}?interval=Min1&start={int(start)}&end={int(end)}"
         for k in range(retries):
             try:
-                r = sess.get(url, params={"interval": "Min1", "start": int(start), "end": int(end)}, timeout=20)
-                r.raise_for_status()
-                js = r.json()
+                js = get(path)
                 if not js.get("success"):
                     raise RuntimeError(f"MEXC said: {js}")
                 d = js.get("data") or {}
                 t = d.get("time") or []
                 return [(symbol, "1m", int(t[i]), float(d["open"][i]), float(d["high"][i]), float(d["low"][i]),
                          float(d["close"][i]), float(d["vol"][i])) for i in range(len(t))]
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 if k == retries - 1:
                     raise
                 time.sleep(1.5 * (k + 1))
