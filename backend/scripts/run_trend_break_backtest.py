@@ -80,7 +80,7 @@ def main():
                    "q15": (d.m15_quality or {}).get("label"), "q5": (d.m5_quality or {}).get("label"),
                    "struct": (d.structure_confidence or {}).get("state"),
                    "align": d.master_alignment, "stop_pct": abs(d.entry - d.sl) / d.entry * 100,
-                   "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl)}
+                   "mfe": 0.0, "mae": 0.0, "_risk": abs(d.entry - d.sl), "atr": d.atr, "i": i}
     wins = sum(1 for t in trades if t["exit"] == "TP")
     print(f"trades={len(trades)} wins={wins} losses={len(trades)-wins} "
           f"R={sum(t['r'] for t in trades):.1f} open={'yes' if pos else 'no'}")
@@ -108,6 +108,33 @@ def main():
                 w.writerow([k, datetime.datetime.utcfromtimestamp(k).isoformat(), v[0], v[1],
                             v[3], v[4], v[5], v[2]])
         print(f"wrote {a.blocked_csv}")
+    def sweep():
+        """Same entries and same 1.5 ATR stop; vary only the target.  Each trade is
+        simulated independently on 1M bars (ignores the one-position rule)."""
+        print("\nTARGET SWEEP (stop fixed at %.1f ATR; every fired entry simulated on its own)" % cfg.sl_atr)
+        print(f"  {'TP (ATR)':>9s} {'R at win':>9s} {'n':>4s} {'win%':>6s} {'R total':>8s} {'R/trade':>8s}")
+        for tpm in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0):
+            tot = wins = 0
+            for t in trades:
+                sg = 1 if t["side"] == "LONG" else -1
+                sl = t["entry"] - sg * cfg.sl_atr * t["atr"]
+                tp = t["entry"] + sg * tpm * t["atr"]
+                res = None
+                for c in m1[t["i"] + 1:t["i"] + 4000]:
+                    h, l = float(c["high"]), float(c["low"])
+                    hs = l <= sl if sg > 0 else h >= sl
+                    ht = h >= tp if sg > 0 else l <= tp
+                    if hs:
+                        res = -1.0
+                        break
+                    if ht:
+                        res = tpm / cfg.sl_atr
+                        wins += 1
+                        break
+                tot += res if res is not None else 0.0
+            n = len(trades)
+            print(f"  {tpm:9.1f} {tpm/cfg.sl_atr:9.2f} {n:4d} {100*wins/n:5.0f}% {tot:8.1f} {tot/n:8.2f}")
+
     def bucket(title, keyf):
         groups = {}
         for t in trades:
@@ -120,6 +147,7 @@ def main():
             print(f"  {str(k):22s} {len(g):4d} {100*w/len(g):5.0f}% {sum(t['r'] for t in g):7.1f} "
                   f"{sum(t['mfe'] for t in g)/len(g):7.2f} {sum(t['mae'] for t in g)/len(g):7.2f}")
     if trades:
+        sweep()
         bucket("BY SIDE", lambda t: t["side"])
         bucket("BY CONFIDENCE", lambda t: "<0.5" if t["conf"] < .5 else "0.5-0.7" if t["conf"] < .7 else "0.7-0.85" if t["conf"] < .85 else ">=0.85")
         bucket("BY 15M/setup QUALITY", lambda t: t["q15"])
