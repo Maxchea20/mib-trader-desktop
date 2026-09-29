@@ -9,7 +9,7 @@ PULLBACK_ZONE_ATR_MAX = 0.50
 NEARBY_SR_ATR = 0.30
 
 
-def s2_executable(price, origin, atr15, mom, vol, sr, side) -> bool:
+def s2_executable(price, origin, atr15, mom, sr, side) -> bool:
     if not origin or atr15 <= 0:
         return False
     distance_atr = abs(price - origin) / atr15
