@@ -24,7 +24,7 @@ def diagnose_trade(t: dict, candles: Sequence[dict], tp_r: float = 2.0) -> Dict:
     s = 1 if t["side"] == "LONG" else -1
     entry, risk = float(t["entry"]), float(t["_risk"])
     reach: Dict[float, dict] = {}
-    peak, trough = 0.0, 0.0
+    peak, trough, peak_ts = 0.0, 0.0, None
     outcome, exit_n, exit_fav, exit_ts = "OTHER", None, 0.0, None
     last_close_r = 0.0
     n = 0
@@ -43,7 +43,8 @@ def diagnose_trade(t: dict, candles: Sequence[dict], tp_r: float = 2.0) -> Dict:
             m["min_after"] = min(m["min_after"], adv)
             m["max_after"] = max(m["max_after"], fav)
         trough = min(trough, adv)
-        peak = max(peak, fav)
+        if fav > peak:
+            peak, peak_ts = fav, int(c["ts"])
         for m in MILESTONES:
             if m not in reach and fav >= m:
                 reach[m] = {"n": n, "ts": int(c["ts"]), "max_after": fav, "min_after": float("inf")}
@@ -64,7 +65,7 @@ def diagnose_trade(t: dict, candles: Sequence[dict], tp_r: float = 2.0) -> Dict:
                  "min_after": min_after, "drawdown": max(0.0, m - min_after),
                  "bars_to_exit": exit_n - r["n"], "eventual": outcome}
     return {"outcome": outcome, "final_r": final_r, "mfe": peak, "mfe_incl_exit_candle": max(peak, exit_fav),
-            "mae": -trough, "exit_ts": exit_ts, "exit_bar": exit_n, "sl_candle_touched_tp": outcome == "SL" and exit_fav >= tp_r,
+            "mae": -trough, "peak_ts": peak_ts, "exit_ts": exit_ts, "exit_bar": exit_n, "sl_candle_touched_tp": outcome == "SL" and exit_fav >= tp_r,
             "milestones": ms}
 
 

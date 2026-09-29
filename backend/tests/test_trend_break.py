@@ -218,3 +218,61 @@ def test_diag_same_candle_tp_and_sl_counts_as_sl_like_backtest():
     # SHORT mirror
     d3 = diagnose_trade(_trade("SHORT"), [_c(0, 100, 100, 100, 100), _c(60, 100, 101, 82, 83), _c(120, 83, 111, 83, 110)])
     assert d3["outcome"] == "SL" and d3["milestones"][1.75]
+
+
+def _agg(m1, sec):
+    out = {}
+    for c in m1:
+        k = c["ts"] - c["ts"] % sec
+        b = out.get(k)
+        if b is None:
+            out[k] = {"ts": k, "open": c["open"], "high": c["high"], "low": c["low"], "close": c["close"]}
+        else:
+            b["high"], b["low"], b["close"] = max(b["high"], c["high"]), min(b["low"], c["low"]), c["close"]
+    return [out[k] for k in sorted(out)]
+
+
+def _forensic_fixture():
+    rnd = random.Random(5)
+    m1, p, t0 = [], 100.0, 1_700_000_000 - (1_700_000_000 % 3600)
+    for i in range(2600):
+        o = p
+        if i < 2000:
+            p += rnd.uniform(-0.6, 0.6)
+        elif i < 2040:
+            p += 0.5 + rnd.uniform(-0.05, 0.05)     # rally to about +1.7R
+        else:
+            p -= 0.35 + rnd.uniform(-0.1, 0.1)      # reversal to the stop
+        m1.append({"ts": t0 + 60 * i, "open": o, "close": p, "high": max(o, p) + 0.1, "low": min(o, p) - 0.1})
+    entry = m1[2000]["close"]
+    risk = 12.0
+    trade = {"side": "LONG", "entry": entry, "_risk": risk, "sl": entry - risk, "tp": entry + 2 * risk,
+             "atr": risk / 1.5, "i": 2000, "ts": m1[2000]["ts"] + 60, "fire_ts": m1[2000]["ts"] + 60,
+             "break_level": entry - 3.0, "invalid_level": entry - 12.0, "setup_tf": "15m",
+             "break_line": {"line_kind": "upper", "pivot_ts": m1[1500]["ts"], "pivot_price": entry + 4, "slope": 0.001},
+             "exit": None}
+    return m1, trade
+
+
+def _rows_opens(m1):
+    rows = {"1m": m1, "5m": _agg(m1, 300), "15m": _agg(m1, 900), "1h": _agg(m1, 3600)}
+    return rows, {k: [c["ts"] for c in v] for k, v in rows.items()}
+
+
+def test_forensics_uses_only_candles_closed_before_exit():
+    from src.trend_break.diagnostics import diagnose_trade
+    from src.trend_break.forensics import analyze
+    m1, trade = _forensic_fixture()
+    rows, opens = _rows_opens(m1)
+    d = diagnose_trade(trade, m1)
+    assert d["outcome"] == "SL" and d["milestones"][1.5]
+    a = analyze(trade, d, 1.5, rows, opens)
+    assert a and a["events"]
+    # delete every candle that had not closed by the exit candle's open
+    t_end = d["exit_ts"]
+    cut = {tf: [c for c in rows[tf] if c["ts"] + {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}[tf] <= t_end + 60] for tf in rows}
+    cut_opens = {k: [c["ts"] for c in v] for k, v in cut.items()}
+    a2 = analyze(trade, diagnose_trade(trade, cut["1m"]), 1.5, cut, cut_opens)
+    assert {k: v["avail"] for k, v in a["events"].items()} == {k: v["avail"] for k, v in a2["events"].items()}
+    assert all(v["avail"] <= a["t_end"] for v in a["events"].values())
+    assert all(v["avail"] > a["t_ref"] for v in a["events"].values())
