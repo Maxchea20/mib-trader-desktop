@@ -51,7 +51,7 @@ def current_forming_15m_event(
     return current[-1] if current else None
 
 
-def developing_bos_for_thesis(
+def developing_event_for_thesis(
     candles_15m: List[dict],
     candles_5m: List[dict],
     thesis_direction: str,
@@ -59,7 +59,7 @@ def developing_bos_for_thesis(
     ev = current_forming_15m_event(candles_15m, candles_5m)
     if ev is None:
         return None
-    if (getattr(ev, "event_type", None) or "").upper() != "BOS":
+    if (getattr(ev, "event_type", None) or "").upper() not in ("BOS", "CHOCH"):
         return None
     if _dir(getattr(ev, "direction", None)) != thesis_direction:
         return None
@@ -72,7 +72,7 @@ def qualify_s1(
     thesis_direction: str,
     consumed: set,
 ) -> Optional[Tuple[Any, Any]]:
-    """S1 = current forming 15m developing BOS + current M5 same-direction BOS."""
+    """S1 = current forming 15m developing CHoCH/BOS + current M5 same-direction BOS."""
     if not candles_5m:
         return None
 
@@ -82,7 +82,7 @@ def qualify_s1(
     if slot not in (1, 2):
         return None
 
-    ev15 = developing_bos_for_thesis(candles_15m, candles_5m, thesis_direction)
+    ev15 = developing_event_for_thesis(candles_15m, candles_5m, thesis_direction)
     if ev15 is None:
         return None
 
@@ -90,7 +90,7 @@ def qualify_s1(
     ev5 = fresh_m5_event(events5, thesis_direction, ts5, consumed)
     if ev5 is None:
         return None
-    if (getattr(ev5, "event_type", None) or "").upper() != "BOS":
+    if (getattr(ev5, "event_type", None) or "").upper() not in ("BOS", "CHOCH"):
         return None
 
     level = m5_event_level(ev5)
