@@ -49,7 +49,8 @@ class TrendBreakConfig:
     atr_tf: str = "15m"
     sl_atr: float = 1.5
     tp_atr: float = 3.0
-    require_master_alignment: bool = True   # 1D and 4H must both agree with the 1H break
+    use_master_filter: bool = True          # False = master direction is reported but never blocks
+    require_master_alignment: bool = True   # every master timeframe must agree with the break
     setup_max_age_bars: int = 8             # setup-timeframe bars a setup may stay alive
     quality_window: int = 6
     min_quality: float = 0.20               # floor only; quality is otherwise graded
@@ -232,7 +233,9 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
         d.setup_state, d.invalidated = EXPIRED, True
         d.reason = f"{stf.upper()} {side} break older than {cfg.setup_max_age_bars} bars — expired"
         return d
-    if d.master_alignment == "CONFLICT" or (cfg.require_master_alignment and d.master_alignment != "ALIGNED"):
+    if cfg.use_master_filter and (
+            d.master_alignment == "CONFLICT"
+            or (cfg.require_master_alignment and d.master_alignment != "ALIGNED")):
         d.setup_state = MASTER_DIRECTION
         d.reason = (f"{stf.upper()} {side} break not backed by master direction "
                     f"1D={d1} / 4H={d4}" + (f" / 1H={d1h}" if "1h" in masters else ""))
