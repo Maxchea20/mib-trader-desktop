@@ -1,6 +1,7 @@
 """Trend Break engine — the single setup and the single FIRE authority.
 
-  1D + 4H trendline bias      -> master direction (context only)
+  1D + 4H swing structure     -> master direction (context only; NEUTRAL until a
+                                 trend is confirmed, flips only when structure flips)
   1H closed-candle line break -> the ONLY setup
   15M / 5M                    -> break-candle quality (graded, not a setup)
   CHoCH / BOS                 -> confidence gauge only
@@ -82,6 +83,7 @@ class TrendBreakDecision:
     master_1h_direction: str = "NEUTRAL"    # only used when setup_tf == "15m"
     setup_tf: str = "1h"
     master_alignment: str = "NONE"
+    master_detail: Dict[str, Any] = field(default_factory=dict)
     trendline_1h_direction: str = "NEUTRAL"
     trendline_1h_value: Optional[float] = None
     break_detected: bool = False
@@ -132,6 +134,19 @@ def _lines(rows: Sequence[dict], tf: str, cfg: TrendBreakConfig) -> tl.Trendline
         if len(_TL_CACHE) > 64:
             _TL_CACHE.clear()
         hit = _TL_CACHE[key] = tl.compute(rows, cfg.length, cfg.slope_mult, cfg.atr_period)
+    return hit
+
+
+_ST_CACHE: Dict[tuple, Dict] = {}
+
+
+def _structure(rows: Sequence[dict], tf: str, cfg: TrendBreakConfig) -> Dict:
+    key = (tf, len(rows), rows[0]["ts"], rows[-1]["ts"], cfg.length)
+    hit = _ST_CACHE.get(key)
+    if hit is None:
+        if len(_ST_CACHE) > 64:
+            _ST_CACHE.clear()
+        hit = _ST_CACHE[key] = tl.structure_direction(rows, cfg.length)
     return hit
 
 
@@ -194,7 +209,9 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
             continue
         rows = data[tf]
         if len(rows) >= 2 * cfg.length + 2:
-            setattr(d, attr, tl.direction(_lines(rows, tf, cfg), rows))
+            st = _structure(rows, tf, cfg)
+            setattr(d, attr, st["direction"])
+            d.master_detail[tf] = st
         else:
             d.notes.append(f"{tf}: not enough candles for trendline ({len(rows)})")
 

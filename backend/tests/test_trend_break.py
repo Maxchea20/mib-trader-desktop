@@ -158,3 +158,30 @@ def test_setup_tf_15m_uses_1h_as_third_master():
     assert d1.setup_tf == "1h" and d1.master_1h_direction == "NEUTRAL"
     with pytest.raises(ValueError):
         evaluate(rows, config=TrendBreakConfig(setup_tf="5m"))
+
+
+def _zig(n, slope, amp=15.0, period=70):
+    out, prev = [], 100.0
+    for i in range(n):
+        c = 100 + slope * i + amp * math.sin(2 * math.pi * i / period)
+        out.append({"ts": 1_700_000_000 + i * 3600, "open": prev, "close": c,
+                    "high": max(prev, c) + 0.5, "low": min(prev, c) - 0.5, "volume": 1.0})
+        prev = c
+    return out
+
+
+def test_structure_direction_up_down_and_neutral():
+    assert tl.structure_direction(_zig(400, 0.6))["direction"] == "LONG"
+    assert tl.structure_direction(_zig(400, -0.6))["direction"] == "SHORT"
+    assert tl.structure_direction(_zig(30, 0.6))["direction"] == "NEUTRAL"   # nothing confirmed yet
+    assert tl.structure_direction(_zig(400, 0.0))["direction"] in ("NEUTRAL",)  # flat = no trend
+
+
+def test_structure_direction_is_persistent_and_causal():
+    up = _zig(400, 0.6)
+    # a later pullback that only lowers the swing high must not flip an established LONG
+    assert tl.structure_direction(up)["direction"] == "LONG"
+    for cut in (200, 300):
+        a = tl.structure_direction(up[:cut])["direction"]
+        b = tl.structure_direction(up[:cut] + up[cut:cut + 3])["direction"]
+        assert a == b or a == "NEUTRAL"       # extra bars alone don't rewrite history

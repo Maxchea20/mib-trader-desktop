@@ -19,7 +19,7 @@ from src.trend_break.engine import TF_SEC  # noqa: E402
 RANK = {"EXPIRED": 0, "MASTER_DIRECTION": 1, "TREND_BREAK_1H": 2, "BREAK_15M_CONFIRMATION": 3,
         "BREAK_5M_CONFIRMATION": 4, "WAIT_PULLBACK": 5, "1M_ENTRY_OPPORTUNITY": 6,
         "CANCELLED": 7, "DONE": 8, "FIRE": 9}
-LIMITS = {"1d": 120, "4h": 200, "1h": 300, "15m": 300, "5m": 300, "1m": 700}
+LIMITS = {"1d": 400, "4h": 600, "1h": 600, "15m": 400, "5m": 300, "1m": 700}
 
 
 def main():

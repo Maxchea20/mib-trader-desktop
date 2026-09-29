@@ -131,9 +131,9 @@ def collect_observations(
     rows15 = candles_15m if candles_15m else (candles if timeframe == "15m" else None)
     try:
         tb_candles = {
-            "1d": dao.read_closed_candles("1d", limit=120),
-            "4h": candles_4h or dao.read_closed_candles("4h", limit=200),
-            "1h": candles_1h or dao.read_closed_candles("1h", limit=300),
+            "1d": dao.read_closed_candles("1d", limit=400),
+            "4h": dao.read_closed_candles("4h", limit=600),
+            "1h": dao.read_closed_candles("1h", limit=600),
             "15m": rows15 or dao.read_closed_candles("15m", limit=300),
             "5m": candles_5m or dao.read_closed_candles("5m", limit=300),
             "1m": dao.read_closed_candles("1m", limit=700),

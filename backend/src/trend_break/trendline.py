@@ -164,3 +164,43 @@ def as_dict(res: TrendlineResult) -> Dict:
         return {"pivot_ts": x.pivot_ts, "pivot_price": x.pivot_price,
                 "slope": x.slope, "value_now": x.value_at_index(res.last_index)}
     return {"upper": ln(res.upper), "lower": ln(res.lower), "atr": res.atr}
+
+
+def structure_direction(candles: Sequence[dict], length: int = 14) -> Dict:
+    """Persistent swing-structure trend (LONG / SHORT / NEUTRAL).
+
+    Uses the same causally confirmed pivots as the trendlines (a pivot only
+    counts once `length` bars to its right have closed).  Each time a pivot
+    is confirmed, and at least two pivot highs and two pivot lows exist:
+      * latest high > previous high AND latest low > previous low -> LONG
+      * latest high < previous high AND latest low < previous low -> SHORT
+      * otherwise the previous direction is kept.
+    It starts NEUTRAL and stays NEUTRAL until a trend is confirmed, so it
+    only flips when the structure flips (slowly on high timeframes).
+    """
+    n = len(candles)
+    hi = [float(c["high"]) for c in candles]
+    lo = [float(c["low"]) for c in candles]
+    highs: List[tuple] = []      # (pivot_index, price)
+    lows: List[tuple] = []
+    state = "NEUTRAL"
+    since_ts: Optional[int] = None
+    for t in range(2 * length, n):
+        i = t - length
+        changed = False
+        if hi[i] > max(hi[i - length:i]) and hi[i] >= max(hi[i + 1:t + 1]):
+            highs.append((i, hi[i]))
+            changed = True
+        if lo[i] < min(lo[i - length:i]) and lo[i] <= min(lo[i + 1:t + 1]):
+            lows.append((i, lo[i]))
+            changed = True
+        if changed and len(highs) >= 2 and len(lows) >= 2:
+            up = highs[-1][1] > highs[-2][1] and lows[-1][1] > lows[-2][1]
+            dn = highs[-1][1] < highs[-2][1] and lows[-1][1] < lows[-2][1]
+            new = LONG if up else SHORT if dn else state
+            if new != state:
+                state, since_ts = new, int(candles[t]["ts"])
+    return {
+        "direction": state, "since_ts": since_ts,
+        "last_highs": [p for _, p in highs[-2:]], "last_lows": [p for _, p in lows[-2:]],
+    }
