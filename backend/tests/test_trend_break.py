@@ -147,3 +147,14 @@ def test_matches_reference_indicator_recursion(seed):
     for (_, _, x), (_, _, y) in zip(got, ref):
         assert x == pytest.approx(y, rel=1e-9)
     assert len(got) > 3
+
+
+def test_setup_tf_15m_uses_1h_as_third_master():
+    from src.trend_break.engine import TF_SEC
+    rows = {tf: _series(120, seed=3, step=TF_SEC[tf]) for tf in TF_SEC}
+    d = evaluate(rows, config=TrendBreakConfig(setup_tf="15m"))
+    assert d.setup_tf == d.trend_break_timeframe == "15m" and d.reason
+    d1 = evaluate(rows, config=TrendBreakConfig(setup_tf="1h"))
+    assert d1.setup_tf == "1h" and d1.master_1h_direction == "NEUTRAL"
+    with pytest.raises(ValueError):
+        evaluate(rows, config=TrendBreakConfig(setup_tf="5m"))

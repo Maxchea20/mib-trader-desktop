@@ -42,6 +42,7 @@ EXPIRED = "EXPIRED"
 
 @dataclass
 class TrendBreakConfig:
+    setup_tf: str = "1h"                    # "1h" (1D+4H master) or "15m" (1D+4H+1H master)
     length: int = 14
     slope_mult: float = 1.0
     atr_period: int = 14
@@ -49,7 +50,7 @@ class TrendBreakConfig:
     sl_atr: float = 1.5
     tp_atr: float = 3.0
     require_master_alignment: bool = True   # 1D and 4H must both agree with the 1H break
-    setup_max_age_bars: int = 8             # 1H bars a setup may stay alive
+    setup_max_age_bars: int = 8             # setup-timeframe bars a setup may stay alive
     quality_window: int = 6
     min_quality: float = 0.20               # floor only; quality is otherwise graded
     min_confidence: float = 0.30
@@ -77,6 +78,8 @@ class TrendBreakDecision:
     invalid_level: Optional[float] = None
     master_1d_direction: str = "NEUTRAL"
     master_4h_direction: str = "NEUTRAL"
+    master_1h_direction: str = "NEUTRAL"    # only used when setup_tf == "15m"
+    setup_tf: str = "1h"
     master_alignment: str = "NONE"
     trendline_1h_direction: str = "NEUTRAL"
     trendline_1h_value: Optional[float] = None
@@ -147,9 +150,10 @@ def _atr_at(rows: Sequence[dict], asof: float, tf: str, cfg: TrendBreakConfig) -
 
 def _gauges(d: str, b: tl.Break, data: Dict[str, List[dict]], asof: float,
             cfg: TrendBreakConfig, master_score: float) -> Dict[str, Any]:
+    setup_sec = TF_SEC[cfg.setup_tf]
     c15 = _closed(data["15m"], "15m", asof)
     c5 = _closed(data["5m"], "5m", asof)
-    lv = lambda ts: b.line.value_at_ts(ts, TF_SEC["1h"])
+    lv = lambda ts: b.line.value_at_ts(ts, setup_sec)
     q15 = break_quality(c15, d, lv, b.ts, 900, cfg.quality_window, cfg.atr_period)
     q5 = break_quality(c5, d, lv, b.ts, 300, cfg.quality_window, cfg.atr_period)
     st = structure_gauge(c15, c5, d, b.ts)
@@ -170,31 +174,40 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
     every candle is closed."""
     cfg = config or TrendBreakConfig()
     d = TrendBreakDecision()
+    if cfg.setup_tf not in ("1h", "15m"):
+        raise ValueError("setup_tf must be '1h' or '15m'")
+    stf = cfg.setup_tf
+    ssec = TF_SEC[stf]
+    d.setup_tf = d.trend_break_timeframe = stf
+    masters = ("1d", "4h") if stf == "1h" else ("1d", "4h", "1h")
     data = {tf: _closed(candles.get(tf), tf, now_ts) for tf in TF_SEC}
-    if len(data["1h"]) < 2 * cfg.length + 2 or not data["1m"] or not data["15m"]:
+    if len(data[stf]) < 2 * cfg.length + 2 or not data["1m"] or not data["15m"]:
         d.reason = "insufficient closed candle history"
         return d
     t_now = float(data["1m"][-1]["ts"]) + 60.0
 
     # 1D / 4H master direction (context only)
-    for tf, attr in (("1d", "master_1d_direction"), ("4h", "master_4h_direction")):
+    for tf, attr in (("1d", "master_1d_direction"), ("4h", "master_4h_direction"),
+                     ("1h", "master_1h_direction")):
+        if tf not in masters:
+            continue
         rows = data[tf]
         if len(rows) >= 2 * cfg.length + 2:
             setattr(d, attr, tl.direction(_lines(rows, tf, cfg), rows))
         else:
             d.notes.append(f"{tf}: not enough candles for trendline ({len(rows)})")
 
-    res1h = _lines(data["1h"], "1h", cfg)
+    res1h = _lines(data[stf], stf, cfg)      # the setup-timeframe trendline
     b = res1h.latest_break()
-    d.trendline_1h_direction = tl.direction(res1h, data["1h"])
+    d.trendline_1h_direction = tl.direction(res1h, data[stf])
     if b is None:
         d.setup_state = MASTER_DIRECTION
-        d.reason = "no 1H trendline break yet"
+        d.reason = f"no {stf.upper()} trendline break yet"
         return d
 
     side = b.direction
     s = 1.0 if side == LONG else -1.0
-    break_close = b.ts + TF_SEC["1h"]
+    break_close = b.ts + ssec
     d.direction = side
     d.break_detected = True
     d.break_direction = side
@@ -206,21 +219,23 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
                   "pivot_price": b.line.pivot_price, "slope": b.line.slope}
 
     opp = SHORT if side == LONG else LONG
-    d1, d4 = d.master_1d_direction, d.master_4h_direction
-    if d1 == side and d4 == side:
+    d1, d4, d1h = d.master_1d_direction, d.master_4h_direction, d.master_1h_direction
+    mvals = [{"1d": d1, "4h": d4, "1h": d1h}[m] for m in masters]
+    if all(v == side for v in mvals):
         d.master_alignment, master_score = "ALIGNED", 1.0
-    elif opp in (d1, d4):
+    elif opp in mvals:
         d.master_alignment, master_score = "CONFLICT", 0.0
     else:
         d.master_alignment, master_score = "PARTIAL", 0.6
 
-    if t_now - break_close > cfg.setup_max_age_bars * TF_SEC["1h"]:
+    if t_now - break_close > cfg.setup_max_age_bars * ssec:
         d.setup_state, d.invalidated = EXPIRED, True
-        d.reason = f"1H {side} break older than {cfg.setup_max_age_bars} bars — expired"
+        d.reason = f"{stf.upper()} {side} break older than {cfg.setup_max_age_bars} bars — expired"
         return d
     if d.master_alignment == "CONFLICT" or (cfg.require_master_alignment and d.master_alignment != "ALIGNED"):
         d.setup_state = MASTER_DIRECTION
-        d.reason = f"1H {side} break not backed by 1D={d1} / 4H={d4}"
+        d.reason = (f"{stf.upper()} {side} break not backed by master direction "
+                    f"1D={d1} / 4H={d4}" + (f" / 1H={d1h}" if "1h" in masters else ""))
         return d
 
     A = _atr_at(data[cfg.atr_tf], break_close, cfg.atr_tf, cfg)
@@ -311,6 +326,6 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
     d.entry, d.atr = entry, atr_fire
     d.sl = entry - s * cfg.sl_atr * atr_fire
     d.tp = entry + s * cfg.tp_atr * atr_fire
-    d.reason = (f"{side} Trend Break: 1H break → pullback → 1M reclaim; "
+    d.reason = (f"{side} Trend Break: {stf.upper()} break → pullback → 1M reclaim; "
                 f"SL {cfg.sl_atr}×ATR, TP {cfg.tp_atr}×ATR from entry")
     return d
