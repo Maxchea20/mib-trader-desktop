@@ -43,7 +43,7 @@ Early breakout path.
 - Current forming 15M only.
 - Uses the current 15M's 5M sections.
 - Slot 1/2.
-- Requires same-direction developing 15M BOS plus qualifying current M5 BOS.
+- Requires same-direction developing 15M CHoCH/BOS plus qualifying current M5 CHoCH/BOS.
 - Starts C.
 - C success -> Hunt FIRE.
 - C miss -> WAIT. No fallback FIRE.
@@ -82,7 +82,7 @@ Entry timing only.
 Hunt FIRE
   -> autotrader_loop
   -> weather / one-position / cooldown guards
-  -> _open_live_from_s1
+  -> _open_live_from_hunt
   -> sizing
   -> MEXC Isolated
 ```
