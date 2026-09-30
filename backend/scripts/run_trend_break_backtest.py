@@ -30,6 +30,7 @@ def main():
     ap.add_argument("--no-master", action="store_true", help="1D/4H/1H are reported but never block a setup")
     ap.add_argument("--master-length", type=int, default=14, help="swing lookback for 1D/4H/1H structure")
     ap.add_argument("--master-lengths", default="", help="per-timeframe override, e.g. 1d=5,4h=8,1h=8")
+    ap.add_argument("--master-tfs", default="", help="master timeframes that must agree, e.g. 4h,1h (default: 1d,4h,1h)")
     ap.add_argument("--min-confidence", type=float, default=None, help="override engine min_confidence (default 0.30)")
     ap.add_argument("--diagnose", action="store_true", help="path diagnostic for every fired trade (analysis only)")
     ap.add_argument("--diag-csv", default="trend_break_diagnostic.csv")
@@ -54,6 +55,7 @@ def main():
         print(f"[db] OVERRIDE using {db._DB_PATH}")
     cfg = TrendBreakConfig(require_master_alignment=not a.no_align, setup_tf=a.setup_tf,
                             use_master_filter=not a.no_master,
+                            master_tfs=tuple(x.strip() for x in a.master_tfs.split(',') if x.strip()),
                             master_length=a.master_length,
                             **({'min_confidence': a.min_confidence} if a.min_confidence is not None else {}),
                             master_lengths={k.strip(): int(v) for k, v in (x.split('=') for x in a.master_lengths.split(',') if x)})

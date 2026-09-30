@@ -48,6 +48,8 @@ class TrendBreakConfig:
     master_length: int = 14                 # default swing lookback for 1D/4H/1H structure
     master_lengths: Dict[str, int] = field(default_factory=dict)  # per-timeframe override, e.g. {"1d": 5, "4h": 8}
 
+    master_tfs: tuple = ()                  # masters that must agree; () = legacy (1d,4h[,1h] by setup tf)
+
     def master_len(self, tf: str) -> int:
         return int(self.master_lengths.get(tf, self.master_length))
     slope_mult: float = 1.0
@@ -200,7 +202,7 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
     stf = cfg.setup_tf
     ssec = TF_SEC[stf]
     d.setup_tf = d.trend_break_timeframe = stf
-    masters = ("1d", "4h") if stf == "1h" else ("1d", "4h", "1h")
+    masters = tuple(cfg.master_tfs) or (("1d", "4h") if stf == "1h" else ("1d", "4h", "1h"))
     data = {tf: _closed(candles.get(tf), tf, now_ts) for tf in TF_SEC}
     if len(data[stf]) < 2 * cfg.length + 2 or not data["1m"] or not data["15m"]:
         d.reason = "insufficient closed candle history"
@@ -260,7 +262,7 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
             or (cfg.require_master_alignment and d.master_alignment != "ALIGNED")):
         d.setup_state = MASTER_DIRECTION
         d.reason = (f"{stf.upper()} {side} break not backed by master direction "
-                    f"1D={d1} / 4H={d4}" + (f" / 1H={d1h}" if "1h" in masters else ""))
+                    ", ".join(f"{m.upper()}={dict(zip(masters, mvals))[m]}" for m in masters))
         return d
 
     A = _atr_at(data[cfg.atr_tf], break_close, cfg.atr_tf, cfg)
