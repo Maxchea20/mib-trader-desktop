@@ -419,3 +419,45 @@ def test_research_db_builder_parses_and_aggregates_consistently():
     d1 = brd.aggregate(rows, 86400)
     assert len(d1) == 1                                                  # only the one complete day
     assert len(brd.aggregate(rows[:100], 3600)) == 1                     # partial hour at the edge is dropped
+
+
+def _walk(n=6000, seed=3, planted=False):
+    rnd = random.Random(seed)
+    p, out = 100.0, []
+    for i in range(n):
+        o = p
+        p += rnd.gauss(0, 1)
+        out.append({"ts": 1_700_000_000 + i * 900, "open": o, "high": max(o, p) + abs(rnd.gauss(0, .3)),
+                    "low": min(o, p) - abs(rnd.gauss(0, .3)), "close": p, "volume": rnd.uniform(50, 150)})
+    return out
+
+
+def test_feature_study_is_causal_and_finds_nothing_in_a_random_walk():
+    from src.trend_break import features as F
+    c = _walk()
+    rows = F.tag_breaks(c, 900)
+    assert len(rows) > 100
+    cut = rows[len(rows) // 2]
+    pre = F.tag_breaks(c[:cut["i"] + 1], 900)                    # data up to the break bar only
+    same = [r for r in pre if r["ts"] == cut["ts"]][0]
+    for k in F.FEATURES:
+        assert same[k] == pytest.approx(cut[k])                  # features never look past the break bar
+    st = F.study(rows, (1, 4, 16, 64))
+    assert not any(r["flag"] for r in st["results"])            # no edge in noise
+
+
+def test_feature_study_detects_a_planted_volume_signal():
+    from src.trend_break import features as F
+    c = _walk(n=12000, seed=5)
+    res = tl.compute(c)
+    for b in res.events:                                        # plant: high-volume breaks gap onward
+        i = b.index
+        if i + 2 < len(c) and i % 2 == 0:
+            c[i]["volume"] *= 5
+            jump = 1.5 if b.direction == "LONG" else -1.5
+            for key in ("open", "high", "low", "close"):
+                c[i + 1][key] += jump
+    rows = F.tag_breaks(c, 900)
+    st = F.study(rows, (1, 4, 16, 64))
+    top = [r for r in st["results"] if r["feature"] == "vol_ratio" and r["target"] == "fwd1"][0]
+    assert top["rho"] > 0.2 and top["p"] < 1e-6
