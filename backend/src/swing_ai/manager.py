@@ -122,7 +122,7 @@ class SwingManager:
             store.add_decision(**row)
             self.status["last_error"] = err
             return {"decision": "NO_TRADE", "error": err}
-        row.update({k: getattr(dec, k) for k in ("decision", "confidence", "market_state", "daily_analysis", "h4_analysis", "h1_analysis",
+        row.update({k: getattr(dec, k) for k in ("decision", "confidence", "headline", "market_state", "daily_analysis", "h4_analysis", "h1_analysis",
                                                     "m15_analysis", "structure_analysis", "entry_analysis", "entry_type", "entry", "sl", "tp",
                                                     "thesis", "invalidation", "invalidation_price", "wake_levels")})
         self.previous = _previous_from_dec(dec)

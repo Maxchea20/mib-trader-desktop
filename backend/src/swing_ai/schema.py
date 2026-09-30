@@ -31,6 +31,7 @@ def entry_json_schema() -> Dict[str, Any]:
     props = {
         "decision": {"type": "string", "enum": list(ENTRY_DECISIONS)},
         "confidence": {"type": "number"},
+        "headline": {"type": "string"},
         "market_state": {"type": "string", "enum": list(MARKET_STATES)},
         "daily_analysis": {"type": "string"}, "h4_analysis": {"type": "string"}, "h1_analysis": {"type": "string"},
         "m15_analysis": {"type": "string"}, "structure_analysis": {"type": "string"}, "entry_analysis": {"type": "string"},
@@ -56,6 +57,7 @@ def manage_json_schema() -> Dict[str, Any]:
 class EntryDecision:
     decision: str = "NO_TRADE"
     confidence: float = 0.0
+    headline: str = ""
     market_state: str = "UNCLEAR"
     daily_analysis: str = ""
     h4_analysis: str = ""
@@ -147,7 +149,7 @@ def parse_entry(raw: Any) -> EntryDecision:
         raise SchemaError("confidence must be within 0..1")
     if d.get("market_state") not in MARKET_STATES:
         raise SchemaError(f"market_state must be one of {MARKET_STATES}")
-    out = EntryDecision(decision=dec, confidence=conf, market_state=d["market_state"],
+    out = EntryDecision(decision=dec, confidence=conf, market_state=d["market_state"], headline=_text(d, "headline", True, 200),
                         thesis=_text(d, "thesis", True), invalidation=_text(d, "invalidation", dec != "NO_TRADE", 800),
                         invalidation_price=_num(d, "invalidation_price"), wake_levels=_wake_levels(d))
     for f in ANALYSIS_FIELDS:                        # the AI must always show its analysis, trade or not

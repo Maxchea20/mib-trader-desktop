@@ -29,7 +29,7 @@ class SwingConfig:
     market_tolerance_pct: float = 0.05    # entry this close to live price counts as a market order
     limit_expiry_minutes: int = 480
     max_spread_pct: float = 0.03
-    min_confidence: float = 0.5
+    min_confidence: float = 0.0           # recorded for calibration, not a gate: MIB does not veto the AI's own confidence
     max_trades_per_day: int = 3
     max_daily_loss_r: float = 3.0
     cooldown_after_loss_minutes: int = 60

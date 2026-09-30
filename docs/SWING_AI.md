@@ -23,10 +23,10 @@ the snapshot, and no analytical function anywhere in the package).
 
 ## What GPT returns (strict JSON schema)
 
-`decision` (LONG / SHORT / NO_TRADE), `confidence`, `market_state` (TRENDING_UP / TRENDING_DOWN / RANGE / TRANSITION / UNCLEAR),
+`decision` (LONG / SHORT / NO_TRADE), `confidence`, `headline` (one-line bottom line), `market_state` (TRENDING_UP / TRENDING_DOWN / RANGE / TRANSITION / UNCLEAR),
 `daily_analysis`, `h4_analysis`, `h1_analysis`, `m15_analysis`, `structure_analysis`, `entry_analysis`, `entry_type`, `entry`,
 `sl`, `tp`, `thesis`, `invalidation`, `invalidation_price`, and `wake_levels` (up to 4 prices where it wants to be woken next).
-NO_TRADE is valid and still carries the full analysis. `market_state` is an enum so results can be grouped by the AI's own
+NO_TRADE is valid and still carries the full analysis. Every field is asked to be one short sentence, and the prompt (`swing-v3-brief`) tells GPT that paper mode exists to learn from its decisions, so a LIMIT order at a range edge or pullback it identified is a valid trade, not just NO_TRADE. Confidence is recorded for calibration and is not a MIB gate. `market_state` is an enum so results can be grouped by the AI's own
 market classification. An unparseable or failed reply is a NO_TRADE / HOLD, never a guess.
 
 ## When GPT is called
@@ -56,7 +56,7 @@ open paper trade, GPT's latest management review, and performance. Every analysi
 
 Percent-of-price limits only (no volatility measure): stop 0.3% to 8%, reward/risk >= 1.5, market entry within 0.05% of price,
 limit entries passive and within 3%, spread <= 0.03%, fresh ticker, one position at a time, 3 trades/day, -3R daily stop,
-cooldown after a loss, 1% equity risk per trade, max 5x leverage, max notional. GPT's levels are never edited: valid as given
+cooldown after a loss (the AI's confidence is not gated), 1% equity risk per trade, max 5x leverage, max notional. GPT's levels are never edited: valid as given
 or rejected with reasons. GPT is told these limits up front so its proposals fit them.
 
 ## Run it (paper only)

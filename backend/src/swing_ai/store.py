@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS swing_ai_market_snapshots (
 CREATE TABLE IF NOT EXISTS swing_ai_wakes (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, kind TEXT, detail TEXT, wkey TEXT);
 CREATE TABLE IF NOT EXISTS swing_ai_decisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, symbol TEXT, kind TEXT, wake_kind TEXT, wake_detail TEXT, price REAL,
-  snapshot_id INTEGER, model TEXT, prompt_version TEXT, decision TEXT, confidence REAL, market_state TEXT,
+  snapshot_id INTEGER, model TEXT, prompt_version TEXT, decision TEXT, confidence REAL, headline TEXT, market_state TEXT,
   daily_analysis TEXT, h4_analysis TEXT, h1_analysis TEXT, m15_analysis TEXT, structure_analysis TEXT, entry_analysis TEXT,
   entry_type TEXT, entry REAL, sl REAL, tp REAL, thesis TEXT, invalidation TEXT, invalidation_price REAL, wake_levels TEXT,
   raw TEXT, valid INTEGER, risk_ok INTEGER, risk_reasons TEXT, trade_id INTEGER, error TEXT, latency_ms INTEGER);
@@ -37,6 +37,9 @@ def init() -> None:
     with db._lock:
         c = db._connect()
         c.executescript(TABLES)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(swing_ai_decisions)").fetchall()}
+        if "headline" not in cols:                          # databases created before the headline field existed
+            c.execute("ALTER TABLE swing_ai_decisions ADD COLUMN headline TEXT")
         c.commit()
     _ready = True
 
@@ -82,7 +85,7 @@ def add_wake(ts: int, w: Dict[str, Any]) -> int:
 
 # --- decisions --------------------------------------------------------------------------------
 DECISION_COLS = ["ts", "symbol", "kind", "wake_kind", "wake_detail", "price", "snapshot_id", "model", "prompt_version", "decision",
-                 "confidence", "market_state", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis",
+                 "confidence", "headline", "market_state", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis",
                  "entry_analysis", "entry_type", "entry", "sl", "tp", "thesis", "invalidation", "invalidation_price", "wake_levels",
                  "raw", "valid", "risk_ok", "risk_reasons", "trade_id", "error", "latency_ms"]
 

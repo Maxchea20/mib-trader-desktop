@@ -150,7 +150,7 @@ def test_snapshot_is_causal():
 
 # ------------------------------------------------------------------ schema
 def _good(**kw):
-    d = {"decision": "LONG", "confidence": 0.7, "market_state": "TRENDING_UP", "daily_analysis": "d", "h4_analysis": "h4",
+    d = {"decision": "LONG", "confidence": 0.7, "headline": "Trend continuation long", "market_state": "TRENDING_UP", "daily_analysis": "d", "h4_analysis": "h4",
          "h1_analysis": "h1", "m15_analysis": "m15", "structure_analysis": "HH/HL", "entry_analysis": "reclaim", "entry_type": "MARKET",
          "entry": 100.0, "sl": 96.0, "tp": 108.0, "thesis": "t", "invalidation": "i", "invalidation_price": 95.5,
          "wake_levels": [{"price": 105.0, "direction": "ABOVE", "reason": "breakout"}]}
@@ -164,7 +164,7 @@ def test_schema_accepts_valid_and_rejects_everything_else():
     nt = _good(decision="NO_TRADE", entry=0, sl=None, tp=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[])
     assert schema.parse_entry(nt).decision == "NO_TRADE"
     bads = ["not json", "[]", _good(decision="BUY"), _good(confidence=1.5), _good(sl=None), _good(entry_type="STOP"), _good(thesis=""),
-            _good(market_state="BULLISH"), _good(entry="100"), _good(tp=float("nan")), _good(daily_analysis=""), _good(h1_analysis=None),
+            _good(market_state="BULLISH"), _good(entry="100"), _good(tp=float("nan")), _good(daily_analysis=""), _good(h1_analysis=None), _good(headline=""),
             _good(invalidation=""), _good(wake_levels=[{"price": 1, "direction": "SIDEWAYS", "reason": ""}])]
     for bad in bads:
         with pytest.raises(schema.SchemaError):
@@ -178,7 +178,7 @@ def test_schema_accepts_valid_and_rejects_everything_else():
     for js in (schema.entry_json_schema(), schema.manage_json_schema()):                      # OpenAI strict mode: every key required
         sc = js["schema"]
         assert sc["additionalProperties"] is False and set(sc["required"]) == set(sc["properties"])
-    for f in ("daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "entry_analysis", "market_state", "thesis", "invalidation"):
+    for f in ("headline", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "entry_analysis", "market_state", "thesis", "invalidation"):
         assert f in schema.entry_json_schema()["schema"]["properties"]
 
 
@@ -231,10 +231,12 @@ def test_safety_layer_checks_geometry_and_limits_only():
     assert ok.ok and ok.plan["entry_type"] == "MARKET" and ok.plan["risk_usd"] <= cfg.equity_usd * cfg.risk_pct / 100 + 1e-6
     assert ok.plan["leverage"] <= cfg.max_leverage + 1e-9
     cases = {"sl above entry": _dec(sl=104.0), "tp below entry": _dec(tp=98.0), "rr too low": _dec(tp=104.0),
-             "stop too tight": _dec(sl=99.9, tp=110.0), "stop too wide": _dec(sl=85.0, tp=140.0), "low confidence": _dec(confidence=0.3),
+             "stop too tight": _dec(sl=99.9, tp=110.0), "stop too wide": _dec(sl=85.0, tp=140.0),
              "market but far": _dec(entry=103.0, tp=115.0), "limit wrong side": _dec(entry=101.0, entry_type="LIMIT", sl=97.0, tp=112.0)}
     for name, d in cases.items():
         assert not risk.validate_entry(d, _mk(), cfg, {"now": 0}).ok, name
+    assert risk.validate_entry(_dec(confidence=0.1), _mk(), cfg, {"now": 0}).ok                   # confidence is recorded, not a MIB gate
+    assert not risk.validate_entry(_dec(confidence=0.3), _mk(), SwingConfig(min_confidence=0.5), {"now": 0}).ok
     for bad_ctx in ({"has_active": True}, {"trades_today": 3}, {"daily_r": -3.5}, {"last_loss_ts": 900, "now": 1000}, {"connected": False}):
         assert not risk.validate_entry(_dec(), _mk(), cfg, {"now": 0, **bad_ctx}).ok
     assert not risk.validate_entry(_dec(), _mk(spread=0.2), cfg, {"now": 0}).ok
@@ -303,11 +305,11 @@ def test_store_round_trips_snapshots_decisions_and_trades(tmpdb):
     d = schema.parse_entry(_good())
     did = store.add_decision(ts=1, symbol="BTC_USDT", kind="ENTRY", wake_kind="HEARTBEAT_15M", price=1.0, snapshot_id=sid, model="m",
                              prompt_version="v", raw="{}", valid=1, risk_ok=1, **{k: getattr(d, k) for k in (
-                                 "decision", "confidence", "market_state", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis",
+                                 "decision", "confidence", "headline", "market_state", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis",
                                  "structure_analysis", "entry_analysis", "entry_type", "entry", "sl", "tp", "thesis", "invalidation",
                                  "invalidation_price", "wake_levels")})
     r = store.latest_entry_decision()
-    assert r["id"] == did and r["h4_analysis"] == "h4" and r["snapshot_id"] == sid and json.loads(r["wake_levels"])[0]["price"] == 105.0
+    assert r["id"] == did and r["headline"] == "Trend continuation long" and r["h4_analysis"] == "h4" and r["snapshot_id"] == sid and json.loads(r["wake_levels"])[0]["price"] == 105.0
     assert r["model"] == "m" and r["wake_kind"] == "HEARTBEAT_15M"
 
 
@@ -480,7 +482,7 @@ def test_ui_endpoint_serves_only_stored_gpt_output(tmpdb):
         json.dumps(out)                                                                     # JSON-serialisable for the API
         a = out["last_analysis"]
         stored = store.latest_entry_decision()
-        for k in ("daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis", "entry_analysis", "thesis",
+        for k in ("headline", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis", "entry_analysis", "thesis",
                   "invalidation", "decision", "confidence", "entry", "sl", "tp", "market_state", "model"):
             assert a[k] == stored[k]                                                        # UI fields are the stored GPT fields
         assert set(a) == set(service.AI_FIELDS) and out["mode"] == "PAPER" and out["active_trade"]["status"] == "OPEN"
@@ -527,3 +529,22 @@ def test_openai_call_has_room_for_reasoning_and_rejects_truncated_replies(monkey
         llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema())
     dec, raw, err, ms = engine.review_entry(llm, SwingConfig(), snap_at(), None, None)
     assert dec is None and "truncated" in err                                                               # fails closed, no retry loop
+
+
+def test_prompt_is_brief_and_lets_the_ai_act_on_limit_setups():
+    from src.swing_ai import prompts
+    text = prompts.system_prompt(SwingConfig())
+    assert "BE BRIEF" in text and "at most 12 words" in text and "LIMIT order at a range edge" in text
+    assert "frequent and good" not in text and "confidence at least" not in text
+
+
+def test_old_database_gets_the_headline_column(tmpdb):
+    with db._lock:
+        c = db._connect()
+        c.executescript("DROP TABLE swing_ai_decisions; CREATE TABLE swing_ai_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, symbol TEXT, kind TEXT);")
+        c.commit()
+    store._ready = False
+    store.init()
+    with db._lock:
+        cols = {r[1] for r in db._connect().execute("PRAGMA table_info(swing_ai_decisions)").fetchall()}
+    assert "headline" in cols

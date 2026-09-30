@@ -19,10 +19,10 @@ const DECISION_COLOR = {
   NO_TRADE: { rgb: "148,163,184", label: "NO TRADE" },
 };
 
-const Block = ({ title, text, testId }) => (
-  <div className="mb-3" data-testid={testId}>
-    <div className="widget-label mb-1">{title}</div>
-    <div className="font-mono-t text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap">{text || "—"}</div>
+const Line = ({ label, text, testId }) => (
+  <div className="flex gap-3 py-1.5 border-b border-[#141c29] last:border-b-0" data-testid={testId}>
+    <span className="widget-label w-20 shrink-0 pt-0.5">{label}</span>
+    <span className="font-mono-t text-[12px] leading-snug text-slate-200">{text || "—"}</span>
   </div>
 );
 
@@ -93,52 +93,63 @@ export const SwingAiPanel = () => {
       )}
 
       {a && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1">
-            <div className="widget-label mb-1">MARKET VIEW <span className="text-slate-500">· GPT · {a.market_state || "—"}</span></div>
-            <Block title="Daily" text={a.daily_analysis} testId="swing-daily" />
-            <Block title="4H" text={a.h4_analysis} testId="swing-h4" />
-            <Block title="1H" text={a.h1_analysis} testId="swing-h1" />
-            <Block title="15M" text={a.m15_analysis} testId="swing-m15" />
-          </div>
-
-          <div className="lg:col-span-1">
-            <Block title="STRUCTURE" text={a.structure_analysis} testId="swing-structure" />
-            <Block title="ENTRY ANALYSIS" text={a.entry_analysis} testId="swing-entry-analysis" />
-            <Block title="THESIS" text={a.thesis} testId="swing-thesis" />
-            <Block title="INVALIDATION" text={a.invalidation} testId="swing-invalidation" />
-          </div>
-
-          <div className="lg:col-span-1">
-            <div className="widget-label mb-1">AI DECISION</div>
-            <div className="font-head font-black text-4xl leading-none" style={{ color: `rgb(${dec.rgb})` }} data-testid="swing-decision">
-              {dec.label}
+        <div>
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-3 border-b border-[#1d2635]">
+            <div>
+              <div className="widget-label mb-1">AI DECISION</div>
+              <div className="font-head font-black text-4xl leading-none" style={{ color: `rgb(${dec.rgb})` }} data-testid="swing-decision">
+                {dec.label}
+              </div>
+              <div className="font-mono-t text-[10px] text-slate-500 mt-1">{a.market_state || "—"}{a.entry_type ? ` · ${a.entry_type}` : ""}</div>
             </div>
-            <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="flex-1 min-w-[220px]">
+              <div className="widget-label mb-1">HEADLINE</div>
+              <div className="font-mono-t text-sm text-slate-100 leading-snug" data-testid="swing-headline">{a.headline || a.thesis || "—"}</div>
+            </div>
+            <div className="grid grid-cols-4 gap-5">
               <Stat label="Entry" value={px(a.entry)} />
-              <Stat label="Confidence" value={pct(a.confidence)} />
               <Stat label="SL" value={px(a.sl)} color="#ff6b81" />
               <Stat label="TP" value={px(a.tp)} color="#34d399" />
+              <Stat label="Confidence" value={pct(a.confidence)} />
             </div>
-            {a.entry_type && <div className="font-mono-t text-[10px] text-slate-500 mt-2">{a.entry_type} · invalidation price {px(a.invalidation_price)}</div>}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 mt-2">
+            <div>
+              <div className="widget-label mt-1">MARKET VIEW · GPT</div>
+              <Line label="Daily" text={a.daily_analysis} testId="swing-daily" />
+              <Line label="4H" text={a.h4_analysis} testId="swing-h4" />
+              <Line label="1H" text={a.h1_analysis} testId="swing-h1" />
+              <Line label="15M" text={a.m15_analysis} testId="swing-m15" />
+            </div>
+            <div>
+              <div className="widget-label mt-1">READ · GPT</div>
+              <Line label="Structure" text={a.structure_analysis} testId="swing-structure" />
+              <Line label="Entry" text={a.entry_analysis} testId="swing-entry-analysis" />
+              <Line label="Thesis" text={a.thesis} testId="swing-thesis" />
+              <Line label="Invalidation" text={a.invalidation} testId="swing-invalidation" />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-x-8 gap-y-3 mt-3">
             {a.wake_levels?.length > 0 && (
-              <div className="mt-3">
+              <div className="min-w-[260px]">
                 <div className="widget-label mb-1">AI ALERTS (its own wake levels)</div>
                 {a.wake_levels.map((w, i) => (
-                  <div key={i} className="font-mono-t text-[10px] text-slate-400">
-                    {w.direction} {px(w.price)} — {w.reason}
+                  <div key={i} className="font-mono-t text-[11px] text-slate-400">
+                    {w.direction === "ABOVE" ? "▲" : "▼"} {px(w.price)} — {w.reason}
                   </div>
                 ))}
               </div>
             )}
             {a.decision !== "NO_TRADE" && a.risk_ok === 0 && (
-              <div className="mt-3 font-mono-t text-[10px] text-amber-300" data-testid="swing-safety-reject">
+              <div className="font-mono-t text-[11px] text-amber-300" data-testid="swing-safety-reject">
                 Safety layer rejected this proposal: {a.risk_reasons}
               </div>
             )}
             {trade && (
-              <div className="mt-3 p-2 rounded-sm border border-[#1d2635] bg-[#0d121b]" data-testid="swing-active-trade">
-                <div className="widget-label mb-1">PAPER TRADE · {trade.status}</div>
+              <div className="p-2 rounded-sm border border-[#1d2635] bg-[#0d121b]" data-testid="swing-active-trade">
+                <div className="widget-label mb-1">PAPER {trade.status === "PENDING" ? "ORDER (waiting for fill)" : "TRADE"}</div>
                 <div className="font-mono-t text-[11px] text-slate-300">
                   {trade.side} {trade.qty} BTC @ {px(trade.fill_price || trade.plan_entry)} · SL {px(trade.sl)} · TP {px(trade.tp)}
                 </div>
@@ -146,9 +157,9 @@ export const SwingAiPanel = () => {
               </div>
             )}
             {mg && (
-              <div className="mt-3" data-testid="swing-management">
+              <div className="min-w-[260px]" data-testid="swing-management">
                 <div className="widget-label mb-1">AI MANAGEMENT · {mg.decision} · {when(mg.ts)}</div>
-                <div className="font-mono-t text-[11px] text-slate-300 whitespace-pre-wrap">{mg.thesis}</div>
+                <div className="font-mono-t text-[11px] text-slate-300">{mg.thesis}</div>
               </div>
             )}
           </div>
