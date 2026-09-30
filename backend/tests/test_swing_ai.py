@@ -487,3 +487,43 @@ def test_ui_endpoint_serves_only_stored_gpt_output(tmpdb):
         assert out["analytics"]["frequency"]["LONG"] == 1
     finally:
         service._manager = None
+
+
+def test_openai_call_has_room_for_reasoning_and_rejects_truncated_replies(monkeypatch):
+    import sys, types
+    from src.swing_ai.llm import OpenAILLM, LLMError
+    seen = {}
+
+    class _Msg: content = "{}"
+
+    def make(reason):
+        class _Choice:
+            finish_reason = reason
+            message = _Msg()
+
+        class _Resp:
+            choices = [_Choice()]
+        return _Resp()
+
+    state = {"reason": "stop"}
+
+    class _Completions:
+        def create(self, **kw):
+            seen.update(kw)
+            return make(state["reason"])
+
+    class _Client:
+        def __init__(self, **kw):
+            self.chat = types.SimpleNamespace(completions=_Completions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_Client))
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.delenv("SWING_AI_MAX_TOKENS", raising=False)
+    llm = OpenAILLM("gpt-5.4")
+    assert llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema()) == "{}"
+    assert seen["max_completion_tokens"] >= 8000 and seen["response_format"]["type"] == "json_schema"     # not the old 900 cap
+    state["reason"] = "length"
+    with pytest.raises(LLMError, match="truncated"):
+        llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema())
+    dec, raw, err, ms = engine.review_entry(llm, SwingConfig(), snap_at(), None, None)
+    assert dec is None and "truncated" in err                                                               # fails closed, no retry loop

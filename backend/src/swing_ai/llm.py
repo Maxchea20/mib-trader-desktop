@@ -8,10 +8,14 @@ class LLMError(RuntimeError):
 
 
 class OpenAILLM:
-    """Structured-output chat call (JSON schema, strict).  Returns the raw JSON string."""
+    """Structured-output chat call (JSON schema, strict).  Returns the raw JSON string.
 
-    def __init__(self, model: str, timeout: int = 90):
+    GPT-5-class models spend part of `max_completion_tokens` on internal reasoning, so the cap must leave room for both the
+    reasoning and the full JSON reply (about 1.5k tokens of analysis).  A reply that hit the cap is an error, never parsed."""
+
+    def __init__(self, model: str, timeout: int = 180, max_tokens: Optional[int] = None):
         self.model, self.timeout = model, timeout
+        self.max_tokens = int(max_tokens or os.environ.get("SWING_AI_MAX_TOKENS", "10000"))
 
     def complete(self, messages: List[Dict[str, str]], json_schema: Dict[str, Any]) -> str:
         key = os.environ.get("OPENAI_API_KEY")
@@ -19,18 +23,20 @@ class OpenAILLM:
             raise LLMError("OPENAI_API_KEY not set")
         from openai import OpenAI
         client = OpenAI(api_key=key, timeout=self.timeout)
+        kw = dict(model=self.model, messages=messages, response_format={"type": "json_schema", "json_schema": json_schema})
+        effort = os.environ.get("SWING_AI_REASONING")            # optional: low | medium | high
+        if effort:
+            kw["reasoning_effort"] = effort
         try:
-            resp = client.chat.completions.create(
-                model=self.model, messages=messages,
-                response_format={"type": "json_schema", "json_schema": json_schema},
-                max_completion_tokens=900)
+            resp = client.chat.completions.create(max_completion_tokens=self.max_tokens, **kw)
         except TypeError:
-            resp = client.chat.completions.create(model=self.model, messages=messages,
-                                                  response_format={"type": "json_schema", "json_schema": json_schema},
-                                                  max_tokens=900)
+            resp = client.chat.completions.create(max_tokens=self.max_tokens, **kw)
         except Exception as e:
             raise LLMError(str(e))
-        return resp.choices[0].message.content or ""
+        choice = resp.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise LLMError(f"reply truncated at {self.max_tokens} tokens (finish_reason=length) - raise SWING_AI_MAX_TOKENS")
+        return choice.message.content or ""
 
 
 class FakeLLM:

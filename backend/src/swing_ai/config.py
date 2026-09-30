@@ -15,7 +15,7 @@ class SwingConfig:
     stop_proximity_pct: float = 0.15      # open trade: price this close (% of price) to the stop wakes the AI
     model: str = field(default_factory=lambda: os.environ.get("SWING_AI_MODEL")
                        or os.environ.get("AI_THESIS_MODEL", "gpt-5.4-mini"))
-    llm_timeout_seconds: int = 90
+    llm_timeout_seconds: int = 180
 
     # --- deterministic risk layer (paper equity and limits) ---
     equity_usd: float = 10_000.0

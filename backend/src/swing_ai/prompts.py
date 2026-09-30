@@ -26,7 +26,7 @@ DECISION
   sl, tp, confidence (0 to 1, your honest confidence), thesis, invalidation in words, and invalidation_price (the price at which the thesis is wrong).
 - For NO_TRADE set entry, entry_type, sl, tp and invalidation_price to null, and explain in thesis why you stand aside and what would change your mind.
 - Always fill every analysis field (daily_analysis, h4_analysis, h1_analysis, m15_analysis, structure_analysis, entry_analysis) and market_state,
-  even for NO_TRADE. Be concrete and concise (a few sentences each) and cite prices.
+  even for NO_TRADE. Be concrete and concise: 2 to 4 sentences (under 500 characters) per field, citing prices.
 - wake_levels: up to 4 price levels where you want to be woken up next (your own alerts), each with direction ABOVE or BELOW and a short reason.
   Use them to say "wake me if price does X". Use [] if none.
 - Use ONLY the supplied data. Do not assume news, funding, order flow or anything not shown. Everything supplied is known at the snapshot time; nothing after it exists.
