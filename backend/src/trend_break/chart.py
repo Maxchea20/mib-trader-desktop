@@ -7,7 +7,7 @@ from . import trendline as tl
 
 
 def chart_payload(candles: Sequence[dict], tf_seconds: int, length: int = 14,
-                  mult: float = 1.0, max_lines: int = 40) -> Dict:
+                  mult: float = 1.0, max_lines: int = 40, extend_bars: int = 60) -> Dict:
     res = tl.compute(candles, length=length, mult=mult)
     if not candles:
         return {"lines": [], "breaks": [], "length": length, "mult": mult}
@@ -19,7 +19,13 @@ def chart_payload(candles: Sequence[dict], tf_seconds: int, length: int = 14,
         broken = [b for b in res.events if b.line == ln]
         if broken:
             end = min(end, broken[0].index)                     # drawn up to the breaking close
+        ext = {}
+        if nxt is None:                                         # still the live line of its side: project it forward
+            e_idx = last + extend_bars
+            ext = {"ext_ts": int(candles[last]["ts"]) + extend_bars * tf_seconds,
+                   "ext_price": ln.value_at_index(e_idx)}
         lines.append({
+            **ext,
             "kind": ln.kind, "pivot_ts": ln.pivot_ts, "pivot_price": ln.pivot_price,
             "confirm_ts": int(candles[ln.confirm_index]["ts"]),
             "end_ts": int(candles[end]["ts"]), "end_price": ln.value_at_index(end),

@@ -27,22 +27,25 @@ export function useTrendBreakOverlay({ chartRef, candleSeriesRef, data, timefram
     if (!data || !Array.isArray(data.lines)) return undefined;
 
     data.lines.forEach((ln) => {
-      const t0 = Number(ln.pivot_ts);
-      const t1 = Number(ln.end_ts);
-      if (!(t1 > t0)) return;
-      const s = chart.addLineSeries({
-        color: ln.kind === "upper" ? UP_COLOR : DN_COLOR,
-        lineWidth: 2,
-        lineStyle: ln.broken ? 0 : 2,
-        lastValueVisible: false,
-        priceLineVisible: false,
-        crosshairMarkerVisible: false,
-      });
-      s.setData([
-        { time: t0, value: Number(ln.pivot_price) },
-        { time: t1, value: Number(ln.end_price) },
-      ]);
-      seriesRef.current.push(s);
+      const color = ln.kind === "upper" ? UP_COLOR : DN_COLOR;
+      const seg = (t0, p0, t1, p1, dashed) => {
+        if (!(t1 > t0)) return;
+        const s = chart.addLineSeries({
+          color,
+          lineWidth: 2,
+          lineStyle: dashed ? 2 : 0,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        s.setData([{ time: t0, value: Number(p0) }, { time: t1, value: Number(p1) }]);
+        seriesRef.current.push(s);
+      };
+      // solid: pivot -> breaking close (or newest bar); dashed: projected forward
+      seg(Number(ln.pivot_ts), ln.pivot_price, Number(ln.end_ts), ln.end_price, false);
+      if (ln.ext_ts != null) {
+        seg(Number(ln.end_ts), ln.end_price, Number(ln.ext_ts), ln.ext_price, true);
+      }
     });
 
     const breaks = (data.breaks || []).filter((b) => Number.isFinite(Number(b.ts)));
