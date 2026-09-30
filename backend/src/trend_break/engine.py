@@ -48,6 +48,7 @@ class TrendBreakConfig:
     master_length: int = 14                 # default swing lookback for 1D/4H/1H structure
     master_lengths: Dict[str, int] = field(default_factory=dict)  # per-timeframe override, e.g. {"1d": 5, "4h": 8}
 
+    use_5m_gauge: bool = True               # False: 15M is the only break-quality gauge (5M ignored)
     master_tfs: tuple = ()                  # masters that must agree; () = legacy (1d,4h[,1h] by setup tf)
 
     def master_len(self, tf: str) -> int:
@@ -180,10 +181,14 @@ def _gauges(d: str, b: tl.Break, data: Dict[str, List[dict]], asof: float,
     q15 = break_quality(c15, d, lv, b.ts, 900, cfg.quality_window, cfg.atr_period)
     q5 = break_quality(c5, d, lv, b.ts, 300, cfg.quality_window, cfg.atr_period)
     st = structure_gauge(c15, c5, d, b.ts)
-    conf = 0.30 * master_score + 0.25 * q15["score"] + 0.25 * q5["score"] + 0.20 * st["score"]
+    if cfg.use_5m_gauge:
+        conf = 0.30 * master_score + 0.25 * q15["score"] + 0.25 * q5["score"] + 0.20 * st["score"]
+        q5_ok = q5["score"] >= cfg.min_quality
+    else:
+        conf = 0.30 * master_score + 0.50 * q15["score"] + 0.20 * st["score"]
+        q5_ok = True
     return {"q15": q15, "q5": q5, "structure": st, "confidence": round(conf, 4),
-            "ok": q15["score"] >= cfg.min_quality and q5["score"] >= cfg.min_quality
-                  and conf >= cfg.min_confidence}
+            "ok": q15["score"] >= cfg.min_quality and q5_ok and conf >= cfg.min_confidence}
 
 
 # --- engine ----------------------------------------------------------------
@@ -322,7 +327,7 @@ def evaluate(candles: Dict[str, Sequence[dict]], live_price: Optional[float] = N
         d.structure_confidence, d.confidence = g["structure"], g["confidence"]
         if g["q15"]["score"] < cfg.min_quality:
             d.setup_state, d.reason = BREAK_15M, "15M break quality below floor"
-        elif g["q5"]["score"] < cfg.min_quality:
+        elif cfg.use_5m_gauge and g["q5"]["score"] < cfg.min_quality:
             d.setup_state, d.reason = BREAK_5M, "5M break quality below floor"
         elif armed:
             d.setup_state, d.reason = ENTRY_1M, "pullback has room — waiting for 1M reclaim/continuation"
