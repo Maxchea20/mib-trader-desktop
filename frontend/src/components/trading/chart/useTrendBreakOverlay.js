@@ -28,8 +28,17 @@ export function useTrendBreakOverlay({ chartRef, candleSeriesRef, data, timefram
 
     data.lines.forEach((ln) => {
       const color = ln.kind === "upper" ? UP_COLOR : DN_COLOR;
+      const step = Number(data.tf_seconds) || 900;
       const seg = (t0, p0, t1, p1, dashed) => {
         if (!(t1 > t0)) return;
+        // One point per bar: the time scale counts a bar per data time, so a
+        // 2-point line running past the last candle would squash all the
+        // future bars into one and look almost vertical.
+        const n = Math.max(1, Math.round((t1 - t0) / step));
+        const pts = [];
+        for (let k = 0; k <= n; k += 1) {
+          pts.push({ time: t0 + k * step, value: Number(p0) + ((Number(p1) - Number(p0)) * k) / n });
+        }
         const s = chart.addLineSeries({
           color,
           lineWidth: 2,
@@ -38,7 +47,7 @@ export function useTrendBreakOverlay({ chartRef, candleSeriesRef, data, timefram
           priceLineVisible: false,
           crosshairMarkerVisible: false,
         });
-        s.setData([{ time: t0, value: Number(p0) }, { time: t1, value: Number(p1) }]);
+        s.setData(pts);
         seriesRef.current.push(s);
       };
       // solid: pivot -> breaking close (or newest bar); dashed: projected forward

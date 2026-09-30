@@ -37,4 +37,5 @@ def chart_payload(candles: Sequence[dict], tf_seconds: int, length: int = 14,
         "dist": abs(b.close - b.line_value),
         "dist_atr": (abs(b.close - b.line_value) / b.line.slope / length) if b.line.slope else None,
     } for b in res.events]
-    return {"lines": lines[-max_lines:], "breaks": breaks[-max_lines:], "length": length, "mult": mult}
+    return {"lines": lines[-max_lines:], "breaks": breaks[-max_lines:], "length": length, "mult": mult,
+            "tf_seconds": tf_seconds}
