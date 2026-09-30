@@ -15,7 +15,7 @@ import pandas as pd
 TFS = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 BASE, BASE_SEC = "15m", 900
 SL_ATR, TP_ATR, MAX_BARS = 1.5, 3.0, 200
-FEE_RT = 0.0009
+FEE_RT = 0.0004          # MEXC BTCUSDT perp taker 0.020% x2 (maker 0%); override with --fee-rt
 THRESH_P = 0.40          # trade when the model's win probability is at least this (fixed in advance)
 EMBARGO = MAX_BARS * BASE_SEC
 
@@ -106,7 +106,8 @@ def raw_windows(frames: Dict[str, pd.DataFrame], close_ts: np.ndarray) -> pd.Dat
     return pd.DataFrame(np.column_stack(cols), columns=names)
 
 
-def build_dataset(frames: Dict[str, pd.DataFrame], inputs: str = "features", stride: int = 1) -> Dict:
+def build_dataset(frames: Dict[str, pd.DataFrame], inputs: str = "features", stride: int = 1,
+                  fee_rt: float = FEE_RT) -> Dict:
     base = frames[BASE].reset_index(drop=True)
     close_ts = base["ts"].to_numpy() + BASE_SEC
     hour = ((close_ts % 86400) / 3600.0)
@@ -138,7 +139,7 @@ def build_dataset(frames: Dict[str, pd.DataFrame], inputs: str = "features", str
             r, d = _race(hi, lo, cl, i, s, a)
             if r >= 0:
                 y[s][i], dur[s][i] = r, d
-    fee_r = FEE_RT * cl / (SL_ATR * np.where(atr > 0, atr, np.nan))
+    fee_r = fee_rt * cl / (SL_ATR * np.where(atr > 0, atr, np.nan))
     out = {"X": X, "y": y, "dur": dur, "fee_r": fee_r, "ts": close_ts, "atr": atr}
     if stride > 1:                                            # thin the decision bars (saves memory in raw mode)
         keep = np.arange(0, n, stride)

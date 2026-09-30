@@ -653,3 +653,54 @@ def test_ml_raw_inputs_are_causal_and_tree_rules_are_readable():
     oos = ml.walk_forward(small, int(small["ts"][0]) + 100 * 86400, int(small["ts"][-1]) - 3 * 86400, 30, log=lambda *_: None, kind="tree")
     rules = oos["rules"][1]
     assert rules and "15m_ret3" in rules[0]["rule"] and rules[0]["p_train"] > 0.5
+
+
+def test_scalp_study_race_fees_and_gate():
+    import numpy as np, pandas as pd
+    from src.trend_break import scalp as S
+    # race_r: hand-checked cases (long, T = 1%, H = 3)
+    cl = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
+    hi = np.array([100.0, 101.2, 100.0, 100.0, 100.0, 100.0])
+    lo = np.array([100.0, 99.9, 100.0, 100.0, 100.0, 100.0])
+    r = S.race_r(hi, lo, cl, 0.01, 3, 1)
+    assert r[0] == 1.0                                                     # TP hit on bar 1
+    hi2 = np.array([100.0, 101.2, 100.0, 100.0, 100.0, 100.0])
+    lo2 = np.array([100.0, 98.9, 100.0, 100.0, 100.0, 100.0])
+    assert S.race_r(hi2, lo2, cl, 0.01, 3, 1)[0] == -1.0                   # both in one bar -> SL wins
+    assert S.race_r(hi, lo, cl, 0.01, 3, -1)[0] == -1.0                    # short: the same bar stops it out
+    assert np.isnan(S.race_r(hi, lo, cl, 0.01, 3, 1)[-1])                  # no future -> NaN
+    # noise: no PASS; planted follow-through after EMA crosses: PASS
+    def walk(seed, n=120_000):
+        rng = np.random.default_rng(seed)
+        c = 30000 * np.exp(np.cumsum(rng.normal(0, 0.0004, n)))
+        o = np.concatenate([[30000.0], c[:-1]])
+        return pd.DataFrame({"ts": 1_700_006_400 + np.arange(n) * 60.0, "open": o,
+                             "high": np.maximum(o, c) * 1.0001, "low": np.minimum(o, c) * 0.9999,
+                             "close": c, "volume": rng.uniform(50, 150, n)})
+    fails = 0
+    for seed in range(4):
+        df = walk(seed)
+        sg = S.signals(df)["EMA9/21+RSI"]
+        R = {1: S.race_r(df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy(), 0.002, 30, 1),
+             -1: S.race_r(df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy(), 0.002, 30, -1)}
+        j = S.judge(sg, R, 0.002, 30, 12)
+        fails += bool(j["pass_taker"] or j["pass_maker"])
+    assert fails == 0                                                      # no false PASS on random walks
+    df = walk(9)
+    sg = S.signals(df)["EMA9/21+RSI"]
+    idx = S.decluster_idx(np.where(sg != 0)[0], 40)
+    c = df["close"].to_numpy().copy()
+    for i in idx:                                                          # plant: the cross keeps running 0.5% over 10 bars, then stays
+        ramp = np.linspace(0.0, 0.005, 11)[1:]
+        for d, f in enumerate(ramp, start=1):
+            if i + d < len(c):
+                c[i + d] *= 1 + int(sg[i]) * f
+    df2 = df.copy()
+    df2["close"] = c
+    df2["high"] = np.maximum(df2["open"], df2["close"]) * 1.0001
+    df2["low"] = np.minimum(df2["open"], df2["close"]) * 0.9999
+    sg2 = S.signals(df2)["EMA9/21+RSI"]
+    R2 = {1: S.race_r(df2["high"].to_numpy(), df2["low"].to_numpy(), df2["close"].to_numpy(), 0.002, 30, 1),
+          -1: S.race_r(df2["high"].to_numpy(), df2["low"].to_numpy(), df2["close"].to_numpy(), 0.002, 30, -1)}
+    j2 = S.judge(sg2, R2, 0.002, 30, 12)
+    assert j2["pass_maker"] and j2["net_maker"] > 0.1

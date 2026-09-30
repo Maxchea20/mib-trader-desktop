@@ -62,12 +62,14 @@ def main():
     ap.add_argument("--model", choices=["gbm", "tree"], default="gbm",
                     help="gbm = black-box booster; tree = small decision tree whose leaves are readable IF-THEN rules (the setup)")
     ap.add_argument("--stride", type=int, default=1, help="use every Nth 15m bar as a decision point (saves memory)")
+    ap.add_argument("--fee-rt", type=float, default=ml.FEE_RT,
+                    help="round-trip fee as a fraction of price (default 0.0004 = taker 0.02%% x2; use 0 for maker-only)")
     ap.add_argument("--final", action="store_true")
     a = ap.parse_args()
     t0 = time.time()
     frames = {tf: ml.load_tf(a.db, SYMBOL, tf) for tf in ml.TFS}
     line("[data] " + "  ".join(f"{tf}:{len(d)}" for tf, d in frames.items()))
-    data = ml.build_dataset(frames, inputs=a.inputs, stride=a.stride)
+    data = ml.build_dataset(frames, inputs=a.inputs, stride=a.stride, fee_rt=a.fee_rt)
     ts = data["ts"]
     n_feat = data["X"].shape[1]
     line(f"[dataset] {len(ts)} decision bars x {n_feat} features, built in {time.time() - t0:.0f}s "

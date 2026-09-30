@@ -12,7 +12,7 @@ from typing import Dict, List, Sequence
 from . import trendline as tl
 from .features import mean_t, _p_two_sided
 
-FEE_RT = 0.0009          # 0.045% taker each side, round trip, as a fraction of price
+FEE_RT = 0.0004          # MEXC BTCUSDT perp: taker 0.020% each side -> 0.04% round trip (maker is 0%)
 
 
 def _race(hi, lo, cl, i, s, a, sl_atr, tp_atr, max_bars):
