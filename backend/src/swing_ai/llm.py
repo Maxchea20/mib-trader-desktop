@@ -16,8 +16,15 @@ class OpenAILLM:
     def __init__(self, model: str, timeout: int = 180, max_tokens: Optional[int] = None):
         self.model, self.timeout = model, timeout
         self.reasoning: Optional[str] = None          # low | medium | high; None = env / model default
+        self.extended_cache = os.environ.get("SWING_AI_CACHE_24H", "1").strip().lower() not in ("0", "false", "no")
         self.last_usage: Optional[Dict[str, int]] = None
         self.max_tokens = int(max_tokens or os.environ.get("SWING_AI_MAX_TOKENS", "10000"))
+
+    def _create(self, client, kw: Dict[str, Any], extra: Dict[str, Any]):
+        try:
+            return client.chat.completions.create(max_completion_tokens=self.max_tokens, extra_body=dict(extra), **kw)
+        except TypeError:                                            # very old SDKs / models that only know max_tokens
+            return client.chat.completions.create(max_tokens=self.max_tokens, extra_body=dict(extra), **kw)
 
     def complete(self, messages: List[Dict[str, str]], json_schema: Dict[str, Any]) -> str:
         key = os.environ.get("OPENAI_API_KEY")
@@ -30,12 +37,28 @@ class OpenAILLM:
         effort = self.reasoning or os.environ.get("SWING_AI_REASONING")            # optional: low | medium | high
         if effort:
             kw["reasoning_effort"] = effort
-        try:
-            resp = client.chat.completions.create(max_completion_tokens=self.max_tokens, **kw)
-        except TypeError:
-            resp = client.chat.completions.create(max_tokens=self.max_tokens, **kw)
-        except Exception as e:
-            raise LLMError(str(e))
+        # Prompt caching hints: a stable key improves cache routing; 24h retention keeps the unchanging daily/4H prefix cached between
+        # 15-minute reviews.  If the model or API rejects either hint, drop it and remember (never fail a review over a cost hint).
+        extra: Dict[str, Any] = {"prompt_cache_key": "mib-swing-ai"}
+        if self.extended_cache:
+            extra["prompt_cache_retention"] = "24h"
+        resp = None
+        for _ in range(3):
+            try:
+                resp = self._create(client, kw, extra)
+                break
+            except Exception as e:
+                msg = str(e).lower()
+                if "prompt_cache_retention" in extra and "prompt_cache_retention" in msg:
+                    extra.pop("prompt_cache_retention")
+                    self.extended_cache = False
+                    continue
+                if "prompt_cache_key" in extra and "prompt_cache_key" in msg:
+                    extra.pop("prompt_cache_key")
+                    continue
+                raise LLMError(str(e))
+        if resp is None:
+            raise LLMError("OpenAI call failed after dropping cache hints")
         u = getattr(resp, "usage", None)
         if u is not None:                                          # tokens actually billed, kept for the cost meter
             details = getattr(u, "prompt_tokens_details", None)

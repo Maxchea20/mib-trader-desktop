@@ -780,3 +780,41 @@ def test_audit_finds_no_lookahead_in_real_snapshots_and_detects_a_planted_leak(t
     revised = json.loads(json.dumps(snap))                                                  # plant: a 'closed' candle whose values later changed
     revised["timeframes"]["1h"]["candles"][-1][3] += 500.0
     assert len(audit.audit_snapshot(revised)["revised"]) == 1
+
+
+def test_cache_hints_are_sent_and_dropped_safely_if_rejected(monkeypatch):
+    import sys, types
+    from src.swing_ai.llm import OpenAILLM
+    sent = []
+
+    class _Msg: content = "{}"
+
+    class _Choice:
+        finish_reason = "stop"
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = types.SimpleNamespace(prompt_tokens=100, completion_tokens=5, prompt_tokens_details=types.SimpleNamespace(cached_tokens=60))
+
+    class _Completions:
+        def create(self, **kw):
+            sent.append(dict(kw.get("extra_body") or {}))
+            if "prompt_cache_retention" in (kw.get("extra_body") or {}):
+                raise Exception("Unknown parameter: 'prompt_cache_retention' is not supported for this model")
+            return _Resp()
+
+    class _Client:
+        def __init__(self, **kw):
+            self.chat = types.SimpleNamespace(completions=_Completions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_Client))
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    llm = OpenAILLM("gpt-5.4")
+    assert llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema()) == "{}"
+    assert sent[0] == {"prompt_cache_key": "mib-swing-ai", "prompt_cache_retention": "24h"}          # asked for the long cache first
+    assert sent[1] == {"prompt_cache_key": "mib-swing-ai"} and llm.extended_cache is False           # rejected -> dropped, review still succeeds
+    assert llm.last_usage == {"input": 100, "cached": 60, "output": 5}
+    n = len(sent)
+    llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema())
+    assert len(sent) == n + 1 and "prompt_cache_retention" not in sent[-1]                          # remembered: not retried every call

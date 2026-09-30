@@ -113,3 +113,9 @@ Reviews are the cost: about 13k input tokens plus GPT's reasoning tokens each. L
 `python scripts/swing_ai_audit.py` re-reads the snapshots GPT actually received and checks, for every timeframe, that (1) no candle was
 still forming or in the future at the snapshot time and (2) no candle GPT saw as closed later changed in the market database. The **LEAN**
 context profile (30 daily, 60 4H, 96 1H, 64 15M, 36 5M, 30 1M candles) cuts a review to roughly 9k tokens.
+
+## Prompt-cache hints
+
+Each request carries `prompt_cache_key` and asks for `prompt_cache_retention: 24h` so the unchanging start of the prompt (instructions, daily and 4H candles)
+can stay cached between 15-minute reviews. If the model or API rejects a hint it is dropped automatically and remembered; a review never fails over it.
+Turn the long-retention request off with `SWING_AI_CACHE_24H=0` in `.env`. The cached-token count of every review is stored and shown in the panel/report.
