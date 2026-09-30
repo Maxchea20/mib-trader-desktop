@@ -973,3 +973,18 @@ def test_trade_character_and_swing_prompt(tmpdb):
     assert c["trades"] == 3 and c["median_held_hours"] == pytest.approx(10.0) and c["share_closed_under_1h"] == pytest.approx(1 / 3)
     assert c["median_stop_pct"] == pytest.approx(4.0 / 99.9 * 100 if False else 4.0 / 100.0 * 100, abs=0.1)
     assert c["median_expected_hold_hours"] == 30.0 and c["median_actual_vs_expected"] < 1.0
+
+
+def test_diagnose_flags_ai_mistakes(tmpdb):
+    from src.swing_ai import diagnose
+    base = dict(symbol="BTCUSDT", kind="ENTRY", model="m", prompt_version="v", valid=1, risk_ok=1, price=100.0, ts=1000)
+    store.add_decision(**base, decision="LONG", entry=100.0, sl=99.5, tp=101.0, entry_type="MARKET", confidence=0.7, invalidation_price=99.0, latency_ms=90_000)   # scalp target, R:R 2 ok, slow
+    store.add_decision(**{**base, "ts": 1600}, decision="SHORT", entry=100.0, sl=101.0, tp=97.0, entry_type="MARKET", confidence=0.7)                       # flip within an hour
+    store.add_decision(**{**base, "ts": 1700, "risk_ok": 0}, decision="LONG", entry=100.0, sl=100.5, tp=101.0, risk_reasons="LONG needs sl < entry < tp")       # refused
+    store.add_decision(**{**base, "ts": 1800, "kind": "MANAGE"}, decision="HOLD", thesis="[INVALID] structure broke")                                    # contradiction
+    store.add_decision(**{**base, "ts": 1900, "valid": 0}, decision="NO_TRADE", error="truncated")
+    out = diagnose.diagnose()
+    codes = {f["code"]: f["count"] for f in out["findings"]}
+    assert codes["SCALP_GEOMETRY"] >= 1 and codes["SIDE_FLIP"] == 2 and codes["PROPOSALS_REJECTED"] == 1
+    assert codes["MANAGE_CONTRADICTION"] == 1 and codes["AI_ERRORS"] == 1 and codes["SLOW_CALLS"] == 1
+    assert out["findings"][0]["severity"] == "HIGH"

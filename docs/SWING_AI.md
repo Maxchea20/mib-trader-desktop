@@ -158,3 +158,10 @@ Mechanical exits are `TP`, `SL` (original stop) and `SL_MOVED`. When GPT closes 
 `AI_WEAKENING` (thesis fading) or `AI_EXIT_VALID` (it exited although it still called the thesis valid, e.g. a
 discretionary profit or risk decision). Older rows keep `AI_EXIT`. The trade row also shows GPT's reason and the wake
 that triggered the review (for example `INVALIDATION_LEVEL_HIT`). All `AI_*` exits get the "if held" follow-up.
+
+## Diagnosing the AI
+
+`python scripts/swing_ai_diagnose.py` (read-only) lists mistakes and inconsistencies from the stored decisions and trades: failed or slow
+calls, refused proposals, scalp-sized targets, R:R below the prompt's own 1.5, order type not matching the entry price, LONG/SHORT flips
+within an hour, management reviews that contradict themselves (INVALID but HOLD, VALID but EXIT), stops tighter than GPT's own
+invalidation, trades closed far earlier than expected, stale MARKET fills, and AI exits that cost money vs holding.
