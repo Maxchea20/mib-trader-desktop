@@ -188,7 +188,7 @@ export const SwingAiPanel = () => {
           {models?.error && <span className="text-amber-300">models: {models.error}</span>}
           {[
             ["Reasoning", "reasoning", ["default", "low", "medium", "high"]],
-            ["Context", "context", ["FULL", "COMPACT"]],
+            ["Context", "context", ["FULL", "COMPACT", "LEAN"]],
           ].map(([label, key, opts]) => (
             <label key={key} className="flex items-center gap-1">{label}
               <select value={st[key]} onChange={(e) => save({ [key]: e.target.value })}

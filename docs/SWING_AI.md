@@ -107,3 +107,9 @@ Reviews are the cost: about 13k input tokens plus GPT's reasoning tokens each. L
   Changing the model starts a new record: the model is stored on every decision.
 * **Meter:** tokens per review are stored; the panel shows tokens today (and dollars if you set `SWING_AI_PRICE_IN`, `SWING_AI_PRICE_CACHED`,
   `SWING_AI_PRICE_OUT` in USD per 1M tokens in `.env`). `swing_ai_report.py` prints them too.
+
+## Look-ahead audit
+
+`python scripts/swing_ai_audit.py` re-reads the snapshots GPT actually received and checks, for every timeframe, that (1) no candle was
+still forming or in the future at the snapshot time and (2) no candle GPT saw as closed later changed in the market database. The **LEAN**
+context profile (30 daily, 60 4H, 96 1H, 64 15M, 36 5M, 30 1M candles) cuts a review to roughly 9k tokens.

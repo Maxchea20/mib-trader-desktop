@@ -13,7 +13,8 @@ from .source import TF_SEC, closed_only
 # How much raw history GPT receives per timeframe (closed candles, newest last).
 LIMITS = {"1d": 90, "4h": 180, "1h": 240, "15m": 192, "5m": 144, "1m": 90}
 LIMITS_COMPACT = {"1d": 45, "4h": 90, "1h": 120, "15m": 96, "5m": 72, "1m": 45}     # about 45% fewer tokens
-PROFILES = {"FULL": LIMITS, "COMPACT": LIMITS_COMPACT}
+LIMITS_LEAN = {"1d": 30, "4h": 60, "1h": 96, "15m": 64, "5m": 36, "1m": 30}          # about 65% fewer tokens than FULL
+PROFILES = {"FULL": LIMITS, "COMPACT": LIMITS_COMPACT, "LEAN": LIMITS_LEAN}
 MIN_ROWS = {"1d": 20, "4h": 30, "1h": 48, "15m": 48, "5m": 24, "1m": 20}
 ORDER = ("1d", "4h", "1h", "15m", "5m", "1m")
 COLUMNS = ["open", "high", "low", "close", "volume"]

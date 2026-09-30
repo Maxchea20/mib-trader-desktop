@@ -747,3 +747,36 @@ def test_model_env_takes_one_name_first_entry_wins(monkeypatch):
     assert SwingConfig().model == "gpt-5.4"
     monkeypatch.setenv("SWING_AI_MODEL", "gpt-5.4-mini")
     assert SwingConfig().model == "gpt-5.4-mini"
+
+
+def test_lean_profile_is_much_smaller_and_still_valid():
+    src = ListSource(DATA)
+    p = price_at(NOW)
+    full = json.dumps(snap_at())
+    lean_snap = raw_data.build_raw_snapshot(src, NOW, p, {"bid": p - 0.5, "ask": p + 0.5}, None, profile="LEAN")
+    assert lean_snap is not None and len(json.dumps(lean_snap)) < 0.4 * len(full)
+    for tf, b in lean_snap["timeframes"].items():                    # up to the profile limit (the test data has only 25 daily bars)
+        assert len(b["candles"]) == min(raw_data.LIMITS_LEAN[tf], len([c for c in DATA[tf] if c["ts"] + TF_SEC[tf] <= NOW]))
+
+
+def test_audit_finds_no_lookahead_in_real_snapshots_and_detects_a_planted_leak(tmpdb):
+    from src.swing_ai import audit
+    cfg = SwingConfig()
+    snap = snap_at()
+    price = snap["live"]["price"]
+    for tf, rows in DATA.items():                                   # the market database the audit compares against
+        db.upsert_candles("BTC_USDT", tf, rows)
+    nt = json.dumps(_good(decision="NO_TRADE", entry=None, sl=None, tp=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[]))
+    m = SwingManager(cfg, ListSource(DATA), FakeLLM(lambda msgs, sc: nt))
+    m.step(NOW, price, _ticker(price))
+    r = audit.audit_recent(5)
+    assert r["snapshots"] == 1 and r["future_candles"] == 0 and r["revised_candles"] == 0
+    assert all(v >= 0 for v in r["detail"][0]["margin_seconds"].values())                   # newest candle of every timeframe had closed
+    leaked = json.loads(json.dumps(snap))                                                   # plant: an extra candle that is still forming
+    blk = leaked["timeframes"]["15m"]
+    blk["candles"].append(blk["candles"][-1])
+    blk["last_open_ts"] += 900
+    assert len(audit.audit_snapshot(leaked, check_db=False)["future"]) >= 1
+    revised = json.loads(json.dumps(snap))                                                  # plant: a 'closed' candle whose values later changed
+    revised["timeframes"]["1h"]["candles"][-1][3] += 500.0
+    assert len(audit.audit_snapshot(revised)["revised"]) == 1
