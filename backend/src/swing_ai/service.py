@@ -16,7 +16,7 @@ _manager: Optional[mgr.SwingManager] = None
 
 AI_FIELDS = ("ts", "kind", "wake_kind", "wake_detail", "price", "model", "prompt_version", "decision", "confidence", "headline", "market_state",
              "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis", "entry_analysis", "entry_type",
-             "entry", "sl", "tp", "thesis", "invalidation", "invalidation_price", "wake_levels", "risk_ok", "risk_reasons",
+             "entry", "sl", "tp", "expected_hold_hours", "thesis", "invalidation", "invalidation_price", "wake_levels", "risk_ok", "risk_reasons",
              "snapshot_id", "trade_id", "error", "id")
 
 

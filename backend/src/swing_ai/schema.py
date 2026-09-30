@@ -36,7 +36,7 @@ def entry_json_schema() -> Dict[str, Any]:
         "daily_analysis": {"type": "string"}, "h4_analysis": {"type": "string"}, "h1_analysis": {"type": "string"},
         "m15_analysis": {"type": "string"}, "structure_analysis": {"type": "string"}, "entry_analysis": {"type": "string"},
         "entry_type": {"type": ["string", "null"], "enum": list(ENTRY_TYPES) + [None]},
-        "entry": n, "sl": n, "tp": n,
+        "entry": n, "sl": n, "tp": n, "expected_hold_hours": n,
         "thesis": {"type": "string"}, "invalidation": {"type": "string"}, "invalidation_price": n,
         "wake_levels": _wake_schema(),
     }
@@ -69,6 +69,7 @@ class EntryDecision:
     entry: Optional[float] = None
     sl: Optional[float] = None
     tp: Optional[float] = None
+    expected_hold_hours: Optional[float] = None
     thesis: str = ""
     invalidation: str = ""
     invalidation_price: Optional[float] = None
@@ -157,6 +158,9 @@ def parse_entry(raw: Any) -> EntryDecision:
     if dec == "NO_TRADE":
         return out                                    # NO_TRADE never needs levels (0 / null both mean "none")
     out.entry, out.sl, out.tp = _num(d, "entry", True), _num(d, "sl", True), _num(d, "tp", True)
+    out.expected_hold_hours = _num(d, "expected_hold_hours", True)
+    if out.expected_hold_hours <= 0:
+        raise SchemaError("expected_hold_hours must be positive for a trade")
     et = d.get("entry_type")
     if et not in ENTRY_TYPES:
         raise SchemaError(f"entry_type must be one of {ENTRY_TYPES} for a trade")

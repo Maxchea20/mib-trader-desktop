@@ -21,14 +21,14 @@ CREATE TABLE IF NOT EXISTS swing_ai_decisions (
   daily_analysis TEXT, h4_analysis TEXT, h1_analysis TEXT, m15_analysis TEXT, structure_analysis TEXT, entry_analysis TEXT,
   entry_type TEXT, entry REAL, sl REAL, tp REAL, thesis TEXT, invalidation TEXT, invalidation_price REAL, wake_levels TEXT,
   raw TEXT, valid INTEGER, risk_ok INTEGER, risk_reasons TEXT, trade_id INTEGER, error TEXT, latency_ms INTEGER,
-  input_tokens INTEGER, cached_tokens INTEGER, output_tokens INTEGER, safety_mode TEXT);
+  input_tokens INTEGER, cached_tokens INTEGER, output_tokens INTEGER, safety_mode TEXT, expected_hold_hours REAL);
 CREATE TABLE IF NOT EXISTS swing_ai_trades (
   id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, status TEXT, side TEXT, entry_type TEXT, plan_entry REAL, fill_price REAL,
   sl REAL, sl0 REAL, tp REAL, qty REAL, risk_usd REAL, risk_dist REAL, created_ts INTEGER, opened_ts INTEGER, expires_ts INTEGER,
   thesis TEXT, invalidation TEXT, invalidation_price REAL, decision_id INTEGER, market_state TEXT, confidence REAL,
   fee_entry REAL, fee_tp REAL, fee_sl REAL, mfe_r REAL DEFAULT 0, mae_r REAL DEFAULT 0, last_bar_ts INTEGER,
   exit_price REAL, exit_reason TEXT, closed_ts INTEGER, r_gross REAL, r_net REAL, fees_usd REAL, outcome TEXT, meta TEXT,
-  cf_status TEXT, cf_last_bar_ts INTEGER, cf_r_net REAL, cf_exit_reason TEXT, cf_closed_ts INTEGER);
+  cf_status TEXT, cf_last_bar_ts INTEGER, cf_r_net REAL, cf_exit_reason TEXT, cf_closed_ts INTEGER, expected_hold_hours REAL);
 """
 _ready = False
 ENCODING = "zlib+json"
@@ -40,11 +40,11 @@ def init() -> None:
         c = db._connect()
         c.executescript(TABLES)
         cols = {r[1] for r in c.execute("PRAGMA table_info(swing_ai_decisions)").fetchall()}
-        for name, typ in (("headline", "TEXT"), ("input_tokens", "INTEGER"), ("cached_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("safety_mode", "TEXT")):
+        for name, typ in (("headline", "TEXT"), ("input_tokens", "INTEGER"), ("cached_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("safety_mode", "TEXT"), ("expected_hold_hours", "REAL")):
             if name not in cols:                            # databases created before these fields existed
                 c.execute(f"ALTER TABLE swing_ai_decisions ADD COLUMN {name} {typ}")
         tcols = {r[1] for r in c.execute("PRAGMA table_info(swing_ai_trades)").fetchall()}
-        for name, typ in (("cf_status", "TEXT"), ("cf_last_bar_ts", "INTEGER"), ("cf_r_net", "REAL"), ("cf_exit_reason", "TEXT"), ("cf_closed_ts", "INTEGER")):
+        for name, typ in (("cf_status", "TEXT"), ("cf_last_bar_ts", "INTEGER"), ("cf_r_net", "REAL"), ("cf_exit_reason", "TEXT"), ("cf_closed_ts", "INTEGER"), ("expected_hold_hours", "REAL")):
             if name not in tcols:
                 c.execute(f"ALTER TABLE swing_ai_trades ADD COLUMN {name} {typ}")
         c.commit()
@@ -94,7 +94,7 @@ def add_wake(ts: int, w: Dict[str, Any]) -> int:
 DECISION_COLS = ["ts", "symbol", "kind", "wake_kind", "wake_detail", "price", "snapshot_id", "model", "prompt_version", "decision",
                  "confidence", "headline", "market_state", "daily_analysis", "h4_analysis", "h1_analysis", "m15_analysis", "structure_analysis",
                  "entry_analysis", "entry_type", "entry", "sl", "tp", "thesis", "invalidation", "invalidation_price", "wake_levels",
-                 "raw", "valid", "risk_ok", "risk_reasons", "trade_id", "error", "latency_ms", "input_tokens", "cached_tokens", "output_tokens", "safety_mode"]
+                 "raw", "valid", "risk_ok", "risk_reasons", "trade_id", "error", "latency_ms", "input_tokens", "cached_tokens", "output_tokens", "safety_mode", "expected_hold_hours"]
 
 
 def add_decision(**k) -> int:

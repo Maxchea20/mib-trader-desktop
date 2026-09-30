@@ -154,7 +154,7 @@ def test_snapshot_is_causal():
 def _good(**kw):
     d = {"decision": "LONG", "confidence": 0.7, "headline": "Trend continuation long", "market_state": "TRENDING_UP", "daily_analysis": "d", "h4_analysis": "h4",
          "h1_analysis": "h1", "m15_analysis": "m15", "structure_analysis": "HH/HL", "entry_analysis": "reclaim", "entry_type": "MARKET",
-         "entry": 100.0, "sl": 96.0, "tp": 108.0, "thesis": "t", "invalidation": "i", "invalidation_price": 95.5,
+         "entry": 100.0, "sl": 96.0, "tp": 108.0, "expected_hold_hours": 36.0, "thesis": "t", "invalidation": "i", "invalidation_price": 95.5,
          "wake_levels": [{"price": 105.0, "direction": "ABOVE", "reason": "breakout"}]}
     d.update(kw)
     return d
@@ -163,10 +163,10 @@ def _good(**kw):
 def test_schema_accepts_valid_and_rejects_everything_else():
     e = schema.parse_entry(json.dumps(_good()))
     assert e.decision == "LONG" and e.daily_analysis == "d" and e.wake_levels[0]["direction"] == "ABOVE"
-    nt = _good(decision="NO_TRADE", entry=0, sl=None, tp=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[])
+    nt = _good(decision="NO_TRADE", entry=0, sl=None, tp=None, expected_hold_hours=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[])
     assert schema.parse_entry(nt).decision == "NO_TRADE"
     bads = ["not json", "[]", _good(decision="BUY"), _good(confidence=1.5), _good(sl=None), _good(entry_type="SPREAD"), _good(thesis=""),
-            _good(market_state="BULLISH"), _good(entry="100"), _good(tp=float("nan")), _good(daily_analysis=""), _good(h1_analysis=None), _good(headline=""),
+            _good(market_state="BULLISH"), _good(entry="100"), _good(tp=float("nan")), _good(daily_analysis=""), _good(h1_analysis=None), _good(headline=""), _good(expected_hold_hours=None), _good(expected_hold_hours=0),
             _good(invalidation=""), _good(wake_levels=[{"price": 1, "direction": "SIDEWAYS", "reason": ""}])]
     for bad in bads:
         with pytest.raises(schema.SchemaError):
@@ -957,3 +957,19 @@ def test_stop_entry_orders_fill_only_when_price_trades_through(tmpdb):
     w = _open(_plan(side="SHORT", typ="STOP", entry=99.0, sl=102.0, tp=92.0), 7000, None, None)
     v = raw_data.position_state(w, 100.0, 7000)
     assert v["status"] == "PENDING_NOT_FILLED" and v["order_type"] == "STOP" and v["trigger_price"] == 99.0
+
+
+def test_trade_character_and_swing_prompt(tmpdb):
+    from src.swing_ai import prompts
+    text = prompts.system_prompt(SwingConfig())
+    assert "NOT A SCALPER" in text and "expected_hold_hours" in text and "2% to 8%" in text and prompts.PROMPT_VERSION == "swing-v5-horizon"
+    assert "do not exit on 1M/5M noise" in prompts.MANAGE_TASK
+    cfg = SwingConfig()
+    for i, (hold_min, exp_h) in enumerate(((20, 30.0), (600, 24.0), (3000, 48.0))):
+        p = _open(_plan(), 1000 + i * 10_000, 99.9, 100.0)
+        store.update_trade(p["id"], expected_hold_hours=exp_h)
+        paper.close_now(store.get_trade(p["id"]), 101.0, "AI_EXIT", 1000 + i * 10_000 + hold_min * 60)
+    c = analytics.report()["character"]
+    assert c["trades"] == 3 and c["median_held_hours"] == pytest.approx(10.0) and c["share_closed_under_1h"] == pytest.approx(1 / 3)
+    assert c["median_stop_pct"] == pytest.approx(4.0 / 99.9 * 100 if False else 4.0 / 100.0 * 100, abs=0.1)
+    assert c["median_expected_hold_hours"] == 30.0 and c["median_actual_vs_expected"] < 1.0

@@ -45,6 +45,26 @@ def _cost(i: int, c: int, o: int):
     return ((i - c) * pin + c * pc + o * pout) / 1_000_000.0
 
 
+def _median(v):
+    v = sorted(x for x in v if x is not None)
+    return None if not v else (v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2)
+
+
+def character(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Is this behaving like a swing system or a scalper?  Plain facts about the trades taken (no judgement, no market analysis)."""
+    taken = [t for t in trades if t.get("fill_price") and t.get("risk_dist")]
+    closed = [t for t in taken if t["status"] == "CLOSED" and t.get("closed_ts") and t.get("opened_ts")]
+    held_h = [(t["closed_ts"] - t["opened_ts"]) / 3600.0 for t in closed]
+    exp = [(t["expected_hold_hours"], (t["closed_ts"] - t["opened_ts"]) / 3600.0) for t in closed if t.get("expected_hold_hours")]
+    return {"trades": len(taken),
+            "median_stop_pct": _median([t["risk_dist"] / t["fill_price"] * 100.0 for t in taken]),
+            "median_target_pct": _median([abs(t["tp"] - t["fill_price"]) / t["fill_price"] * 100.0 for t in taken if t.get("tp")]),
+            "median_held_hours": _median(held_h),
+            "share_closed_under_1h": (sum(1 for h in held_h if h < 1.0) / len(held_h)) if held_h else None,
+            "median_expected_hold_hours": _median([t["expected_hold_hours"] for t in taken if t.get("expected_hold_hours")]),
+            "median_actual_vs_expected": _median([a / e for e, a in exp if e]) if exp else None}
+
+
 def report(decision_limit: int = 100000) -> Dict[str, Any]:
     dec = [d for d in store.decisions(decision_limit) if d["kind"] == "ENTRY"]
     trades = store.trades()
@@ -73,8 +93,9 @@ def report(decision_limit: int = 100000) -> Dict[str, Any]:
                      "avg_r_saved_by_exiting": (sum(saved) / len(saved)) if saved else None,
                      "exit_was_better": sum(1 for x in saved if x > 0), "exit_was_worse": sum(1 for x in saved if x < 0)}
     all_rows = store.decisions(decision_limit)
+    char = character(trades)
     return {
-        "usage": usage_report(all_rows), "ai_exit_value": ai_exit_value,
+        "usage": usage_report(all_rows), "ai_exit_value": ai_exit_value, "character": char,
         "frequency": {"entry_reviews": n, "LONG": counts["LONG"], "SHORT": counts["SHORT"], "NO_TRADE": counts["NO_TRADE"],
                       "no_trade_share": (counts["NO_TRADE"] / n) if n else None,
                       "proposals_rejected_by_safety": sum(1 for d in dec if d["decision"] in ("LONG", "SHORT") and not d["risk_ok"]),

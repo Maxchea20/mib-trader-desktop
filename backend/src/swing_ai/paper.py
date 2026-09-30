@@ -17,6 +17,7 @@ def open_from_plan(plan: Dict[str, Any], decision: Dict[str, Any], decision_id: 
     fill = plan["entry"] if not market else (ask if plan["side"] == "LONG" else bid) or plan["entry"]
     row = {
         "symbol": "BTC_USDT", "market_state": decision.get("market_state"), "confidence": decision.get("confidence"),
+        "expected_hold_hours": decision.get("expected_hold_hours"),
         "status": "OPEN" if market else "PENDING", "side": plan["side"], "entry_type": plan["entry_type"],
         "plan_entry": plan["entry"], "fill_price": fill if market else None, "sl": plan["sl"], "sl0": plan["sl"],
         "tp": plan["tp"], "qty": plan["qty"], "risk_usd": plan["risk_usd"], "risk_dist": abs(fill - plan["sl"]) if market else plan["risk_dist"],

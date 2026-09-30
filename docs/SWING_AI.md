@@ -139,3 +139,14 @@ before anyone changes a rule.
   entry (fills when price trades through). The only refusals are proposals that cannot be simulated at all: missing or non-positive levels, or a stop/target on the wrong
   side of the entry. Sizing still risks 1% and respects the leverage/notional caps (they only shrink size; R results are unaffected).
 * The mode in force is stored on every decision (`safety_mode`). Whenever a live executor exists, STRICT is forced regardless of this setting.
+
+## Swing horizon (prompt `swing-v5-horizon`)
+
+The prompt now states this is a swing system, not a scalper: targets typically 2–8% away
+on 4H/1H/1D levels, hold half a day to several days, and NO_TRADE when only a short-term
+scalp exists. GPT reports `expected_hold_hours` with every trade. Management reviews are told
+not to exit on 1M/5M noise or a brief wick.
+
+`swing_ai_report.py` prints a trade-character line (median stop %, target %, held hours,
+share of trades closed under 1h, expected vs actual hold). If the share closed under 1h is
+high, the AI is still scalping. Keep "Trade check every" at 15–30 min; 1 min invites noise exits.

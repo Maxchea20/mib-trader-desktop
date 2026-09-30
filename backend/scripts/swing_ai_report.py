@@ -53,6 +53,12 @@ def main():
         print("confidence calibration (does higher confidence win more?):")
         for c in r["confidence_calibration"]:
             print(f"  {c['confidence_bin']}  trades {c['trades']:>3}  mean conf {c['mean_confidence']:.2f}  win {c['win_rate']:.0%}  mean net R {c['mean_net_r']:+.2f}")
+    c = r["character"]
+    if c["trades"]:
+        f = lambda v, u="": "—" if v is None else f"{v:.2f}{u}"
+        print(f"trade character ({c['trades']} trades): median stop {f(c['median_stop_pct'], '%')}, target {f(c['median_target_pct'], '%')}, "
+              f"held {f(c['median_held_hours'], ' h')} (expected {f(c['median_expected_hold_hours'], ' h')}); closed within 1h: "
+              + ("—" if c["share_closed_under_1h"] is None else f"{c['share_closed_under_1h']:.0%}") + "  (a swing system: hours to days, targets a few %)")
     x = r["ai_exit_value"]
     if x["ai_exits"]:
         v = f"{x['avg_r_saved_by_exiting']:+.2f} R per exit ({x['exit_was_better']} better, {x['exit_was_worse']} worse)" if x["judged"] else "not judged yet"
