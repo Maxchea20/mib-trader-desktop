@@ -1,83 +1,85 @@
 # Swing AI (paper-mode experiment)
 
-A separate, isolated swing-trading experiment. **The AI is the decision brain; deterministic code owns all money
-decisions.** Nothing here imports Hunt, S1/S2, the scalp engine or Trend Break. Delete `backend/src/swing_ai/` (and the
-three small hooks in `server.py`) to remove it completely.
+**AI is the brain. MIB is the body.** OpenAI (GPT) is the ONLY market-analysis brain. MIB moves raw MEXC data, stores and
+displays what GPT says, enforces hard safety limits and simulates paper fills. MIB computes **no** second market opinion.
+Nothing here imports Hunt, S1/S2, the scalp engine or Trend Break. Delete `backend/src/swing_ai/` (plus the small hooks in
+`server.py`, `App.js`, `lib/api.js`, and `SwingAiPanel.js`) to remove it.
 
 ```
-live MEXC feed + SQLite candles
-   -> market_state.build_snapshot()      multi-timeframe facts, causal (closed candles only)
-   -> events.detect()                    deterministic wake-ups (no AI on ticks)
-   -> engine.review_entry / review_manage  strict-JSON call to the model
-   -> risk.validate_*()                  accept exactly as proposed, or reject with reasons; sizes the position
-   -> paper.py                           simulated fills, SL/TP, MFE/MAE, R after fees
-   -> store.py                           every snapshot, event, decision and position is logged
+MEXC -> raw live data (quote, OHLCV 1D/4H/1H/15M/5M/1M) -> MIB raw-data layer (raw_data.py: packaging only)
+     -> GPT analyses EVERYTHING -> strict JSON decision
+     -> MIB stores it (swing_ai_market_snapshots / swing_ai_decisions / swing_ai_trades)
+     -> Swing AI panel shows the stored GPT output
+     -> deterministic safety layer (risk.py) -> paper broker (live MEXC execution is NOT connected)
 ```
+
+## What MIB sends to GPT (raw evidence only)
+
+Live price, bid, ask, spread, 24h exchange volume; closed OHLCV candles for 1D (90), 4H (180), 1H (240), 15M (192), 5M (144),
+1M (90); and the current paper position/order (side, entry, stop, target, size, unrealised R, MFE/MAE) with GPT's **own** stored
+thesis. GPT also gets its own previous analysis for continuity. There is no trend, structure, HH/HL, BOS/CHoCH, level,
+liquidity, FVG, momentum, volatility, indicator, bias, confidence or signal from MIB. A test enforces this (no analytical key in
+the snapshot, and no analytical function anywhere in the package).
+
+## What GPT returns (strict JSON schema)
+
+`decision` (LONG / SHORT / NO_TRADE), `confidence`, `market_state` (TRENDING_UP / TRENDING_DOWN / RANGE / TRANSITION / UNCLEAR),
+`daily_analysis`, `h4_analysis`, `h1_analysis`, `m15_analysis`, `structure_analysis`, `entry_analysis`, `entry_type`, `entry`,
+`sl`, `tp`, `thesis`, `invalidation`, `invalidation_price`, and `wake_levels` (up to 4 prices where it wants to be woken next).
+NO_TRADE is valid and still carries the full analysis. `market_state` is an enum so results can be grouped by the AI's own
+market classification. An unparseable or failed reply is a NO_TRADE / HOLD, never a guess.
+
+## When GPT is called
+
+* Heartbeat: a full review every 15 minutes when flat.
+* Wakes (raw mechanical conditions, never an opinion): a 1H / 4H / 1D candle just closed; a raw price move of 0.6% within
+  30 minutes; price crossing a level **GPT itself asked** to be woken at; open trade: price through GPT's own invalidation
+  price, or within 0.15% of the stop (urgent, immediate). Each kind has a cooldown; AI calls are at least 60 s apart
+  (urgent wakes ignore both).
+* Open position: management review every 5 minutes. GPT may HOLD, MOVE_SL (risk-reducing only) or EXIT. It cannot add or reverse.
+
+## Storage (audit trail of what GPT saw and decided)
+
+* `swing_ai_market_snapshots`: the exact raw package sent (zlib-compressed JSON).
+* `swing_ai_decisions`: timestamp, symbol, model, prompt version, wake reason, snapshot reference, the full structured GPT
+  output (all analysis fields, levels, confidence, thesis, invalidation, alerts), the raw reply, the safety-layer verdict.
+* `swing_ai_trades`: paper trades with fills, fees, MFE, MAE, gross/net R, exit reason, and final outcome.
+* `swing_ai_wakes`: which raw condition triggered each review.
+
+## UI
+
+The Swing AI panel (`SwingAiPanel.js`, fed by `GET /api/swing-ai/latest`) shows Market view (Daily, 4H, 1H, 15M), Structure,
+Entry analysis, the AI decision (entry, SL, TP, confidence), Thesis, Invalidation, GPT's own alerts, last-analysis time, the
+open paper trade, GPT's latest management review, and performance. Every analysis field is the stored GPT text.
+
+## Safety layer (`risk.py`) - constraints, not market opinions
+
+Percent-of-price limits only (no volatility measure): stop 0.3% to 8%, reward/risk >= 1.5, market entry within 0.05% of price,
+limit entries passive and within 3%, spread <= 0.03%, fresh ticker, one position at a time, 3 trades/day, -3R daily stop,
+cooldown after a loss, 1% equity risk per trade, max 5x leverage, max notional. GPT's levels are never edited: valid as given
+or rejected with reasons. GPT is told these limits up front so its proposals fit them.
 
 ## Run it (paper only)
 
 ```
 set OPENAI_API_KEY=...            # PowerShell: $env:OPENAI_API_KEY="..."
 set SWING_AI_ENABLED=1
-set SWING_AI_MODEL=gpt-5.4-mini   # optional; falls back to AI_THESIS_MODEL
+set SWING_AI_MODEL=gpt-5.4        # or another model; defaults to AI_THESIS_MODEL / gpt-5.4-mini
 python run_server.py
 ```
 
-* Try one review without trading or storing anything: `python scripts/swing_ai_dryrun.py` (add `--no-call` to only size the snapshot).
-* Watch it: `GET /api/swing-ai/status`, `/api/swing-ai/decisions`, `/api/swing-ai/positions`.
-* Judge it: `python scripts/swing_ai_report.py` (win rate, net R after fees, profit factor, t-statistic, MFE/MAE, rejected proposals).
-
-There is **no live execution path**. A live executor would be a separate, explicit step that reuses the MEXC layer
-(`autotrader_exec.py` / `mexc_private.py`) behind the same `risk.py` checks.
-
-## What the AI sees (all known at the decision timestamp)
-
-* **Market:** live price, bid/ask, spread %, ticker age.
-* **4H / 1H / 15M:** the last 30 / 48 / 64 closed candles, ATR and volatility percentile, trend (from confirmed swings),
-  BOS / CHoCH, swing highs and lows, support/resistance clusters with touches and distance in ATR, RSI, multi-bar returns
-  in ATR, volume ratios, range expansion, extension from EMA20/EMA50 and position in the 96-bar range.
-  15M also has liquidity sweeps and wick rejections.
-* **5M / 1M:** entry refinement only (EMA9 reclaim, wicks, immediate structure).
-* **Derived:** trend alignment across 4H/1H/15M, volatility regime, whether price is extended, room to the nearest
-  level in 1H-ATR, momentum flips, typical 24-bar range.
-* **Open position:** side, entry, stop, target, thesis, invalidation, unrealised R, MFE/MAE.
-
-## Cadence
-
-* Heartbeat: full entry review every 15 minutes (when flat).
-* Events wake it sooner: 4H/1H structure change, 15M BOS/CHoCH, 15M liquidity sweep, a 15M close through a multi-touch
-  level, volatility expansion, 1H RSI crossing 50, price arriving at a multi-touch level. Per-event de-duplication and a
-  15-minute quiet period per kind; at least 60 s between AI calls.
-* Open position: management review every 5 minutes; **immediately** when price crosses the invalidation level or comes
-  within 0.25 ATR of the stop.
-
-## Risk / execution layer (`risk.py`, defaults in `config.py`)
-
-Max 1% equity risk per trade, max 5x leverage, max position size, stop 0.5 to 5 x ATR(1h), reward/risk at least 1.5,
-spread <= 0.03%, fresh ticker, one position at a time, 3 trades/day, -3R daily stop, cooldown after a loss, limit orders
-must be on the passive side and within 2 ATR(1h), pending limits expire after 8 h. The AI never sets size or leverage and
-its levels are never edited: a proposal is valid as given or rejected. A failed or unparseable AI call is a NO_TRADE / HOLD.
-The AI can `MOVE_SL` only to reduce risk, and `EXIT`; it cannot add or reverse (a reversal suggestion is only logged).
-
-Fees are the MEXC BTCUSDT perpetual tier: taker 0.02%, maker 0% (market entry and stop-outs pay taker, limit entries and
-targets pay maker).
+* One review without trading or storing: `python scripts/swing_ai_dryrun.py` (`--no-call` sizes the raw snapshot only).
+* Judge it: `python scripts/swing_ai_report.py` - win rate, expectancy, average R, MFE/MAE, fees, LONG vs SHORT, performance
+  by GPT's market_state, confidence calibration, decision and NO_TRADE frequency.
 
 ## Paper fills are conservative
 
-Pending limits fill only when a later **closed** 1m bar trades through the level; on the fill bar only the stop counts;
-a bar touching both stop and target counts as the stop; no slippage is added (so real results will be a little worse).
+Pending limits fill only when a later **closed** 1m bar trades through the level; on the fill bar only the stop counts; a bar
+touching both stop and target counts as the stop; no slippage. Fees: MEXC BTCUSDT taker 0.02%, maker 0%.
 
-## How to read the result honestly
+## Reading the result honestly
 
-* Only **forward** paper trading is a valid test. Replaying old data through an LLM is contaminated: the model may have
-  seen those prices and events in training, so a good replay proves nothing.
-* At about 1 to 3 trades a week per setup the sample grows slowly. With a per-trade standard deviation near 1.3 R you need
-  roughly 150+ closed trades to detect +0.2 R/trade; `swing_ai_report.py` prints the number. Do not act on 20 trades.
-* Do not tune prompts, thresholds or the model to the results you have seen. Change one thing, log the version, and
-  restart the count.
-* Kill it if the expectancy after fees is not clearly positive at a meaningful sample size. Everything is in one folder.
-
-## Cost
-
-Each review sends roughly 6-8k tokens. A 15-minute heartbeat is about 96 reviews a day, plus management reviews every
-5 minutes while a position is open (up to 288 a day). Watch your API usage in the first days.
+* Only **forward** paper trading is valid. Replaying old data through an LLM is contaminated by what the model saw in training.
+* Roughly 150+ closed trades are needed to detect +0.2 R/trade; the report prints the number for the observed variance.
+* Do not tune prompts, limits or the model to results you have seen. Change one thing, record the prompt version, restart the count.
+* Cost: each review sends roughly 12-14k tokens of candles; 96 heartbeats a day plus up to 288 management reviews while in a trade.

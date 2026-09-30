@@ -16,6 +16,7 @@ def open_from_plan(plan: Dict[str, Any], decision: Dict[str, Any], decision_id: 
     market = plan["entry_type"] == "MARKET"
     fill = plan["entry"] if not market else (ask if plan["side"] == "LONG" else bid) or plan["entry"]
     row = {
+        "symbol": "BTC_USDT", "market_state": decision.get("market_state"), "confidence": decision.get("confidence"),
         "status": "OPEN" if market else "PENDING", "side": plan["side"], "entry_type": plan["entry_type"],
         "plan_entry": plan["entry"], "fill_price": fill if market else None, "sl": plan["sl"], "sl0": plan["sl"],
         "tp": plan["tp"], "qty": plan["qty"], "risk_usd": plan["risk_usd"], "risk_dist": abs(fill - plan["sl"]) if market else plan["risk_dist"],
@@ -25,8 +26,8 @@ def open_from_plan(plan: Dict[str, Any], decision: Dict[str, Any], decision_id: 
         "fee_entry": plan["fee_entry"], "fee_tp": plan["fee_tp"], "fee_sl": plan["fee_sl"],
         "last_bar_ts": int(now // 60 * 60), "meta": json.dumps({"rr": plan["rr"], "leverage": plan["leverage"], "sized_down": plan["sized_down"]}),
     }
-    pid = store.add_position(row)
-    store.set_decision_position(decision_id, pid)
+    pid = store.add_trade(row)
+    store.set_decision_trade(decision_id, pid)
     return pid
 
 
@@ -37,9 +38,10 @@ def _close(p: Dict[str, Any], price: float, reason: str, now: float) -> Dict[str
     fee_exit = p["fee_tp"] if reason == "TP" else p["fee_sl"]
     fees_usd = p["qty"] * (p["fill_price"] * p["fee_entry"] + price * fee_exit)
     net_r = gross_r - fees_usd / (p["qty"] * rd)
-    store.update_position(p["id"], status="CLOSED", exit_price=price, exit_reason=reason, closed_ts=int(now),
-                          r_gross=gross_r, r_net=net_r, fees_usd=fees_usd)
-    return {**p, "status": "CLOSED", "exit_price": price, "exit_reason": reason, "r_gross": gross_r, "r_net": net_r}
+    outcome = "WIN" if net_r > 0.05 else "LOSS" if net_r < -0.05 else "FLAT"
+    store.update_trade(p["id"], status="CLOSED", exit_price=price, exit_reason=reason, closed_ts=int(now),
+                       r_gross=gross_r, r_net=net_r, fees_usd=fees_usd, outcome=outcome)
+    return {**p, "status": "CLOSED", "exit_price": price, "exit_reason": reason, "r_gross": gross_r, "r_net": net_r, "outcome": outcome}
 
 
 def close_now(p: Dict[str, Any], price: float, reason: str, now: float) -> Dict[str, Any]:
@@ -48,7 +50,7 @@ def close_now(p: Dict[str, Any], price: float, reason: str, now: float) -> Dict[
 
 
 def cancel(p: Dict[str, Any], reason: str, now: float) -> None:
-    store.update_position(p["id"], status="CANCELLED", exit_reason=reason, closed_ts=int(now))
+    store.update_trade(p["id"], status="CANCELLED", exit_reason=reason, closed_ts=int(now))
 
 
 def _excursions(p: Dict[str, Any], hi: float, lo: float) -> Dict[str, float]:
@@ -72,12 +74,12 @@ def process_bar(p: Dict[str, Any], bar: Dict[str, Any], cfg: SwingConfig) -> Dic
             return p
         p = {**p, "status": "OPEN", "fill_price": lim, "opened_ts": ts_close,
              "risk_dist": abs(lim - p["sl0"])}
-        store.update_position(p["id"], status="OPEN", fill_price=lim, opened_ts=ts_close, risk_dist=p["risk_dist"])
+        store.update_trade(p["id"], status="OPEN", fill_price=lim, opened_ts=ts_close, risk_dist=p["risk_dist"])
         # fill bar: only the stop counts (conservative); target must be reached on a later bar
         if (p["side"] == "LONG" and lo <= p["sl"]) or (p["side"] == "SHORT" and hi >= p["sl"]):
             return _close(p, p["sl"], "SL", ts_close)
         ex = _excursions(p, hi, lo)
-        store.update_position(p["id"], **ex)
+        store.update_trade(p["id"], **ex)
         return {**p, **ex}
     if p["status"] != "OPEN":
         return p
@@ -85,7 +87,7 @@ def process_bar(p: Dict[str, Any], bar: Dict[str, Any], cfg: SwingConfig) -> Dic
     hit_sl = lo <= p["sl"] if long_ else hi >= p["sl"]
     hit_tp = hi >= p["tp"] if long_ else lo <= p["tp"]
     ex = _excursions(p, hi, lo)
-    store.update_position(p["id"], **ex, last_bar_ts=int(bar["ts"]))
+    store.update_trade(p["id"], **ex, last_bar_ts=int(bar["ts"]))
     p = {**p, **ex}
     if hit_sl:                                         # SL wins a same-bar tie
         return _close(p, p["sl"], "SL" if abs(p["sl"] - p["sl0"]) < 1e-9 else "SL_MOVED", ts_close)
@@ -107,7 +109,7 @@ def process_price(p: Dict[str, Any], price: float, now: float) -> Dict[str, Any]
         return _close(p, p["tp"], "TP", now)
     ex = _excursions(p, price, price)
     if ex["mfe_r"] > (p["mfe_r"] or 0) or ex["mae_r"] > (p["mae_r"] or 0):
-        store.update_position(p["id"], **ex)
+        store.update_trade(p["id"], **ex)
         p = {**p, **ex}
     return p
 

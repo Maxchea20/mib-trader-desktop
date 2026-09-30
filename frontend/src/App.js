@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
+import { SwingAiPanel } from "@/components/trading/SwingAiPanel";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
 import { AiThesisPanel } from "@/components/trading/AiThesisPanel";
 import { LearningBrainPanel } from "@/components/trading/LearningBrainPanel";
@@ -245,6 +246,9 @@ function App() {
             <LearningBrainPanel />
             <AiThesisPanel analysis={analysis} auto={auto} />
           </section>
+        </div>
+        <div className="mt-4">
+          <SwingAiPanel />
         </div>
         <div className="mt-4">
           <ObservationLayer observations={analysis?.observations || []} />
