@@ -85,19 +85,13 @@ def _live_meta(trade: Optional[Dict]) -> Optional[Dict]:
 
 
 def _close_live_if_needed(trade: Optional[Dict], exit_px: Optional[float]) -> None:
+    """Close the bot's own MEXC position only: its side, at most its own vol."""
     meta = _live_meta(trade)
     if not meta:
         return
     try:
-        from .market_data import mexc_private
-        price = _fresh_price() or exit_px
-        mexc_private.close_position(
-            symbol=SYMBOL,
-            opened_side=trade.get("side") or meta.get("side"),
-            vol=float(meta.get("vol") or 0),
-            price=price,
-            open_type=mexc_private.OPEN_TYPE_ISOLATED,
-        )
+        from .autotrader_live_sync import flatten_mexc
+        flatten_mexc(trade.get("side") or meta.get("side"), float(meta.get("vol") or 0), exit_px)
     except Exception:
         logger.exception("live MEXC close failed — close it by hand on MEXC if still open")
 

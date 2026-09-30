@@ -10,7 +10,7 @@ from .brain.weather import side_allowed
 from .trend_break import VERSION as ENGINE_VERSION
 from .autotrader_state import CONFIG, STATE, logger, _live_armed, _open_auto
 from .autotrader_exec import (
-    _open_from_hunt, _open_live_from_hunt, _close_live_if_needed,
+    _open_from_hunt, _open_live_from_hunt, _close_live_if_needed, _live_meta,
 )
 from .autotrader_live_sync import revive_shadow_if_mexc_open, flatten_mexc
 
@@ -46,12 +46,9 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
         if rec:
             STATE["last_lifecycle"] = {k: rec.get(k) for k in ("action", "reason", "exit_kind", "sl")}
             if rec.get("action") == "EXIT":
-                try:
-                    flatten_mexc(open_before.get("side") if open_before else None,
-                                 None, rec.get("exit_px") or live_price)
-                except Exception:
-                    logger.exception("MEXC flatten on lifecycle EXIT failed")
-                _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
+                # only a bot-opened MEXC trade is ever closed; its own vol, never the account's
+                if _live_meta(open_before):
+                    _close_live_if_needed(open_before, rec.get("exit_px") or live_price)
                 _record_close(rec.get("exit_kind") or "BRAIN_EXIT")
                 STATE["normal_base"] = None
                 STATE["normal_base_captured_at"] = None
@@ -106,7 +103,7 @@ def evaluate(live_price: Optional[float], force: bool = False) -> Dict:
     try:
         from .autotrader_exec import _mexc_open_position_vol
         if _mexc_open_position_vol() > 0:
-            STATE["last_action"] = "HOLD MEXC Isolated still open"
+            STATE["last_action"] = "HOLD — MEXC position open (manual or bot); bot will not touch it or open another"
             return STATE
     except Exception:
         pass

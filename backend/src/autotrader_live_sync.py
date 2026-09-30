@@ -49,35 +49,53 @@ def _install_price_guard() -> None:
 
 
 def flatten_mexc(side: Optional[str], vol: Optional[float], exit_px: Optional[float]) -> Optional[Dict]:
+    """Close ONLY what the bot itself opened.
+
+    `vol` is the contract count of the bot's own MEXC trade. It is never
+    replaced by the account's live position size, and a position on the other
+    side (or nothing) is left alone, so a manual trade is never closed here.
+    """
     from .market_data import mexc_private
-    from .autotrader_exec import _fresh_price, _mexc_open_position_vol
-    live_vol = vol
-    try:
-        live_vol = _mexc_open_position_vol() or vol or 0
-    except Exception:
-        live_vol = vol or 0
-    if not live_vol:
+    from .autotrader_exec import _fresh_price
+    own = float(vol or 0)
+    if own <= 0 or not side:
+        logger.warning("flatten_mexc skipped: no bot-owned volume — manual position left untouched")
         return None
-    price = _fresh_price() or exit_px
-    opened = side or "LONG"
+    want = 1 if str(side).upper() == "LONG" else 2
     try:
         rows = mexc_private.get_open_positions(SYMBOL) or []
-        if rows:
-            pt = int(rows[0].get("positionType") or 0)
-            opened = "LONG" if pt == 1 else "SHORT"
-            live_vol = float(rows[0].get("holdVol") or live_vol)
     except Exception:
-        pass
+        logger.exception("flatten_mexc skipped: cannot read MEXC positions")
+        return None
+    live = 0.0
+    for r in rows:
+        try:
+            pt = int(r.get("positionType") or 0)
+        except (TypeError, ValueError):
+            pt = 0
+        if pt == want:
+            live += float(r.get("holdVol") or r.get("hold_vol") or 0)
+    close_vol = min(own, live)
+    if close_vol <= 0:
+        logger.warning("flatten_mexc skipped: MEXC holds no %s position — nothing of the bot's to close", side)
+        return None
     return mexc_private.close_position(
         symbol=SYMBOL,
-        opened_side=opened,
-        vol=float(live_vol),
-        price=price,
+        opened_side=str(side).upper(),
+        vol=close_vol,
+        price=_fresh_price() or exit_px,
         open_type=mexc_private.OPEN_TYPE_ISOLATED,
     )
 
 
+# A live MEXC position with no OPEN AUTO row is a MANUAL trade. Reviving an old
+# AUTO row over it would let the bot manage (and possibly close) that trade.
+REVIVE_SHADOW = False
+
+
 def revive_shadow_if_mexc_open() -> Optional[Dict]:
+    if not REVIVE_SHADOW:
+        return None
     if paper_trading.list_trades("OPEN"):
         for t in paper_trading.list_trades("OPEN"):
             if t.get("source") == "AUTO":

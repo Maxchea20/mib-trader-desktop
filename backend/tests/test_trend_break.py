@@ -461,3 +461,19 @@ def test_feature_study_detects_a_planted_volume_signal():
     st = F.study(rows, (1, 4, 16, 64))
     top = [r for r in st["results"] if r["feature"] == "vol_ratio" and r["target"] == "fwd1"][0]
     assert top["rho"] > 0.2 and top["p"] < 1e-6
+
+
+def test_bot_never_closes_a_manual_position(monkeypatch):
+    from src import autotrader_live_sync as ls
+    from src.market_data import mexc_private
+    closed = []
+    monkeypatch.setattr(mexc_private, "close_position", lambda **kw: closed.append(kw) or {"ok": True})
+    monkeypatch.setattr("src.autotrader_exec._fresh_price", lambda: 100.0)
+    manual_long = [{"positionType": 1, "holdVol": 7}]
+    monkeypatch.setattr(mexc_private, "get_open_positions", lambda *a, **k: manual_long)
+    assert ls.flatten_mexc("LONG", None, 100.0) is None            # no bot-owned vol -> nothing closed
+    assert ls.flatten_mexc("SHORT", 3, 100.0) is None              # other side -> nothing closed
+    assert closed == []
+    ls.flatten_mexc("LONG", 3, 100.0)                              # bot owns 3 of the 7 contracts
+    assert len(closed) == 1 and closed[0]["vol"] == 3              # never the account's 7
+    assert ls.REVIVE_SHADOW is False and ls.revive_shadow_if_mexc_open() is None
