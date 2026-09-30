@@ -15,6 +15,8 @@ class OpenAILLM:
 
     def __init__(self, model: str, timeout: int = 180, max_tokens: Optional[int] = None):
         self.model, self.timeout = model, timeout
+        self.reasoning: Optional[str] = None          # low | medium | high; None = env / model default
+        self.last_usage: Optional[Dict[str, int]] = None
         self.max_tokens = int(max_tokens or os.environ.get("SWING_AI_MAX_TOKENS", "10000"))
 
     def complete(self, messages: List[Dict[str, str]], json_schema: Dict[str, Any]) -> str:
@@ -24,7 +26,8 @@ class OpenAILLM:
         from openai import OpenAI
         client = OpenAI(api_key=key, timeout=self.timeout)
         kw = dict(model=self.model, messages=messages, response_format={"type": "json_schema", "json_schema": json_schema})
-        effort = os.environ.get("SWING_AI_REASONING")            # optional: low | medium | high
+        self.last_usage = None
+        effort = self.reasoning or os.environ.get("SWING_AI_REASONING")            # optional: low | medium | high
         if effort:
             kw["reasoning_effort"] = effort
         try:
@@ -33,6 +36,11 @@ class OpenAILLM:
             resp = client.chat.completions.create(max_tokens=self.max_tokens, **kw)
         except Exception as e:
             raise LLMError(str(e))
+        u = getattr(resp, "usage", None)
+        if u is not None:                                          # tokens actually billed, kept for the cost meter
+            details = getattr(u, "prompt_tokens_details", None)
+            self.last_usage = {"input": int(getattr(u, "prompt_tokens", 0) or 0), "cached": int(getattr(details, "cached_tokens", 0) or 0),
+                               "output": int(getattr(u, "completion_tokens", 0) or 0)}
         choice = resp.choices[0]
         if getattr(choice, "finish_reason", None) == "length":
             raise LLMError(f"reply truncated at {self.max_tokens} tokens (finish_reason=length) - raise SWING_AI_MAX_TOKENS")
@@ -42,11 +50,12 @@ class OpenAILLM:
 class FakeLLM:
     """Scripted responses for tests: pass a list of raw JSON strings / dicts, or a callable(messages, schema)."""
 
-    def __init__(self, script):
-        self.script, self.calls = script, []
+    def __init__(self, script, usage=None):
+        self.script, self.calls, self.last_usage, self._usage = script, [], None, usage
 
     def complete(self, messages, json_schema):
         self.calls.append((messages, json_schema["name"]))
+        self.last_usage = dict(self._usage) if self._usage else None
         if callable(self.script):
             return self.script(messages, json_schema)
         if not self.script:

@@ -33,6 +33,13 @@ def main():
           + (f"  (NO_TRADE {f['no_trade_share']:.0%})" if f["no_trade_share"] is not None else ""))
     print(f"  rejected by the safety layer: {f['proposals_rejected_by_safety']}   AI/schema errors: {f['ai_errors']}"
           + (f"   proposals/day {f['proposals_per_day']:.2f}" if f["proposals_per_day"] else ""))
+    u = r["usage"]
+    for k, name in (("today", "today"), ("all_time", "all time")):
+        x = u[k]
+        cost = f"  ≈ ${x['cost_usd']:.2f}" if x["cost_usd"] is not None else ""
+        print(f"AI usage {name}: {x['calls']} calls, {x['input_tokens']:,} input tokens ({x['cached_tokens']:,} cached), {x['output_tokens']:,} output{cost}")
+    if not u["prices_set"]:
+        print("  (set SWING_AI_PRICE_IN / SWING_AI_PRICE_OUT [/ SWING_AI_PRICE_CACHED] in .env, USD per 1M tokens, to see dollars)")
     print(f"trades: {t['total']} total, {t['closed']} closed, {t['active']} active, {t['never_filled']} never filled\n")
     print("performance (net of MEXC fees):")
     print(line("ALL", r["overall"]))

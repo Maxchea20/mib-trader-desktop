@@ -63,14 +63,15 @@ def _compact(obj: Any) -> str:
 
 
 def entry_messages(cfg, snapshot: Dict[str, Any], wake: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]]):
-    user = [ENTRY_TASK, "", f"WAKE REASON: {(wake or {}).get('kind', 'HEARTBEAT_15M')} {(wake or {}).get('detail', '')}".strip()]
+    # order matters for prompt caching: static text, then slow-changing data, and the parts that change every call last
+    user = [ENTRY_TASK, "", "RAW MARKET DATA FROM MEXC (JSON):", _compact(snapshot), "",
+            f"WAKE REASON: {(wake or {}).get('kind', 'HEARTBEAT_15M')} {(wake or {}).get('detail', '')}".strip()]
     if previous:
         user.append("YOUR PREVIOUS ANALYSIS (your own output, for continuity only): " + _compact(previous))
-    user += ["", "RAW MARKET DATA FROM MEXC (JSON):", _compact(snapshot)]
     return [{"role": "system", "content": system_prompt(cfg)}, {"role": "user", "content": "\n".join(user)}]
 
 
 def manage_messages(cfg, snapshot: Dict[str, Any], wake: Optional[Dict[str, Any]]):
-    user = [MANAGE_TASK, "", f"WAKE REASON: {(wake or {}).get('kind', 'MANAGEMENT_5M')} {(wake or {}).get('detail', '')}".strip(),
-            "", "RAW MARKET DATA FROM MEXC (JSON; 'position_or_order' holds the open trade and your own stored thesis):", _compact(snapshot)]
+    user = [MANAGE_TASK, "", "RAW MARKET DATA FROM MEXC (JSON; 'position_or_order' holds the open trade and your own stored thesis):",
+            _compact(snapshot), "", f"WAKE REASON: {(wake or {}).get('kind', 'MANAGEMENT_5M')} {(wake or {}).get('detail', '')}".strip()]
     return [{"role": "system", "content": system_prompt(cfg)}, {"role": "user", "content": "\n".join(user)}]

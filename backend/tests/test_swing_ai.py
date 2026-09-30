@@ -87,6 +87,7 @@ def test_snapshot_is_raw_evidence_only():
     keys = _all_keys(s)
     assert not [k for k in keys for f in FORBIDDEN if f in re.split(r"[_\W]+", k)], keys        # no analytical key anywhere
     assert set(s) == {"symbol", "source", "as_of_unix", "candle_columns", "candle_note", "live", "timeframes", "position_or_order"}
+    assert list(s)[-1] == "as_of_unix" and list(s).index("timeframes") < list(s).index("live")            # slow data first, fast data last
     assert list(s["timeframes"]) == ["1d", "4h", "1h", "15m", "5m", "1m"]
     for tf, blk in s["timeframes"].items():
         assert set(blk) == {"seconds", "candles"} and all(len(r) == 6 for r in blk["candles"])   # OHLCV rows and nothing else
@@ -125,7 +126,7 @@ def test_prompt_never_carries_a_mib_opinion_and_names_gpt_as_the_analyst():
     msgs = prompts.entry_messages(cfg, snap_at(), {"kind": "HEARTBEAT_15M"}, None)
     system, user = msgs[0]["content"], msgs[1]["content"]
     assert "sole market analyst" in system and "no indicator, no signal, no structure" in system and "NO_TRADE" in system
-    payload = json.loads(user.split("RAW MARKET DATA FROM MEXC (JSON):\n", 1)[1])
+    payload = json.loads(user.split("RAW MARKET DATA FROM MEXC (JSON):\n", 1)[1].split("\n\nWAKE REASON:", 1)[0])
     assert json.dumps(payload) == json.dumps(snap_at())                                     # exactly the raw snapshot, nothing added
     assert payload["as_of_unix"] == int(NOW)
 
@@ -628,3 +629,56 @@ def test_run_once_respects_the_enabled_setting(tmp_path, monkeypatch):
     sett.save({"enabled": True})
     service.run_once(_M(), st)
     assert seen == [False, True]
+
+
+# ------------------------------------------------------------------ cost controls
+def test_cost_controls_context_profile_cache_friendly_prompt_and_settings(tmp_path, monkeypatch, tmpdb):
+    from src.swing_ai import prompts, service, settings as sett
+    full, compact = snap_at(), None
+    src = ListSource(DATA)
+    p = price_at(NOW)
+    compact = raw_data.build_raw_snapshot(src, NOW, p, {"bid": p - 0.5, "ask": p + 0.5}, None, profile="COMPACT")
+    assert len(json.dumps(compact)) < 0.6 * len(json.dumps(full))                                           # far fewer tokens
+    assert all(len(compact["timeframes"][tf]["candles"]) <= raw_data.LIMITS_COMPACT[tf] for tf in compact["timeframes"])
+    cfg = SwingConfig()
+    # prompt caching: two consecutive calls share a long identical prefix (system + slow-changing candles) before anything that changes
+    later = NOW + 900
+    p2 = price_at(later)
+    s2 = raw_data.build_raw_snapshot(src, later, p2, {"bid": p2 - 0.5, "ask": p2 + 0.5}, None)
+    m1 = prompts.entry_messages(cfg, full, {"kind": "HEARTBEAT_15M"}, {"decision": "NO_TRADE"})
+    m2 = prompts.entry_messages(cfg, s2, {"kind": "PRICE_MOVE", "detail": "x"}, {"decision": "LONG"})
+    a, b = m1[0]["content"] + m1[1]["content"], m2[0]["content"] + m2[1]["content"]
+    common = 0
+    while common < min(len(a), len(b)) and a[common] == b[common]:
+        common += 1
+    assert common > 0.35 * len(a)                                                                          # a large shared prefix -> cacheable
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    service._manager = None
+    try:
+        v = service.update_settings({"heartbeat_minutes": 60, "management_minutes": 10, "reasoning": "low", "context": "COMPACT"})
+        c = service.get_manager().cfg
+        assert (c.heartbeat_seconds, c.management_seconds, c.reasoning, c.context) == (3600, 600, "low", "COMPACT") and v["reasoning"] == "low"
+        for bad in ({"heartbeat_minutes": 1}, {"reasoning": "extreme"}, {"context": "HUGE"}, {"management_minutes": 0}):
+            with pytest.raises(ValueError):
+                service.update_settings(bad)
+    finally:
+        service._manager = None
+
+
+def test_token_usage_is_recorded_and_costed(tmpdb, monkeypatch):
+    monkeypatch.setenv("SWING_AI_PRICE_IN", "2.0")
+    monkeypatch.setenv("SWING_AI_PRICE_CACHED", "0.2")
+    monkeypatch.setenv("SWING_AI_PRICE_OUT", "10.0")
+    cfg = SwingConfig()
+    snap = snap_at()
+    price = snap["live"]["price"]
+    nt = json.dumps(_good(decision="NO_TRADE", entry=None, sl=None, tp=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[]))
+    llm = FakeLLM(lambda msgs, sc: nt, usage={"input": 14000, "cached": 6000, "output": 3000})
+    m = SwingManager(cfg, ListSource(DATA), llm)
+    m.step(NOW, price, _ticker(price))
+    d = store.decisions()[0]
+    assert (d["input_tokens"], d["cached_tokens"], d["output_tokens"]) == (14000, 6000, 3000)
+    u = analytics.report()["usage"]
+    assert u["all_time"]["calls"] == 1 and u["all_time"]["input_tokens"] == 14000 and u["prices_set"]
+    assert u["all_time"]["cost_usd"] == pytest.approx((8000 * 2.0 + 6000 * 0.2 + 3000 * 10.0) / 1e6)
+    assert u["today"]["calls"] in (0, 1)

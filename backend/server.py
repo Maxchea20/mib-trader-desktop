@@ -325,6 +325,10 @@ class SwingAiSettingsReq(BaseModel):
     risk_pct: Optional[float] = None
     max_leverage: Optional[float] = None
     max_position_usd: Optional[float] = None
+    heartbeat_minutes: Optional[float] = None
+    management_minutes: Optional[float] = None
+    reasoning: Optional[str] = None
+    context: Optional[str] = None
 
 @api_router.get("/swing-ai/settings")
 async def swing_ai_get_settings():

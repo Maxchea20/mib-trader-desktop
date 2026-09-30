@@ -168,6 +168,41 @@ export const SwingAiPanel = () => {
           Swing AI is OFF: no AI reviews are running. Press AUTO-TRADE above to switch it ON (needs OPENAI_API_KEY in the backend .env).
         </div>
       )}
+      {st && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono-t text-[10px] text-slate-400" data-testid="swing-cost-controls">
+          <span className="widget-label">COST CONTROLS</span>
+          {[
+            ["Reasoning", "reasoning", ["default", "low", "medium", "high"]],
+            ["Context", "context", ["FULL", "COMPACT"]],
+          ].map(([label, key, opts]) => (
+            <label key={key} className="flex items-center gap-1">{label}
+              <select value={st[key]} onChange={(e) => save({ [key]: e.target.value })}
+                className="bg-[#0d121b] border border-[#1d2635] text-slate-200 rounded-sm px-1 py-0.5">
+                {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+          ))}
+          {[
+            ["Review every", "heartbeat_minutes", [5, 15, 30, 60, 120], "min"],
+            ["Trade check every", "management_minutes", [1, 5, 10, 15, 30], "min"],
+          ].map(([label, key, opts, unit]) => (
+            <label key={key} className="flex items-center gap-1">{label}
+              <select value={Number(st[key])} onChange={(e) => save({ [key]: Number(e.target.value) })}
+                className="bg-[#0d121b] border border-[#1d2635] text-slate-200 rounded-sm px-1 py-0.5">
+                {opts.map((o) => <option key={o} value={o}>{o} {unit}</option>)}
+              </select>
+            </label>
+          ))}
+          {data?.analytics?.usage && (
+            <span data-testid="swing-usage">
+              tokens today {Number(data.analytics.usage.today.input_tokens + data.analytics.usage.today.output_tokens).toLocaleString()}
+              {" "}(cached {Number(data.analytics.usage.today.cached_tokens).toLocaleString()})
+              {data.analytics.usage.prices_set && data.analytics.usage.today.cost_usd !== null ? ` · ≈ $${Number(data.analytics.usage.today.cost_usd).toFixed(2)} today · $${Number(data.analytics.usage.all_time.cost_usd).toFixed(2)} total` : " · set SWING_AI_PRICE_IN / _OUT in .env for $"}
+            </span>
+          )}
+        </div>
+      )}
+
       {data?.enabled && !a && !data?.last_review && (
         <div className="font-mono-t text-[11px] text-slate-500 mb-3">Waiting for the first GPT analysis…</div>
       )}

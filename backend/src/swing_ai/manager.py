@@ -46,6 +46,16 @@ class SwingManager:
             except Exception:
                 pass
 
+    def _prepare_llm(self) -> None:
+        if hasattr(self.llm, "reasoning"):
+            self.llm.reasoning = self.cfg.reasoning
+        if hasattr(self.llm, "last_usage"):
+            self.llm.last_usage = None
+
+    def _usage(self) -> Dict[str, Any]:
+        u = getattr(self.llm, "last_usage", None) or {}
+        return {"input_tokens": u.get("input"), "cached_tokens": u.get("cached"), "output_tokens": u.get("output")}
+
     # ------------------------------------------------------------------ paper updates (accounting only)
     def _advance_paper(self, now: float, live_price: Optional[float]) -> Optional[Dict[str, Any]]:
         pos = store.active_trade()
@@ -96,7 +106,7 @@ class SwingManager:
         if not due:
             self.status["state"] = "watching"
             return out
-        snap = raw_data.build_raw_snapshot(self.source, now, live_price, ticker, pview, SYMBOL)
+        snap = raw_data.build_raw_snapshot(self.source, now, live_price, ticker, pview, SYMBOL, self.cfg.context)
         if snap is None:
             self.status["state"] = "waiting for enough candle history"
             return out
@@ -116,8 +126,9 @@ class SwingManager:
     def _entry(self, snap, wake, pending, now, price, ticker):
         wk = wake or {"kind": "HEARTBEAT_15M", "detail": ""}
         sid = store.add_snapshot(int(now), SYMBOL, price, snap)
+        self._prepare_llm()
         dec, raw, err, ms = engine.review_entry(self.llm, self.cfg, snap, wake, self.previous)
-        row = dict(ts=int(now), symbol=SYMBOL, kind="ENTRY", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
+        row = dict(**self._usage(), ts=int(now), symbol=SYMBOL, kind="ENTRY", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
                    snapshot_id=sid, model=self.cfg.model, prompt_version=prompts.PROMPT_VERSION, raw=raw, latency_ms=ms,
                    error=err, valid=int(dec is not None))
         if dec is None:                                   # unparseable / failed call = NO_TRADE, never a guess
@@ -154,8 +165,9 @@ class SwingManager:
     def _manage(self, snap, wake, pos, now, price, ticker):
         wk = wake or {"kind": "MANAGEMENT_5M", "detail": ""}
         sid = store.add_snapshot(int(now), SYMBOL, price, snap)
+        self._prepare_llm()
         md, raw, err, ms = engine.review_manage(self.llm, self.cfg, snap, wake)
-        row = dict(ts=int(now), symbol=SYMBOL, kind="MANAGE", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
+        row = dict(**self._usage(), ts=int(now), symbol=SYMBOL, kind="MANAGE", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
                    snapshot_id=sid, model=self.cfg.model, prompt_version=prompts.PROMPT_VERSION, raw=raw, latency_ms=ms,
                    error=err, valid=int(md is not None), trade_id=pos["id"])
         if md is None:                                    # a failed review never closes or changes anything

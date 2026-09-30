@@ -12,6 +12,8 @@ from .source import TF_SEC, closed_only
 
 # How much raw history GPT receives per timeframe (closed candles, newest last).
 LIMITS = {"1d": 90, "4h": 180, "1h": 240, "15m": 192, "5m": 144, "1m": 90}
+LIMITS_COMPACT = {"1d": 45, "4h": 90, "1h": 120, "15m": 96, "5m": 72, "1m": 45}     # about 45% fewer tokens
+PROFILES = {"FULL": LIMITS, "COMPACT": LIMITS_COMPACT}
 MIN_ROWS = {"1d": 20, "4h": 30, "1h": 48, "15m": 48, "5m": 24, "1m": 20}
 ORDER = ("1d", "4h", "1h", "15m", "5m", "1m")
 COLUMNS = ["ts_open_utc", "open", "high", "low", "close", "volume"]
@@ -22,11 +24,15 @@ def _row(c: dict):
 
 
 def build_raw_snapshot(source, now: float, live_price: Optional[float], ticker: Optional[Dict[str, Any]] = None,
-                       position: Optional[Dict[str, Any]] = None, symbol: str = "BTC_USDT") -> Optional[Dict[str, Any]]:
-    """Returns the raw snapshot, or None when a timeframe has too little closed history."""
+                       position: Optional[Dict[str, Any]] = None, symbol: str = "BTC_USDT",
+                       profile: str = "FULL") -> Optional[Dict[str, Any]]:
+    """Returns the raw snapshot, or None when a timeframe has too little closed history.
+    Key order is deliberate: slow-changing data (daily/4H candles) first and fast-changing data (live quote, time, position) last,
+    so the start of the prompt is identical between consecutive calls and OpenAI's prompt cache can discount it."""
+    limits = PROFILES.get(profile, LIMITS)
     frames: Dict[str, Any] = {}
     for tf in ORDER:
-        rows = closed_only(source.closed(tf, LIMITS[tf], now), tf, now)
+        rows = closed_only(source.closed(tf, limits[tf], now), tf, now)
         if len(rows) < MIN_ROWS[tf]:
             return None
         frames[tf] = {"seconds": TF_SEC[tf], "candles": [_row(c) for c in rows]}
@@ -35,9 +41,9 @@ def build_raw_snapshot(source, now: float, live_price: Optional[float], ticker: 
     price = float(live_price) if live_price else frames["1m"]["candles"][-1][4]
     live = {"price": price, "bid": bid, "ask": ask, "spread": (ask - bid) if bid and ask else None,
             "exchange_24h_volume": q.get("volume24")}
-    return {"symbol": symbol, "source": "MEXC", "as_of_unix": int(now), "candle_columns": COLUMNS,
+    return {"symbol": symbol, "source": "MEXC", "candle_columns": COLUMNS,
             "candle_note": "Only fully CLOSED candles, oldest first. ts_open_utc is the candle open time (unix seconds).",
-            "live": live, "timeframes": frames, "position_or_order": position}
+            "timeframes": frames, "live": live, "position_or_order": position, "as_of_unix": int(now)}
 
 
 def position_state(pos: Dict[str, Any], price: float, now: float) -> Dict[str, Any]:

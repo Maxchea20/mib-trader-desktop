@@ -1,6 +1,7 @@
 """Swing AI configuration.  Every number is a plain default, not a tuned value."""
 import os
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -16,6 +17,8 @@ class SwingConfig:
     model: str = field(default_factory=lambda: os.environ.get("SWING_AI_MODEL")
                        or os.environ.get("AI_THESIS_MODEL", "gpt-5.4-mini"))
     llm_timeout_seconds: int = 180
+    reasoning: Optional[str] = None       # None = model default; low | medium | high
+    context: str = "FULL"                 # FULL | COMPACT candle history sent to the AI
 
     # --- deterministic risk layer (paper equity and limits) ---
     equity_usd: float = 10_000.0

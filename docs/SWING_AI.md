@@ -91,3 +91,16 @@ touching both stop and target counts as the stop; no slippage. Fees: MEXC BTCUSD
 * Roughly 150+ closed trades are needed to detect +0.2 R/trade; the report prints the number for the observed variance.
 * Do not tune prompts, limits or the model to results you have seen. Change one thing, record the prompt version, restart the count.
 * Cost: each review sends roughly 12-14k tokens of candles; 96 heartbeats a day plus up to 288 management reviews while in a trade.
+
+## Cost controls
+
+Reviews are the cost: about 13k input tokens plus GPT's reasoning tokens each. Levers, all in the panel's COST CONTROLS row (persisted):
+
+* **Reasoning** `low` cuts the hidden reasoning tokens, usually the largest part of the bill (`default` = model default).
+* **Review every** (heartbeat) 15 to 30 or 60 minutes; **Trade check every** for open positions.
+* **Context** `COMPACT` sends about 45% fewer candles.
+* **Prompt caching:** the request is ordered so the static prompt and slow-changing candles come first and everything that changes every call
+  (wake reason, previous analysis, live quote, time) comes last, so OpenAI can discount the repeated prefix.
+* **Model:** `SWING_AI_MODEL` in `.env` (for example `gpt-5.4-mini`). Changing it starts a new record: the model is stored on every decision.
+* **Meter:** tokens per review are stored; the panel shows tokens today (and dollars if you set `SWING_AI_PRICE_IN`, `SWING_AI_PRICE_CACHED`,
+  `SWING_AI_PRICE_OUT` in USD per 1M tokens in `.env`). `swing_ai_report.py` prints them too.

@@ -11,8 +11,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 MODES = ("PAPER", "LIVE")
-BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd": (100.0, 1_000_000.0)}
-DEFAULTS = {"enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0}
+BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd": (100.0, 1_000_000.0),
+          "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0)}
+REASONING = ("default", "low", "medium", "high")
+CONTEXTS = ("FULL", "COMPACT")
+DEFAULTS = {"enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
+            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL"}
 LIVE_EXECUTION_IMPLEMENTED = False          # flipped only by a reviewed live-executor change, never by a setting
 
 
@@ -47,6 +51,14 @@ def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload["mode"] not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         clean["mode"] = payload["mode"]
+    if "reasoning" in payload and payload["reasoning"] is not None:
+        if payload["reasoning"] not in REASONING:
+            raise ValueError(f"reasoning must be one of {REASONING}")
+        clean["reasoning"] = payload["reasoning"]
+    if "context" in payload and payload["context"] is not None:
+        if payload["context"] not in CONTEXTS:
+            raise ValueError(f"context must be one of {CONTEXTS}")
+        clean["context"] = payload["context"]
     for k, (lo, hi) in BOUNDS.items():
         if k in payload and payload[k] is not None:
             v = payload[k]
@@ -74,3 +86,7 @@ def effective_mode(s: Optional[Dict[str, Any]] = None) -> str:
 def apply_to_config(cfg, s: Optional[Dict[str, Any]] = None) -> None:
     s = s or load()
     cfg.risk_pct, cfg.max_leverage, cfg.max_position_usd = float(s["risk_pct"]), float(s["max_leverage"]), float(s["max_position_usd"])
+    cfg.heartbeat_seconds = int(float(s["heartbeat_minutes"]) * 60)
+    cfg.management_seconds = int(float(s["management_minutes"]) * 60)
+    cfg.reasoning = None if s["reasoning"] == "default" else s["reasoning"]
+    cfg.context = s["context"]
