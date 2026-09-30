@@ -740,3 +740,10 @@ def test_accessible_models_lists_only_usable_chat_models_and_never_the_key(monke
     assert "sk-secret" not in json.dumps(r)
     monkeypatch.delenv("OPENAI_API_KEY")
     assert service.accessible_models(force=True)["error"] == "OPENAI_API_KEY not set"
+
+
+def test_model_env_takes_one_name_first_entry_wins(monkeypatch):
+    monkeypatch.setenv("SWING_AI_MODEL", "gpt-5.4, gpt-5.4 mini")
+    assert SwingConfig().model == "gpt-5.4"
+    monkeypatch.setenv("SWING_AI_MODEL", "gpt-5.4-mini")
+    assert SwingConfig().model == "gpt-5.4-mini"

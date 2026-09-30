@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+def _first_model(value: str) -> str:
+    """SWING_AI_MODEL takes ONE model name; if a list is written by mistake, the first entry is used."""
+    return (value or "").split(",")[0].strip() or "gpt-5.4-mini"
+
+
 @dataclass
 class SwingConfig:
     # --- AI cadence ---
@@ -14,8 +19,8 @@ class SwingConfig:
     price_move_trigger_pct: float = 0.6   # raw move over the window below wakes the AI (cost control, not an opinion)
     price_move_window_seconds: int = 1800
     stop_proximity_pct: float = 0.15      # open trade: price this close (% of price) to the stop wakes the AI
-    model: str = field(default_factory=lambda: os.environ.get("SWING_AI_MODEL")
-                       or os.environ.get("AI_THESIS_MODEL", "gpt-5.4-mini"))
+    model: str = field(default_factory=lambda: _first_model(os.environ.get("SWING_AI_MODEL")
+                                                             or os.environ.get("AI_THESIS_MODEL", "gpt-5.4-mini")))
     llm_timeout_seconds: int = 180
     reasoning: Optional[str] = None       # None = model default; low | medium | high
     context: str = "FULL"                 # FULL | COMPACT candle history sent to the AI
