@@ -53,6 +53,11 @@ def main():
         print("confidence calibration (does higher confidence win more?):")
         for c in r["confidence_calibration"]:
             print(f"  {c['confidence_bin']}  trades {c['trades']:>3}  mean conf {c['mean_confidence']:.2f}  win {c['win_rate']:.0%}  mean net R {c['mean_net_r']:+.2f}")
+    x = r["ai_exit_value"]
+    if x["ai_exits"]:
+        v = f"{x['avg_r_saved_by_exiting']:+.2f} R per exit ({x['exit_was_better']} better, {x['exit_was_worse']} worse)" if x["judged"] else "not judged yet"
+        print(f"\nAI early exits: {x['ai_exits']} ({x['judged']} judged, {x['still_running']} still running). If it had held to the original stop/target: {v}. "
+              "Positive = the AI exit saved money.")
     o = r["overall"]
     if o.get("trades"):
         sd = abs(o["expectancy_r"]) / abs(o["t_stat"]) * math.sqrt(o["trades"]) if o["t_stat"] else 1.3

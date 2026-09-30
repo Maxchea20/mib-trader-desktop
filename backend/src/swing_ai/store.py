@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS swing_ai_trades (
   sl REAL, sl0 REAL, tp REAL, qty REAL, risk_usd REAL, risk_dist REAL, created_ts INTEGER, opened_ts INTEGER, expires_ts INTEGER,
   thesis TEXT, invalidation TEXT, invalidation_price REAL, decision_id INTEGER, market_state TEXT, confidence REAL,
   fee_entry REAL, fee_tp REAL, fee_sl REAL, mfe_r REAL DEFAULT 0, mae_r REAL DEFAULT 0, last_bar_ts INTEGER,
-  exit_price REAL, exit_reason TEXT, closed_ts INTEGER, r_gross REAL, r_net REAL, fees_usd REAL, outcome TEXT, meta TEXT);
+  exit_price REAL, exit_reason TEXT, closed_ts INTEGER, r_gross REAL, r_net REAL, fees_usd REAL, outcome TEXT, meta TEXT,
+  cf_status TEXT, cf_last_bar_ts INTEGER, cf_r_net REAL, cf_exit_reason TEXT, cf_closed_ts INTEGER);
 """
 _ready = False
 ENCODING = "zlib+json"
@@ -42,6 +43,10 @@ def init() -> None:
         for name, typ in (("headline", "TEXT"), ("input_tokens", "INTEGER"), ("cached_tokens", "INTEGER"), ("output_tokens", "INTEGER")):
             if name not in cols:                            # databases created before these fields existed
                 c.execute(f"ALTER TABLE swing_ai_decisions ADD COLUMN {name} {typ}")
+        tcols = {r[1] for r in c.execute("PRAGMA table_info(swing_ai_trades)").fetchall()}
+        for name, typ in (("cf_status", "TEXT"), ("cf_last_bar_ts", "INTEGER"), ("cf_r_net", "REAL"), ("cf_exit_reason", "TEXT"), ("cf_closed_ts", "INTEGER")):
+            if name not in tcols:
+                c.execute(f"ALTER TABLE swing_ai_trades ADD COLUMN {name} {typ}")
         c.commit()
     _ready = True
 
@@ -142,6 +147,11 @@ def trades(status: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any
     if status:
         return _rows("SELECT * FROM swing_ai_trades WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit))
     return _rows("SELECT * FROM swing_ai_trades ORDER BY id DESC LIMIT ?", (limit,))
+
+
+def open_counterfactuals(limit: int = 20) -> List[Dict[str, Any]]:
+    return _rows("SELECT * FROM swing_ai_trades WHERE status='CLOSED' AND exit_reason='AI_EXIT' AND (cf_status IS NULL OR cf_status='RUNNING') "
+                 "ORDER BY id LIMIT ?", (limit,))
 
 
 def day_stats(now: float) -> Dict[str, Any]:

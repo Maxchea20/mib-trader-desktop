@@ -66,9 +66,15 @@ def report(decision_limit: int = 100000) -> Dict[str, Any]:
                           "mean_confidence": sum(t["confidence"] for t in g) / len(g),
                           "win_rate": sum(1 for t in g if t["r_net"] > 0) / len(g),
                           "mean_net_r": sum(t["r_net"] for t in g) / len(g)})
+    ai_exits = [t for t in closed if t["exit_reason"] == "AI_EXIT"]
+    judged = [t for t in ai_exits if t.get("cf_status") in ("DONE", "TIMEOUT") and t.get("cf_r_net") is not None]
+    saved = [t["r_net"] - t["cf_r_net"] for t in judged]                     # > 0: exiting was better than holding
+    ai_exit_value = {"ai_exits": len(ai_exits), "judged": len(judged), "still_running": sum(1 for t in ai_exits if t.get("cf_status") not in ("DONE", "TIMEOUT")),
+                     "avg_r_saved_by_exiting": (sum(saved) / len(saved)) if saved else None,
+                     "exit_was_better": sum(1 for x in saved if x > 0), "exit_was_worse": sum(1 for x in saved if x < 0)}
     all_rows = store.decisions(decision_limit)
     return {
-        "usage": usage_report(all_rows),
+        "usage": usage_report(all_rows), "ai_exit_value": ai_exit_value,
         "frequency": {"entry_reviews": n, "LONG": counts["LONG"], "SHORT": counts["SHORT"], "NO_TRADE": counts["NO_TRADE"],
                       "no_trade_share": (counts["NO_TRADE"] / n) if n else None,
                       "proposals_rejected_by_safety": sum(1 for d in dec if d["decision"] in ("LONG", "SHORT") and not d["risk_ok"]),

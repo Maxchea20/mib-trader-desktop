@@ -125,6 +125,8 @@ def trades_view(limit: int = 200) -> list:
                     "exit_note": last["thesis"] if last else None,
                     "exit_wake": (f"{last['wake_kind']}: {last['wake_detail']}" if last and last.get("wake_detail") else (last or {}).get("wake_kind")),
                     "management_reviews": len(ms),
+                    "if_held": ({"status": t.get("cf_status"), "r_net": t.get("cf_r_net"), "ended_by": t.get("cf_exit_reason")}
+                                if t.get("exit_reason") == "AI_EXIT" else None),
                     "held_minutes": round((end - start) / 60, 1) if end and start else None})
     return out
 

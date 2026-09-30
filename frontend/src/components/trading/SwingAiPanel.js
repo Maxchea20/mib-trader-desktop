@@ -365,6 +365,13 @@ export const SwingAiPanel = () => {
                         <tr>
                           <td colSpan={14} className="pb-2 text-[10px] text-slate-500 leading-snug" data-testid="swing-trade-why">
                             <div><span className="text-slate-400">GPT entered:</span> {t.entry_headline || t.entry_thesis}{t.entry_headline && t.entry_thesis ? ` — ${t.entry_thesis}` : ""}</div>
+                            {t.if_held && (
+                              <div data-testid="swing-if-held"><span className="text-slate-400">If it had NOT exited (original stop and target):</span>{" "}
+                                {t.if_held.status === "DONE" || t.if_held.status === "TIMEOUT"
+                                  ? `${t.if_held.ended_by} ${Number(t.if_held.r_net).toFixed(2)}R vs the ${Number(t.r_net).toFixed(2)}R it took — ${Number(t.r_net) >= Number(t.if_held.r_net) ? "the exit saved money" : "the exit cost money"}`
+                                  : "still running, not decided yet"}
+                              </div>
+                            )}
                             {t.exit_note && (
                               <div><span className="text-slate-400">GPT then said</span> ({t.management_reviews} review{t.management_reviews === 1 ? "" : "s"}{t.exit_wake ? `, woken by ${t.exit_wake}` : ""}): {t.exit_note}</div>
                             )}
@@ -383,13 +390,15 @@ export const SwingAiPanel = () => {
       )}
 
       {an && (
-        <div className="mt-3 pt-2 border-t border-[#1d2635] grid grid-cols-2 md:grid-cols-6 gap-3" data-testid="swing-performance">
+        <div className="mt-3 pt-2 border-t border-[#1d2635] grid grid-cols-2 md:grid-cols-7 gap-3" data-testid="swing-performance">
           <Stat label="Closed trades" value={overall.trades ?? 0} />
           <Stat label="Win rate" value={overall.trades ? pct(overall.win_rate) : "—"} />
           <Stat label="Net R (fees in)" value={overall.trades ? Number(overall.net_r).toFixed(2) : "—"} />
           <Stat label="Expectancy R" value={overall.trades ? Number(overall.expectancy_r).toFixed(3) : "—"} />
           <Stat label="NO TRADE share" value={freq.no_trade_share === null || freq.no_trade_share === undefined ? "—" : pct(freq.no_trade_share)} />
           <Stat label="L / S trades" value={`${an.by_side?.LONG?.trades || 0} / ${an.by_side?.SHORT?.trades || 0}`} />
+          <Stat label="AI exits: R saved vs holding"
+            value={an.ai_exit_value?.judged ? `${Number(an.ai_exit_value.avg_r_saved_by_exiting).toFixed(2)} (${an.ai_exit_value.exit_was_better} better / ${an.ai_exit_value.exit_was_worse} worse)` : "—"} />
         </div>
       )}
     </div>

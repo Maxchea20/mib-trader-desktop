@@ -119,3 +119,10 @@ context profile (30 daily, 60 4H, 96 1H, 64 15M, 36 5M, 30 1M candles) cuts a re
 Each request carries `prompt_cache_key` and asks for `prompt_cache_retention: 24h` so the unchanging start of the prompt (instructions, daily and 4H candles)
 can stay cached between 15-minute reviews. If the model or API rejects a hint it is dropped automatically and remembered; a review never fails over it.
 Turn the long-retention request off with `SWING_AI_CACHE_24H=0` in `.env`. The cached-token count of every review is stored and shown in the panel/report.
+
+## Was the AI's early exit right? (counterfactual, observation only)
+
+After an `AI_EXIT`, the engine keeps following that trade in the background with its original stop and target (up to 7 days, marked to market
+after that) and stores what it would have made. The trades table shows it under each exit, the performance strip shows the average R saved by exiting
+(positive = exiting helped), and `swing_ai_report.py` prints the totals. This never affects trading; it is how we tell whether GPT exits too eagerly
+before anyone changes a rule.

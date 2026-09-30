@@ -840,3 +840,31 @@ def test_trades_view_attaches_gpts_entry_and_exit_reasoning(tmpdb):
     assert t["entry_headline"] == "Short the rejection" and t["entry_thesis"] == "t"
     assert "[INVALID] Price reclaimed the level" in t["exit_note"] and "INVALIDATION_LEVEL_HIT" in t["exit_wake"]
     assert t["management_reviews"] == 1 and t["held_minutes"] is not None and t["held_minutes"] < 10
+
+
+def test_counterfactual_follows_an_ai_exit_to_its_original_stop_or_target(tmpdb):
+    from src.swing_ai import service
+    cfg = SwingConfig()
+    # SHORT 100 -> SL 104 / TP 92, closed early by the AI at 101 (loss); price then falls to the target
+    p = _open(_plan(side="SHORT", sl=104.0, tp=92.0), 1000, 99.9, 100.0)
+    closed = paper.close_now(p, 101.0, "AI_EXIT", 1100)
+    assert closed["r_net"] < 0
+    t = store.get_trade(p["id"])
+    bars = [_bar(1080, 100, 101, 99, 100), _bar(1140, 100, 100.5, 97, 98), _bar(1200, 98, 98.5, 91, 92)]
+    r = paper.advance_counterfactual(t, bars, 1300)
+    assert r["cf_status"] == "DONE" and r["cf_exit_reason"] == "TP" and r["cf_r_net"] == pytest.approx(1.92, abs=0.05)                  # (99.9 - 92) / 4.1 R, less the entry fee
+    assert store.get_trade(p["id"])["cf_status"] == "DONE"
+    rep = analytics.report()["ai_exit_value"]
+    assert rep["judged"] == 1 and rep["exit_was_worse"] == 1 and rep["avg_r_saved_by_exiting"] < -2.0     # holding would have been far better
+    v = [x for x in service.trades_view() if x["id"] == p["id"]][0]
+    assert v["if_held"]["ended_by"] == "TP"
+    # the opposite case: holding would have hit the stop
+    q = _open(_plan(side="SHORT", sl=104.0, tp=92.0), 2000, 99.9, 100.0)
+    paper.close_now(q, 101.0, "AI_EXIT", 2100)
+    r2 = paper.advance_counterfactual(store.get_trade(q["id"]), [_bar(2160, 101, 105, 100, 104)], 2300)
+    assert r2["cf_exit_reason"] == "SL" and r2["cf_r_net"] < -1.0
+    assert analytics.report()["ai_exit_value"]["exit_was_better"] == 1
+    # still running: nothing hit yet
+    u = _open(_plan(side="SHORT", sl=104.0, tp=92.0), 3000, 99.9, 100.0)
+    paper.close_now(u, 101.0, "AI_EXIT", 3100)
+    assert paper.advance_counterfactual(store.get_trade(u["id"]), [_bar(3160, 100, 101, 99, 100)], 3200)["cf_status"] == "RUNNING"

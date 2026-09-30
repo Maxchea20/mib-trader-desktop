@@ -131,3 +131,36 @@ def performance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "avg_mfe_r": sum(x["mfe_r"] or 0 for x in closed) / n, "avg_mae_r": sum(x["mae_r"] or 0 for x in closed) / n,
             "fees_usd": sum(x["fees_usd"] or 0 for x in closed),
             "exits": {k: sum(1 for x in closed if x["exit_reason"] == k) for k in {x["exit_reason"] for x in closed}}}
+
+
+CF_MAX_DAYS = 7
+
+
+def advance_counterfactual(t: Dict[str, Any], bars: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
+    """Follow a trade that the AI closed early as if it had been held with its ORIGINAL stop and target.  Pure accounting, after the fact:
+    it never affects trading.  SL wins a same-bar tie; ends at the first stop/target touch or after CF_MAX_DAYS (marked to market)."""
+    d = _dir(t)
+    rd = t["risk_dist"]
+    last = int(t["cf_last_bar_ts"] or (int(t["closed_ts"]) // 60 * 60))
+    for bar in bars:
+        if int(bar["ts"]) <= last:
+            continue
+        last = int(bar["ts"])
+        hi, lo = float(bar["high"]), float(bar["low"])
+        hit_sl = lo <= t["sl0"] if d > 0 else hi >= t["sl0"]
+        hit_tp = hi >= t["tp"] if d > 0 else lo <= t["tp"]
+        if hit_sl or hit_tp:
+            px, why = (t["sl0"], "SL") if hit_sl else (t["tp"], "TP")
+            gross = d * (px - t["fill_price"]) / rd
+            fee_exit = t["fee_sl"] if why == "SL" else t["fee_tp"]
+            net = gross - t["qty"] * (t["fill_price"] * t["fee_entry"] + px * fee_exit) / (t["qty"] * rd)
+            store.update_trade(t["id"], cf_status="DONE", cf_last_bar_ts=last, cf_r_net=net, cf_exit_reason=why, cf_closed_ts=last + 60)
+            return {**t, "cf_status": "DONE", "cf_r_net": net, "cf_exit_reason": why}
+        if last + 60 - int(t["closed_ts"]) > CF_MAX_DAYS * 86400:
+            px = float(bar["close"])
+            gross = d * (px - t["fill_price"]) / rd
+            net = gross - (t["fill_price"] * t["fee_entry"] + px * t["fee_sl"]) / rd
+            store.update_trade(t["id"], cf_status="TIMEOUT", cf_last_bar_ts=last, cf_r_net=net, cf_exit_reason="TIMEOUT", cf_closed_ts=last + 60)
+            return {**t, "cf_status": "TIMEOUT", "cf_r_net": net, "cf_exit_reason": "TIMEOUT"}
+    store.update_trade(t["id"], cf_status="RUNNING", cf_last_bar_ts=last)
+    return {**t, "cf_status": "RUNNING", "cf_last_bar_ts": last}

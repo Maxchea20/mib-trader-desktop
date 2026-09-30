@@ -32,6 +32,7 @@ class SwingManager:
         self.last_ai_call = -1e18
         self.previous: Optional[Dict[str, Any]] = None       # GPT's own last analysis, fed back for continuity
         self._restored = False
+        self._last_cf = -1e18
         self.status: Dict[str, Any] = {"state": "idle", "last_error": None}
 
     def _restore(self) -> None:
@@ -55,6 +56,18 @@ class SwingManager:
     def _usage(self) -> Dict[str, Any]:
         u = getattr(self.llm, "last_usage", None) or {}
         return {"input_tokens": u.get("input"), "cached_tokens": u.get("cached"), "output_tokens": u.get("output")}
+
+    def _advance_counterfactuals(self, now: float) -> None:
+        """'What if the AI had not exited?'  Observation only, about once a minute."""
+        if now - self._last_cf < 60:
+            return
+        self._last_cf = now
+        pending = store.open_counterfactuals()
+        if not pending:
+            return
+        bars = self.source.closed("1m", 1000, now)
+        for t in pending:
+            paper.advance_counterfactual(t, bars, now)
 
     # ------------------------------------------------------------------ paper updates (accounting only)
     def _advance_paper(self, now: float, live_price: Optional[float]) -> Optional[Dict[str, Any]]:
@@ -85,6 +98,7 @@ class SwingManager:
         if not self._restored:
             self._restore()
         pos = self._advance_paper(now, live_price)
+        self._advance_counterfactuals(now)
         if not ai_enabled:                                # AI switched off: paper fills/stops still tracked, no AI calls
             self.status["state"] = "off (AI paused)"
             return out
