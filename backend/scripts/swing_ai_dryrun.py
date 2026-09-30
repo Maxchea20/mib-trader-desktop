@@ -56,8 +56,11 @@ def main():
     if dec:
         print(json.dumps(dec.to_dict(), indent=1))
         mk = {"price": price, "bid": price, "ask": price, "spread_pct": 0.0, "ticker_age_seconds": 0}
-        rr = risk.validate_entry(dec, mk, cfg, {"now": now})
-        print("safety layer:", "ACCEPTED " + json.dumps(rr.plan) if rr.ok else "REJECTED " + "; ".join(rr.reasons))
+        if dec.decision == "NO_TRADE":
+            print("safety layer: nothing to validate (the AI chose NO_TRADE)")
+        else:
+            rr = risk.validate_entry(dec, mk, cfg, {"now": now})
+            print("safety layer:", "ACCEPTED " + json.dumps(rr.plan) if rr.ok else "REJECTED " + "; ".join(rr.reasons))
 
 
 if __name__ == "__main__":
