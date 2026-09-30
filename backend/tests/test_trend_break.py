@@ -477,3 +477,23 @@ def test_bot_never_closes_a_manual_position(monkeypatch):
     ls.flatten_mexc("LONG", 3, 100.0)                              # bot owns 3 of the 7 contracts
     assert len(closed) == 1 and closed[0]["vol"] == 3              # never the account's 7
     assert ls.REVIVE_SHADOW is False and ls.revive_shadow_if_mexc_open() is None
+
+
+def test_sweep_study_random_walk_has_no_edge_and_planted_reversal_is_found():
+    from src.trend_break import sweep as W
+    c = _walk(n=12000, seed=11)
+    res = W.tag_sweeps(c, 48)
+    assert len(res["events"]) > 200
+    assert not W.judge(res)["pass"]
+    for e in res["events"]:                                # events only use data up to bar i
+        pre = W.tag_sweeps(c[:e["i"] + 1], 48)["events"]
+        if pre and pre[-1]["i"] == e["i"]:
+            assert pre[-1]["side"] == e["side"] and pre[-1]["wick_atr"] == pytest.approx(e["wick_atr"])
+        break
+    p = _walk(n=12000, seed=11)
+    for e in res["events"]:                                # plant: price reverses hard after every sweep
+        i = e["i"]
+        if i + 2 < len(p):
+            for key in ("open", "high", "low", "close"):
+                p[i + 1][key] += e["s"] * 4.0
+    assert W.judge(W.tag_sweeps(p, 48))["pass"]
