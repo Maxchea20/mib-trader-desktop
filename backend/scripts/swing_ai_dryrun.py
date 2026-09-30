@@ -52,7 +52,9 @@ def main():
     if a.no_call:
         return
     dec, raw, err, ms = engine.review_entry(OpenAILLM(cfg.model, cfg.llm_timeout_seconds), cfg, snap, None, None)
-    print(f"\nmodel {cfg.model}: {ms} ms" + (f"   ERROR: {err}" if err else ""))
+    _k = os.environ.get("OPENAI_API_KEY") or ""
+    print(f"\nOPENAI_API_KEY in use ends with ...{_k[-4:]}" if _k else "\nOPENAI_API_KEY: not set")
+    print(f"model {cfg.model}: {ms} ms" + (f"   ERROR: {err}" if err else ""))
     if dec:
         print(json.dumps(dec.to_dict(), indent=1))
         mk = {"price": price, "bid": price, "ask": price, "spread_pct": 0.0, "ticker_age_seconds": 0}

@@ -20,6 +20,12 @@ AI_FIELDS = ("ts", "kind", "wake_kind", "wake_detail", "price", "model", "prompt
              "snapshot_id", "trade_id", "error", "id")
 
 
+def key_tail() -> Optional[str]:
+    """Last 4 characters of the OpenAI key this process is using (never the key), to spot a wrong-key mix-up."""
+    k = os.environ.get("OPENAI_API_KEY") or ""
+    return ("..." + k[-4:]) if k else None
+
+
 def enabled() -> bool:
     return os.environ.get("SWING_AI_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
@@ -51,7 +57,8 @@ def latest() -> Dict[str, Any]:
     if trade:
         rows = [d for d in store.decisions(50) if d["kind"] == "MANAGE" and d["trade_id"] == trade["id"] and d["valid"]]
         mgmt = _view(rows[0]) if rows else None
-    return {"enabled": enabled(), "mode": "PAPER", "symbol": "BTC/USDT", "model": m.cfg.model, "state": m.status,
+    return {"enabled": enabled(), "mode": "PAPER", "symbol": "BTC/USDT", "model": m.cfg.model, "openai_key_tail": key_tail(),
+            "state": m.status,
             "last_analysis": _view(store.latest_entry_decision()), "last_review": _view(store.latest_decision()),
             "latest_management": mgmt, "active_trade": trade,
             "analytics": mgr.report()}
@@ -59,7 +66,7 @@ def latest() -> Dict[str, Any]:
 
 def status() -> Dict[str, Any]:
     m = get_manager()
-    return {"enabled": enabled(), "mode": "PAPER", "model": m.cfg.model, "state": m.status,
+    return {"enabled": enabled(), "mode": "PAPER", "model": m.cfg.model, "openai_key_tail": key_tail(), "state": m.status,
             "active_trade": store.active_trade(), **mgr.report()}
 
 
