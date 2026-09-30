@@ -38,8 +38,8 @@ def report(decision_limit: int = 100000) -> Dict[str, Any]:
                       "no_trade_share": (counts["NO_TRADE"] / n) if n else None,
                       "proposals_rejected_by_safety": sum(1 for d in dec if d["decision"] in ("LONG", "SHORT") and not d["risk_ok"]),
                       "ai_errors": sum(1 for d in store.decisions(decision_limit) if d["error"]),
-                      "reviews_per_day": (n / span_days) if span_days > 0 else None,
-                      "proposals_per_day": (proposals / span_days) if span_days > 0 else None},
+                      "reviews_per_day": (n / span_days) if span_days >= 1 else None,          # only meaningful after a day of data
+                      "proposals_per_day": (proposals / span_days) if span_days >= 1 else None},
         "overall": _perf(closed), "by_side": by_side, "by_market_state": by_state, "confidence_calibration": calib,
         "trades": {"total": len(trades), "closed": len(closed),
                    "active": sum(1 for t in trades if t["status"] in ("OPEN", "PENDING")),
