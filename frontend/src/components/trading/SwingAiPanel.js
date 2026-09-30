@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getSwingAiLatest } from "@/lib/api";
+import { getSwingAiLatest, getSwingAiTrades } from "@/lib/api";
 
 /**
  * SwingAiPanel
@@ -36,13 +36,15 @@ const Stat = ({ label, value, color }) => (
 export const SwingAiPanel = () => {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [trades, setTrades] = useState([]);
+  const [tab, setTab] = useState("open");
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const d = await getSwingAiLatest();
-        if (alive) { setData(d); setError(null); }
+        const [d, t] = await Promise.all([getSwingAiLatest(), getSwingAiTrades(60)]);
+        if (alive) { setData(d); setTrades(t || []); setError(null); }
       } catch (e) {
         if (alive) setError("Swing AI endpoint not reachable");
       }
@@ -172,6 +174,61 @@ export const SwingAiPanel = () => {
           <span>wake: {a.wake_kind}{a.wake_detail ? ` — ${a.wake_detail}` : ""}</span>
           <span>price then {px(a.price)}</span>
           <span>snapshot #{a.snapshot_id}</span>
+        </div>
+      )}
+
+      {data && (
+        <div className="mt-3 pt-2 border-t border-[#1d2635]" data-testid="swing-trades">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="widget-label">SWING AI TRADES</span>
+            {["open", "history"].map((k) => {
+              const n = trades.filter((t) => (k === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING")).length;
+              return (
+                <button key={k} type="button" onClick={() => setTab(k)}
+                  className={`font-mono-t text-[10px] px-2 py-0.5 rounded-sm border ${tab === k ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-200" : "border-[#1d2635] text-slate-500"}`}>
+                  {k === "open" ? `Open / pending (${n})` : `History (${n})`}
+                </button>
+              );
+            })}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full font-mono-t text-[11px] text-slate-300">
+              <thead>
+                <tr className="text-left text-slate-500 text-[10px]">
+                  {["OPENED", "SIDE", "STATUS", "ENTRY", "SL", "TP", "EXIT", "WHY", "R (NET)", "MFE", "MAE", "FEES", "OUTCOME"].map((h) => (
+                    <th key={h} className="pr-3 pb-1 font-normal">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trades
+                  .filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING"))
+                  .slice(0, 20)
+                  .map((t) => (
+                    <tr key={t.id} className="border-t border-[#141c29]">
+                      <td className="pr-3 py-1">{when(t.opened_ts || t.created_ts)}</td>
+                      <td className={`pr-3 ${t.side === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{t.side}</td>
+                      <td className="pr-3">{t.status}</td>
+                      <td className="pr-3">{px(t.fill_price || t.plan_entry)}</td>
+                      <td className="pr-3">{px(t.sl)}</td>
+                      <td className="pr-3">{px(t.tp)}</td>
+                      <td className="pr-3">{px(t.exit_price)}</td>
+                      <td className="pr-3">{t.exit_reason || "—"}</td>
+                      <td className={`pr-3 ${t.r_net > 0 ? "text-emerald-400" : t.r_net < 0 ? "text-rose-400" : ""}`}>
+                        {t.r_net === null || t.r_net === undefined ? "—" : Number(t.r_net).toFixed(2)}
+                      </td>
+                      <td className="pr-3">{Number(t.mfe_r || 0).toFixed(2)}</td>
+                      <td className="pr-3">{Number(t.mae_r || 0).toFixed(2)}</td>
+                      <td className="pr-3">{t.fees_usd === null || t.fees_usd === undefined ? "—" : `$${Number(t.fees_usd).toFixed(2)}`}</td>
+                      <td className="pr-3">{t.outcome || "—"}</td>
+                    </tr>
+                  ))}
+                {trades.filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING")).length === 0 && (
+                  <tr><td colSpan={13} className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
