@@ -11,7 +11,7 @@ import {
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { SwingAiPanel } from "@/components/trading/SwingAiPanel";
-import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
+import { SwingAiHero } from "@/components/trading/SwingAiHero";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
@@ -228,7 +228,7 @@ function App() {
             </div>
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
-            <BrainHeroPanel s1={analysis?.s1} hunt={analysis?.s1 || analysis?.hunt} weather={analysis?.weather} auto={auto} />
+            <SwingAiHero />
           </section>
         </div>
         <div className="mt-4">
