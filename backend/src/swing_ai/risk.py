@@ -107,7 +107,7 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
         "leverage": qty * fill / cfg.equity_usd, "rr": reward / risk_dist,
         "fee_entry": cfg.taker_fee if near_market else cfg.maker_fee, "fee_tp": cfg.maker_fee, "fee_sl": cfg.taker_fee,
         "expires_ts": None if near_market else int(now + cfg.limit_expiry_minutes * 60),
-        "invalidation_price": dec.invalidation_price, "sized_down": qty * risk_dist < risk_usd * 0.999,
+        "invalidation_price": dec.invalidation_price, "sized_down": qty * risk_dist < risk_usd * 0.98,           # a real reduction (limits), not step rounding
     }
     return RiskResult(True, [], plan)
 
