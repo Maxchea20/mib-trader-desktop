@@ -10,6 +10,15 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+try:                                                    # same .env files run_server.py reads
+    from dotenv import load_dotenv
+    _here = os.path.join(os.path.dirname(__file__), "..")
+    load_dotenv(os.path.join(_here, ".env"), override=False)
+    _appdata = os.environ.get("APPDATA")
+    if _appdata:
+        load_dotenv(os.path.join(_appdata, "mib-trader", ".env"), override=False)
+except Exception:
+    pass
 from src.market_data import database as db  # noqa: E402
 from src.swing_ai import engine, raw_data, risk  # noqa: E402
 from src.swing_ai.config import SwingConfig  # noqa: E402
