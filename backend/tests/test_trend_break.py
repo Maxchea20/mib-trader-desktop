@@ -568,3 +568,61 @@ def test_level_study_is_causal_calibrated_and_finds_planted_reversals():
                 for key in ("open", "high", "low", "close"):
                     w[e["i"] + d][key] += sh
     assert W.judge(group(L.tag_levels(w, tol_atr=1.0), lambda e: e["type"] == "REJECT"), n_variants=4)["pass"]
+
+
+def _multi_tf_frames(days=150, seed=5, drift=0.0):
+    import numpy as np, pandas as pd
+    rng = np.random.default_rng(seed)
+    n = days * 1440
+    close = 30000 * np.exp(np.cumsum(rng.normal(drift, 0.0007, n)))
+    op = np.concatenate([[30000.0], close[:-1]])
+    hi = np.maximum(op, close) * (1 + np.abs(rng.normal(0, 0.0003, n)))
+    lo = np.minimum(op, close) * (1 - np.abs(rng.normal(0, 0.0003, n)))
+    df = pd.DataFrame({"ts": 1_700_000_000 - 1_700_000_000 % 86400 + np.arange(n) * 60, "open": op, "high": hi,
+                       "low": lo, "close": close, "volume": rng.uniform(50, 150, n)})
+    out = {}
+    for tf, sec in (("5m", 300), ("15m", 900), ("30m", 1800), ("1h", 3600), ("4h", 14400), ("1d", 86400)):
+        g = df.groupby(df["ts"] // sec * sec)
+        f = g.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"),
+                  volume=("volume", "sum")).reset_index().rename(columns={"ts": "ts"})
+        out[tf] = f
+    return out
+
+
+def test_ml_pipeline_is_causal_and_finds_nothing_in_noise():
+    pytest.importorskip("lightgbm")
+    import numpy as np
+    from src.trend_break import ml
+    fr = _multi_tf_frames()
+    data = ml.build_dataset(fr)
+    cut = int(len(data["ts"]) * 0.6)
+    t_cut = int(data["ts"][cut])
+    pre = {tf: d[d["ts"] + {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}[tf] <= t_cut].reset_index(drop=True)
+           for tf, d in fr.items()}
+    pdata = ml.build_dataset(pre)
+    k = cut - 5
+    assert np.allclose(pdata["X"].iloc[k].to_numpy(dtype=float), data["X"].iloc[k].to_numpy(dtype=float), equal_nan=True)   # features never see the future
+    oos = ml.walk_forward(data, int(data["ts"][0]) + 60 * 86400, int(data["ts"][-1]) - 5 * 86400, fold_days=30, log=lambda *_: None)
+    for s in (1, -1):
+        a = ml.auc(data["y"][s], oos[s])
+        assert abs(a - 0.5) < 0.05                                       # random walk: the model learns nothing
+    tr = ml.simulate(data, oos, int(data["ts"][0]) + 60 * 86400, int(data["ts"][-1]))
+    sm = ml.summarize(tr)
+    assert sm["n"] == 0 or sm["net_r"] <= 0.25 * sm["n"]                 # and does not make money
+
+
+def test_ml_pipeline_learns_a_planted_relationship():
+    pytest.importorskip("lightgbm")
+    import numpy as np
+    from src.trend_break import ml
+    data = ml.build_dataset(_multi_tf_frames(days=150, seed=9))
+    X = data["X"]
+    key = X["15m_ret3"].to_numpy()
+    ok = ~np.isnan(key)
+    thr = np.nanmedian(key)
+    for s in (1, -1):                                                    # plant: y depends on a feature (with noise)
+        rng = np.random.default_rng(3 + s)
+        p = np.where(key > thr, 0.6, 0.15)
+        data["y"][s] = np.where(ok, (rng.random(len(key)) < p).astype(float), np.nan)
+    oos = ml.walk_forward(data, int(data["ts"][0]) + 60 * 86400, int(data["ts"][-1]) - 5 * 86400, fold_days=30, log=lambda *_: None)
+    assert ml.auc(data["y"][1], oos[1]) > 0.62
