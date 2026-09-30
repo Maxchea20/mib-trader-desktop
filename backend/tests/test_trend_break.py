@@ -539,3 +539,32 @@ def test_structure_study_events_history_and_gate():
                 for key in ("open", "high", "low", "close"):
                     w[k][key] += e["s"] * 0.25 * min(k - e["i"], 20)
     assert W.judge(S.group(S.tag_structure(w, c4, 5), lambda e: e["type"] == "BOS"), n_variants=8)["pass"]
+
+
+def test_level_study_is_causal_calibrated_and_finds_planted_reversals():
+    from src.trend_break import levels as L, sweep as W
+    from src.trend_break.structure import group
+    c = _walk(n=6000, seed=4)
+    full = L.level_events(c, tol_atr=1.0)
+    assert len(full) > 40
+    m = 3000
+    pre = L.level_events(c[:m], tol_atr=1.0)
+    assert [(e["i"], e["type"], e["s"]) for e in pre] == [(e["i"], e["type"], e["s"]) for e in full if e["i"] < m]
+    passes = 0
+    for seed in range(6):
+        res = L.tag_levels(_walk(n=20000, seed=seed), tol_atr=1.0)
+        for typ in ("REJECT", "RETEST"):
+            passes += W.judge(group(res, lambda e, t=typ: e["type"] == t), n_variants=4)["pass"]
+    assert passes == 0                                                    # no false PASS on random walks
+    w = _walk(n=20000, seed=1)
+    last = -10 ** 9
+    for e in L.level_events(w, tol_atr=1.0):
+        if e["type"] != "REJECT" or e["i"] - last < 20:
+            continue
+        last = e["i"]                                                     # plant: an 8-bar move with the rejection, then back to zero
+        for d in range(1, 17):
+            if e["i"] + d < len(w):
+                sh = e["s"] * 0.6 * (d if d <= 8 else 16 - d)
+                for key in ("open", "high", "low", "close"):
+                    w[e["i"] + d][key] += sh
+    assert W.judge(group(L.tag_levels(w, tol_atr=1.0), lambda e: e["type"] == "REJECT"), n_variants=4)["pass"]
