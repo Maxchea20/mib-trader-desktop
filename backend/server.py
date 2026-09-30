@@ -314,6 +314,21 @@ async def autotrade_status():
 async def ai_thesis_status():
     return ai_thesis.status()
 
+@api_router.get("/swing-ai/status")
+async def swing_ai_status():
+    from src.swing_ai import service as swing_service
+    return await asyncio.to_thread(swing_service.status)
+
+@api_router.get("/swing-ai/decisions")
+async def swing_ai_decisions(limit: int = 100):
+    from src.swing_ai import store as swing_store
+    return await asyncio.to_thread(swing_store.decisions, min(max(limit, 1), 500))
+
+@api_router.get("/swing-ai/positions")
+async def swing_ai_positions(limit: int = 200):
+    from src.swing_ai import store as swing_store
+    return await asyncio.to_thread(swing_store.positions, None, min(max(limit, 1), 1000))
+
 @api_router.get("/learning/status")
 async def learning_status():
     try:
@@ -441,3 +456,7 @@ async def startup():
         os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true")
     await manager.initial_load()
     asyncio.create_task(ai_thesis.loop())
+    from src.swing_ai import service as swing_service
+    if swing_service.enabled():                      # opt-in: SWING_AI_ENABLED=1 (paper mode only)
+        logger.info("Swing AI paper mode enabled")
+        asyncio.create_task(swing_service.loop())
