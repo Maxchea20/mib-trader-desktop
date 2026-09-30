@@ -7,7 +7,6 @@ import {
   getAnalysis,
   getSyncStatus,
   getAutotrade,
-  updateAutotrade,
 } from "@/lib/api";
 import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
@@ -18,7 +17,6 @@ import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime"
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
 import { BacktestHuntModal } from "@/components/trading/BacktestHuntModal";
-import { PaperTradingPanel } from "@/components/trading/PaperTradingPanel";
 
 function App() {
   const [timeframe, setTimeframe] = useState("15m");
@@ -70,15 +68,6 @@ function App() {
   const [auto, setAuto] = useState(null);
   const loadAuto = useCallback(async () => {
     try { setAuto(await getAutotrade()); } catch (e) {}
-  }, []);
-  const saveAuto = useCallback(async (payload) => {
-    try {
-      const a = await updateAutotrade(payload);
-      setAuto(a);
-      return a;
-    } catch (e) {
-      return null;
-    }
   }, []);
 
   const refreshAll = useCallback(async (tf) => {
@@ -249,7 +238,6 @@ function App() {
         <div className="mt-4">
           <ObservationLayer observations={analysis?.observations || []} />
         </div>
-        <PaperTradingPanel brain={analysis?.brain} livePrice={livePrice} timeframe={timeframe} auto={auto} onSaveAuto={saveAuto} />
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} syncStatus={syncStatus} auto={auto} />
       <BacktestHuntModal open={backtestOpen} onClose={() => setBacktestOpen(false)} timeframe={timeframe} />
