@@ -41,14 +41,18 @@ def build_raw_snapshot(source, now: float, live_price: Optional[float], ticker: 
 
 
 def position_state(pos: Dict[str, Any], price: float, now: float) -> Dict[str, Any]:
-    """Current paper position/order facts (accounting only) plus the AI's OWN stored thesis for continuity."""
+    """Current paper position/order facts (accounting only) plus the AI's OWN stored thesis for continuity.
+
+    A pending LIMIT order is described as NOT filled and carries no entry price or P&L, so it can never be mistaken for an open trade."""
+    common = {"trade_id": pos["id"], "side": pos["side"], "stop_loss": pos["sl"], "take_profit": pos["tp"], "quantity_btc": pos["qty"],
+              "your_thesis": pos["thesis"], "your_invalidation": pos["invalidation"], "your_invalidation_price": pos["invalidation_price"]}
+    if pos["status"] == "PENDING":
+        return {**common, "status": "PENDING_NOT_FILLED", "order_type": "LIMIT", "limit_price": pos["plan_entry"],
+                "placed_unix": pos["created_ts"], "expires_unix": pos["expires_ts"],
+                "note": "You are NOT in a trade. This LIMIT order has not filled; it fills only if price trades to limit_price."}
     d = 1 if pos["side"] == "LONG" else -1
     fill = pos["fill_price"] or pos["plan_entry"]
     rd = pos["risk_dist"] or 1.0
-    return {"trade_id": pos["id"], "status": pos["status"], "side": pos["side"], "entry_price": fill,
-            "stop_loss": pos["sl"], "initial_stop_loss": pos["sl0"], "take_profit": pos["tp"], "quantity_btc": pos["qty"],
-            "opened_unix": pos["opened_ts"] or pos["created_ts"],
-            "unrealized_r": round(d * (price - fill) / rd, 3) if pos["status"] == "OPEN" else None,
-            "max_favorable_r": round(pos["mfe_r"] or 0, 3), "max_adverse_r": round(pos["mae_r"] or 0, 3),
-            "your_thesis": pos["thesis"], "your_invalidation": pos["invalidation"],
-            "your_invalidation_price": pos["invalidation_price"]}
+    return {**common, "status": "OPEN", "entry_price": fill, "initial_stop_loss": pos["sl0"], "opened_unix": pos["opened_ts"] or pos["created_ts"],
+            "unrealized_r": round(d * (price - fill) / rd, 3), "max_favorable_r": round(pos["mfe_r"] or 0, 3),
+            "max_adverse_r": round(pos["mae_r"] or 0, 3)}

@@ -548,3 +548,17 @@ def test_old_database_gets_the_headline_column(tmpdb):
     with db._lock:
         cols = {r[1] for r in db._connect().execute("PRAGMA table_info(swing_ai_decisions)").fetchall()}
     assert "headline" in cols
+
+
+def test_pending_order_is_never_described_as_a_filled_position(tmpdb):
+    from src.swing_ai import prompts
+    pend = _open(_plan(typ="LIMIT", entry=98.0, sl=94.0, tp=106.0), 3000, None, None)
+    v = raw_data.position_state(pend, 100.0, 3100)
+    assert v["status"] == "PENDING_NOT_FILLED" and v["limit_price"] == 98.0 and "NOT in a trade" in v["note"]
+    assert "entry_price" not in v and "unrealized_r" not in v
+    filled = paper.process_bar(pend, _bar(3120, 100, 101, 97, 99), SwingConfig())
+    o = raw_data.position_state(filled, 100.0, 3200)
+    assert o["status"] == "OPEN" and o["entry_price"] == 98.0 and "limit_price" not in o
+    assert "PENDING_NOT_FILLED" in prompts.system_prompt(SwingConfig())
+    r = risk.validate_entry(_dec(entry=60000.0, sl=59400.0, tp=61800.0), _mk(price=60000.0), SwingConfig(equity_usd=12345.0), {"now": 0})
+    assert r.ok and r.plan["qty"] == round(r.plan["qty"], 3)                                 # no float artefacts like 0.20800000000000002

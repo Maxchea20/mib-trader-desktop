@@ -151,7 +151,7 @@ export const SwingAiPanel = () => {
               <div className="p-2 rounded-sm border border-[#1d2635] bg-[#0d121b]" data-testid="swing-active-trade">
                 <div className="widget-label mb-1">PAPER {trade.status === "PENDING" ? "ORDER (waiting for fill)" : "TRADE"}</div>
                 <div className="font-mono-t text-[11px] text-slate-300">
-                  {trade.side} {trade.qty} BTC @ {px(trade.fill_price || trade.plan_entry)} · SL {px(trade.sl)} · TP {px(trade.tp)}
+                  {trade.side} {Number(trade.qty).toFixed(3)} BTC @ {px(trade.fill_price || trade.plan_entry)} · SL {px(trade.sl)} · TP {px(trade.tp)}
                 </div>
                 <div className="font-mono-t text-[10px] text-slate-500">MFE {Number(trade.mfe_r || 0).toFixed(2)}R · MAE {Number(trade.mae_r || 0).toFixed(2)}R</div>
               </div>

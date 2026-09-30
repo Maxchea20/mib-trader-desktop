@@ -98,7 +98,7 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
     risk_usd = cfg.equity_usd * cfg.risk_pct / 100.0
     qty = risk_usd / risk_dist
     qty = min(qty, cfg.max_position_usd / fill, cfg.equity_usd * cfg.max_leverage / fill)
-    qty = _floor_step(qty, QTY_STEP)
+    qty = round(_floor_step(qty, QTY_STEP), 3)
     if qty < QTY_STEP:
         return RiskResult(False, ["position would be smaller than the minimum order size"])
     plan = {
