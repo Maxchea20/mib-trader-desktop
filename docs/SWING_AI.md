@@ -101,6 +101,9 @@ Reviews are the cost: about 13k input tokens plus GPT's reasoning tokens each. L
 * **Context** `COMPACT` sends about 45% fewer candles.
 * **Prompt caching:** the request is ordered so the static prompt and slow-changing candles come first and everything that changes every call
   (wake reason, previous analysis, live quote, time) comes last, so OpenAI can discount the repeated prefix.
-* **Model:** `SWING_AI_MODEL` in `.env` (for example `gpt-5.4-mini`). Changing it starts a new record: the model is stored on every decision.
+* **Slim candle rows** (prompt `swing-v4-slim`): rows are `[open,high,low,close,volume]` with no per-row timestamp; each timeframe carries `first_open_ts`, `last_open_ts`, `step_seconds` and
+  `time_breaks` (any missing candles, as `[row_index, open_ts]`), so time is fully recoverable. About 20% fewer tokens.
+* **Model:** the Model selector in the panel (or `SWING_AI_MODEL` in `.env` as the default). A model picked in the panel is saved and wins over `.env`.
+  Changing the model starts a new record: the model is stored on every decision.
 * **Meter:** tokens per review are stored; the panel shows tokens today (and dollars if you set `SWING_AI_PRICE_IN`, `SWING_AI_PRICE_CACHED`,
   `SWING_AI_PRICE_OUT` in USD per 1M tokens in `.env`). `swing_ai_report.py` prints them too.

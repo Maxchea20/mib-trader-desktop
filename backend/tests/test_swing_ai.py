@@ -90,7 +90,8 @@ def test_snapshot_is_raw_evidence_only():
     assert list(s)[-1] == "as_of_unix" and list(s).index("timeframes") < list(s).index("live")            # slow data first, fast data last
     assert list(s["timeframes"]) == ["1d", "4h", "1h", "15m", "5m", "1m"]
     for tf, blk in s["timeframes"].items():
-        assert set(blk) == {"seconds", "candles"} and all(len(r) == 6 for r in blk["candles"])   # OHLCV rows and nothing else
+        assert set(blk) == {"step_seconds", "first_open_ts", "last_open_ts", "time_breaks", "candles"}
+        assert all(len(r) == 5 for r in blk["candles"])                                              # OHLCV rows, no timestamp per row
     assert set(s["live"]) == {"price", "bid", "ask", "spread", "exchange_24h_volume"}
     txt = json.dumps(s).lower()
     assert not [w for w in FORBIDDEN if re.search(rf'"{w}[a-z_]*"\s*:', txt)]
@@ -136,8 +137,8 @@ def test_snapshot_is_causal():
     s1 = snap_at()
     assert s1 is not None and s1["as_of_unix"] == int(NOW)
     for tf, blk in s1["timeframes"].items():
-        assert blk["candles"][-1][0] + TF_SEC[tf] <= NOW                                    # the forming bar is never sent
-        assert all(r[0] + TF_SEC[tf] <= NOW for r in blk["candles"])
+        assert blk["last_open_ts"] + TF_SEC[tf] <= NOW                                      # the forming bar is never sent
+        assert blk["first_open_ts"] + (len(blk["candles"]) - 1) * blk["step_seconds"] == blk["last_open_ts"] and blk["time_breaks"] == []
     future = {tf: [dict(c) for c in rows] for tf, rows in DATA.items()}                      # rewrite everything after NOW
     for tf, rows in future.items():
         for c in rows:
@@ -682,3 +683,43 @@ def test_token_usage_is_recorded_and_costed(tmpdb, monkeypatch):
     assert u["all_time"]["calls"] == 1 and u["all_time"]["input_tokens"] == 14000 and u["prices_set"]
     assert u["all_time"]["cost_usd"] == pytest.approx((8000 * 2.0 + 6000 * 0.2 + 3000 * 10.0) / 1e6)
     assert u["today"]["calls"] in (0, 1)
+
+
+def test_slim_rows_keep_time_recoverable_even_with_gaps_and_cut_tokens():
+    full_rows = [[c["ts"], c["open"], c["high"], c["low"], c["close"], c["volume"]] for c in DATA["1h"][:240]]
+    old_len = len(json.dumps({"seconds": 3600, "candles": full_rows}, separators=(",", ":")))
+    s = snap_at()
+    new_len = len(json.dumps(s["timeframes"]["1h"], separators=(",", ":")))
+    assert new_len < 0.8 * old_len                                                              # at least 20% smaller than timestamped rows
+    gappy = {tf: [dict(c) for c in rows] for tf, rows in DATA.items()}
+    cut = [c for c in gappy["15m"] if c["ts"] + 900 <= NOW]
+    del gappy["15m"][gappy["15m"].index(cut[-50]):gappy["15m"].index(cut[-46])]                  # 4 missing 15m candles
+    g = snap_at(data=gappy)["timeframes"]["15m"]
+    assert len(g["time_breaks"]) == 1
+    row, ts = g["time_breaks"][0]
+    assert ts == cut[-46]["ts"] and row == len(g["candles"]) - 46                                # the break is declared where the gap is
+    t = g["first_open_ts"]
+    prev = None
+    for i in range(len(g["candles"])):                                                          # reconstructing every row's time matches the source
+        if g["time_breaks"] and i == g["time_breaks"][0][0]:
+            t = g["time_breaks"][0][1]
+        assert t == [c for c in gappy["15m"] if c["ts"] + 900 <= NOW][-len(g["candles"]):][i]["ts"]
+        t += 900
+
+
+def test_model_can_be_switched_from_the_panel(tmpdb, tmp_path, monkeypatch):
+    from src.swing_ai import service
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.setenv("SWING_AI_MODEL", "gpt-5.4")
+    service._manager = None
+    try:
+        assert service.get_manager().cfg.model == "gpt-5.4"
+        v = service.update_settings({"model": "gpt-5.4-mini"})
+        m = service.get_manager()
+        assert v["model"] == "gpt-5.4-mini" and m.cfg.model == "gpt-5.4-mini" and m.llm.model == "gpt-5.4-mini"
+        with pytest.raises(ValueError):
+            service.update_settings({"model": "bad model;drop"})
+        service._manager = None
+        assert service.get_manager().cfg.model == "gpt-5.4-mini"                                # persisted, beats the env value
+    finally:
+        service._manager = None

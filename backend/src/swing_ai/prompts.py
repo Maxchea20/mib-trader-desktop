@@ -2,7 +2,7 @@
 import json
 from typing import Any, Dict, Optional
 
-PROMPT_VERSION = "swing-v3b-brief"
+PROMPT_VERSION = "swing-v4-slim"
 
 SYSTEM = """You are the sole market analyst and decision brain of a SWING trading system for BTCUSDT perpetual futures on MEXC.
 You are given RAW market data only: the live quote, closed OHLCV candles for 1D, 4H, 1H, 15M, 5M and 1M, and the current

@@ -15,7 +15,8 @@ BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd
           "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0)}
 REASONING = ("default", "low", "medium", "high")
 CONTEXTS = ("FULL", "COMPACT")
-DEFAULTS = {"enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
+MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$"
+DEFAULTS = {"model": None, "enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
             "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL"}
 LIVE_EXECUTION_IMPLEMENTED = False          # flipped only by a reviewed live-executor change, never by a setting
 
@@ -51,6 +52,11 @@ def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload["mode"] not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         clean["mode"] = payload["mode"]
+    if "model" in payload and payload["model"] is not None:
+        import re
+        if not isinstance(payload["model"], str) or not re.match(MODEL_RE, payload["model"]):
+            raise ValueError("model must be a model name such as gpt-5.4-mini")
+        clean["model"] = payload["model"]
     if "reasoning" in payload and payload["reasoning"] is not None:
         if payload["reasoning"] not in REASONING:
             raise ValueError(f"reasoning must be one of {REASONING}")
@@ -90,3 +96,5 @@ def apply_to_config(cfg, s: Optional[Dict[str, Any]] = None) -> None:
     cfg.management_seconds = int(float(s["management_minutes"]) * 60)
     cfg.reasoning = None if s["reasoning"] == "default" else s["reasoning"]
     cfg.context = s["context"]
+    if s.get("model"):                                # a model picked in the panel overrides SWING_AI_MODEL / the default
+        cfg.model = s["model"]

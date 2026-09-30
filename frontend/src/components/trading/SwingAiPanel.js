@@ -171,6 +171,12 @@ export const SwingAiPanel = () => {
       {st && (
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono-t text-[10px] text-slate-400" data-testid="swing-cost-controls">
           <span className="widget-label">COST CONTROLS</span>
+          <label className="flex items-center gap-1">Model
+            <select value={data?.model || ""} onChange={(e) => save({ model: e.target.value })} data-testid="swing-model-select"
+              className="bg-[#0d121b] border border-[#1d2635] text-slate-200 rounded-sm px-1 py-0.5">
+              {Array.from(new Set(["gpt-5.4-mini", "gpt-5.4", data?.model].filter(Boolean))).map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </label>
           {[
             ["Reasoning", "reasoning", ["default", "low", "medium", "high"]],
             ["Context", "context", ["FULL", "COMPACT"]],

@@ -16,11 +16,23 @@ LIMITS_COMPACT = {"1d": 45, "4h": 90, "1h": 120, "15m": 96, "5m": 72, "1m": 45} 
 PROFILES = {"FULL": LIMITS, "COMPACT": LIMITS_COMPACT}
 MIN_ROWS = {"1d": 20, "4h": 30, "1h": 48, "15m": 48, "5m": 24, "1m": 20}
 ORDER = ("1d", "4h", "1h", "15m", "5m", "1m")
-COLUMNS = ["ts_open_utc", "open", "high", "low", "close", "volume"]
+COLUMNS = ["open", "high", "low", "close", "volume"]
+
+
+def _vol(v: float):
+    return int(round(v)) if v >= 100 else round(v, 2)
 
 
 def _row(c: dict):
-    return [int(c["ts"]), float(c["open"]), float(c["high"]), float(c["low"]), float(c["close"]), float(c["volume"])]
+    return [round(float(c["open"]), 2), round(float(c["high"]), 2), round(float(c["low"]), 2), round(float(c["close"]), 2), _vol(float(c["volume"]))]
+
+
+def _frame(rows, step: int) -> Dict[str, Any]:
+    """Token-lean candle block: no timestamp per row.  Row i opens at first_open_ts + i*step_seconds, except that any missing
+    candles are declared in time_breaks as [row_index, open_ts] (that row, and the ones after it, restart from that time)."""
+    breaks = [[i, int(r["ts"])] for i, r in enumerate(rows) if i and int(r["ts"]) != int(rows[i - 1]["ts"]) + step]
+    return {"step_seconds": step, "first_open_ts": int(rows[0]["ts"]), "last_open_ts": int(rows[-1]["ts"]), "time_breaks": breaks,
+            "candles": [_row(r) for r in rows]}
 
 
 def build_raw_snapshot(source, now: float, live_price: Optional[float], ticker: Optional[Dict[str, Any]] = None,
@@ -35,14 +47,15 @@ def build_raw_snapshot(source, now: float, live_price: Optional[float], ticker: 
         rows = closed_only(source.closed(tf, limits[tf], now), tf, now)
         if len(rows) < MIN_ROWS[tf]:
             return None
-        frames[tf] = {"seconds": TF_SEC[tf], "candles": [_row(c) for c in rows]}
+        frames[tf] = _frame(rows, TF_SEC[tf])
     q = ticker or {}
     bid, ask = q.get("bid"), q.get("ask")
-    price = float(live_price) if live_price else frames["1m"]["candles"][-1][4]
+    price = float(live_price) if live_price else frames["1m"]["candles"][-1][3]
     live = {"price": price, "bid": bid, "ask": ask, "spread": (ask - bid) if bid and ask else None,
             "exchange_24h_volume": q.get("volume24")}
     return {"symbol": symbol, "source": "MEXC", "candle_columns": COLUMNS,
-            "candle_note": "Only fully CLOSED candles, oldest first. ts_open_utc is the candle open time (unix seconds).",
+            "candle_note": "Only fully CLOSED candles, oldest first, columns per candle_columns. No per-row timestamp: row i opened at first_open_ts + i*step_seconds "
+                           "(unix seconds, UTC) unless time_breaks says otherwise ([row_index, open_ts] restarts the clock at that row); last_open_ts is the newest candle.",
             "timeframes": frames, "live": live, "position_or_order": position, "as_of_unix": int(now)}
 
 

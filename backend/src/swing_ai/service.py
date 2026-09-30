@@ -39,7 +39,10 @@ def settings_view() -> Dict[str, Any]:
 def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Saves and applies to the running engine.  Raises ValueError on a bad value."""
     sett.save(payload)
-    sett.apply_to_config(get_manager().cfg)
+    m = get_manager()
+    sett.apply_to_config(m.cfg)
+    if hasattr(m.llm, "model"):
+        m.llm.model = m.cfg.model
     return settings_view()
 
 
