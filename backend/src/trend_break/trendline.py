@@ -18,7 +18,7 @@ prefix of history gives the same events as running live.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 LONG = "LONG"
@@ -59,6 +59,7 @@ class TrendlineResult:
     lower: Optional[Line]
     atr: float
     last_index: int
+    lines: List[Line] = field(default_factory=list)   # every pivot line, oldest first (display only)
 
     def latest_break(self) -> Optional[Break]:
         return self.events[-1] if self.events else None
@@ -99,6 +100,7 @@ def compute(candles: Sequence[dict], length: int = 14, mult: float = 1.0,
     lower: Optional[Line] = None
     upos = dnos = 0          # 1 once a close has crossed the line since its pivot
     events: List[Break] = []
+    history: List[Line] = []
 
     for t in range(n):
         i = t - length
@@ -109,10 +111,12 @@ def compute(candles: Sequence[dict], length: int = 14, mult: float = 1.0,
             h = hi[i]
             if h > max(hi[i - length:i]) and h >= max(hi[i + 1:t + 1]):
                 upper = Line("upper", i, int(candles[i]["ts"]), h, t, slope)
+                history.append(upper)
                 ph = True
             l = lo[i]
             if l < min(lo[i - length:i]) and l <= min(lo[i + 1:t + 1]):
                 lower = Line("lower", i, int(candles[i]["ts"]), l, t, slope)
+                history.append(lower)
                 pl = True
 
         # upos := ph ? 0 : close > upper - slope_ph * length ? 1 : upos
@@ -135,7 +139,7 @@ def compute(candles: Sequence[dict], length: int = 14, mult: float = 1.0,
                 dnos = 1
 
     last_atr = next((x for x in reversed(atrs) if x is not None), 0.0)
-    return TrendlineResult(events, upper, lower, float(last_atr or 0.0), n - 1)
+    return TrendlineResult(events, upper, lower, float(last_atr or 0.0), n - 1, history)
 
 
 def direction(res: TrendlineResult, candles: Sequence[dict]) -> str:

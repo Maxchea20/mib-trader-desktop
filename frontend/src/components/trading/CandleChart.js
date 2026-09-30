@@ -4,6 +4,7 @@ import { useFvgOverlay } from "./chart/useFvgOverlay";
 import { useStructureMarkers } from "./chart/useStructureMarkers";
 import { useStructureEventOverlay } from "./chart/useStructureEventOverlay";
 import { useHuntMapOverlay } from "./chart/useHuntMapOverlay";
+import { useTrendBreakOverlay } from "./chart/useTrendBreakOverlay";
 import { FvgOverlayLayer } from "./chart/FvgOverlayLayer";
 import { StructureEventOverlayLayer } from "./chart/StructureEventOverlayLayer";
 import { HuntMapOverlayLayer } from "./chart/HuntMapOverlayLayer";
@@ -25,6 +26,7 @@ export const CandleChart = ({
   timeframe,
   marketState = null,
   hunt = null,
+  trendBreak = null,
 }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -149,6 +151,8 @@ export const CandleChart = ({
   const bands = useFvgOverlay({ chartRef, candleSeriesRef, containerRef, candles, fvgZones });
 
   useStructureMarkers({ candleSeriesRef, marketState });
+
+  useTrendBreakOverlay({ chartRef, candleSeriesRef, data: trendBreak, timeframe });
 
   const chartEvents = [
     ...(marketState?.structure?.events || []),

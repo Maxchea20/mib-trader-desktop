@@ -230,7 +230,7 @@ function App() {
                 </button>
               </div>
               {candles.length > 0 ? (
-                <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} hunt={analysis?.s1 || analysis?.hunt} />
+                <CandleChart candles={candles} levels={levels} fvgZones={fvgVisible ? fvgZones : []} confluenceZones={confluenceZones} livePrice={livePrice} timeframe={timeframe} marketState={structureVisible ? analysis?.market_state : null} hunt={analysis?.s1 || analysis?.hunt} trendBreak={analysis?.timeframe === timeframe ? analysis?.trend_break_chart : null} />
               ) : (
                 <div className="w-full h-full flex items-center justify-center widget-label">Loading local candles…</div>
               )}

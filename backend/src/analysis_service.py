@@ -147,8 +147,15 @@ def full_analysis(timeframe: str) -> Dict:
         candles, timeframe,
         candles_5m=m5_closed, candles_4h=c4, candles_1h=c1h, candles_15m=c15,
     )
+    try:
+        from .trend_break.chart import chart_payload
+        from .trend_break.engine import TF_SEC
+        tb_chart = chart_payload(candles, TF_SEC.get(timeframe, 900)) if timeframe in TF_SEC else None
+    except Exception:
+        tb_chart = None
     return _native({
         "symbol": SYMBOL, "timeframe": timeframe, "price": price,
+        "trend_break_chart": tb_chart,
         "candle_count": len(candles),
         "market_state": _market_state_to_dict(market_state),
         "agents": [a.to_dict() for a in agents],
