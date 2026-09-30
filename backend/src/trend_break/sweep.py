@@ -96,7 +96,7 @@ def decluster(events: List[Dict], gap: int = DECLUSTER_BARS) -> List[Dict]:
     return out
 
 
-def judge(res: Dict, sides=(1, -1)) -> Dict:
+def judge(res: Dict, sides=(1, -1), n_variants: int = 3) -> Dict:
     """Excess over the same-direction baseline, split by side and by time half.
     Events are de-clustered first so overlapping outcomes are not counted as independent."""
     ev, base, hz = decluster(res["events"]), res["base"], res["horizons"]
@@ -131,4 +131,4 @@ def judge(res: Dict, sides=(1, -1)) -> Dict:
     edge_h = [(x["tp_rate"] - x["tp_base"]) for x in (h1[1], h2[1], h1[-1], h2[-1])] if set(sides) == {1, -1} else []
     consistent = bool(edge_h) and all(d > 0 for d in edge_h)      # both sides, both halves beat baseline
     return {"n_raw": len(res["events"]), "n_used": len(ev), "full": full, "h1": h1, "h2": h2, "tp": (tot_w, tot_n, p0, z, p), "consistent": consistent,
-            "pass": bool(p < 0.05 / 3 and consistent)}                # 3 look-back variants -> Bonferroni
+            "pass": bool(p < 0.05 / n_variants and consistent)}       # Bonferroni over the pre-set variants

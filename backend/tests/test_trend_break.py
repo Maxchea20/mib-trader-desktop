@@ -513,3 +513,29 @@ def test_momentum_study_calibrated_on_noise_and_finds_planted_trend_following():
             for key in ("open", "high", "low", "close"):
                 p[k][key] += e["s"] * 0.15 * min(k - i, 64)
     assert M.judge(M.tag_momentum(p, 48))["pass"]
+
+
+def test_structure_study_events_history_and_gate():
+    from src.trend_break import structure as S, sweep as W, gauges as G
+    c = _walk(n=3000, seed=2)
+    mine = [(e["ts"], e["type"], e["direction"]) for e in S.swing_events(c, 2)]
+    ref = [(e["ts"], e["type"], e["direction"]) for e in G.structure_events(c, 2)]
+    assert mine == ref and len(mine) > 50                      # linear-time version == the engine's definition
+    h = []
+    d = tl.structure_direction(c, 8, history=h)
+    assert (h[-1][1] if h else "NEUTRAL") == d["direction"]     # history hook does not change the answer
+    c4 = [dict(ts=1_700_000_000 + i * 14400, open=100, high=100, low=100, close=100, volume=1) for i in range(0)]
+    passes = 0
+    for seed in range(6):
+        w = _walk(n=9000, seed=seed)
+        res = S.tag_structure(w, c4, 5)
+        passes += W.judge(S.group(res, lambda e: e["type"] == "BOS"), n_variants=8)["pass"]
+    assert passes == 0                                         # no false PASS on random walks
+    w = _walk(n=9000, seed=1)
+    res = S.tag_structure(w, c4, 5)
+    for e in res["events"]:
+        if e["type"] == "BOS":                                 # plant: BOS keeps running, then holds
+            for k in range(e["i"] + 1, len(w)):
+                for key in ("open", "high", "low", "close"):
+                    w[k][key] += e["s"] * 0.25 * min(k - e["i"], 20)
+    assert W.judge(S.group(S.tag_structure(w, c4, 5), lambda e: e["type"] == "BOS"), n_variants=8)["pass"]

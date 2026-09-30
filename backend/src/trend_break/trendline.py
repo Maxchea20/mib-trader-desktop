@@ -170,7 +170,7 @@ def as_dict(res: TrendlineResult) -> Dict:
     return {"upper": ln(res.upper), "lower": ln(res.lower), "atr": res.atr}
 
 
-def structure_direction(candles: Sequence[dict], length: int = 14) -> Dict:
+def structure_direction(candles: Sequence[dict], length: int = 14, history: Optional[list] = None) -> Dict:
     """Persistent swing-structure trend (LONG / SHORT / NEUTRAL).
 
     Uses the same causally confirmed pivots as the trendlines (a pivot only
@@ -204,6 +204,8 @@ def structure_direction(candles: Sequence[dict], length: int = 14) -> Dict:
             new = LONG if up else SHORT if dn else state
             if new != state:
                 state, since_ts = new, int(candles[t]["ts"])
+                if history is not None:
+                    history.append((int(candles[t]["ts"]), state))    # (ts of the confirming bar, new trend)
     return {
         "direction": state, "since_ts": since_ts,
         "last_highs": [p for _, p in highs[-2:]], "last_lows": [p for _, p in lows[-2:]],
