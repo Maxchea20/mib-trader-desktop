@@ -150,3 +150,11 @@ not to exit on 1M/5M noise or a brief wick.
 `swing_ai_report.py` prints a trade-character line (median stop %, target %, held hours,
 share of trades closed under 1h, expected vs actual hold). If the share closed under 1h is
 high, the AI is still scalping. Keep "Trade check every" at 15–30 min; 1 min invites noise exits.
+
+## Exit labels
+
+Mechanical exits are `TP`, `SL` (original stop) and `SL_MOVED`. When GPT closes a trade itself, the label is the
+`thesis_status` it reported with the EXIT: `AI_INVALID` (thesis broken), `AI_OPPOSITE` (strong opposite thesis),
+`AI_WEAKENING` (thesis fading) or `AI_EXIT_VALID` (it exited although it still called the thesis valid, e.g. a
+discretionary profit or risk decision). Older rows keep `AI_EXIT`. The trade row also shows GPT's reason and the wake
+that triggered the review (for example `INVALIDATION_LEVEL_HIT`). All `AI_*` exits get the "if held" follow-up.

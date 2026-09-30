@@ -398,7 +398,7 @@ def test_full_paper_pipeline_long_to_take_profit(tmpdb):
         if store.active_trade() is None:
             break
     closed = store.trades("CLOSED")
-    assert len(closed) == 1 and closed[0]["exit_reason"] in ("TP", "AI_EXIT") and closed[0]["mfe_r"] > 0 and closed[0]["outcome"]
+    assert len(closed) == 1 and closed[0]["exit_reason"] in ("TP", "AI_INVALID", "AI_EXIT_VALID", "AI_WEAKENING", "AI_OPPOSITE") and closed[0]["mfe_r"] > 0 and closed[0]["outcome"]
     assert paper.performance(store.trades())["trades"] == 1
 
 
@@ -443,7 +443,7 @@ def test_management_exit_on_the_ais_own_invalidation_and_no_auto_reverse(tmpdb):
     assert "INVALIDATION_LEVEL_HIT" in o["wakes"] and o["reviewed"] == "MANAGE" and len(llm.calls) == n + 1
     assert o["decision"]["decision"] == "EXIT" and o["decision"].get("reversal_ignored") and store.active_trade() is None
     c = store.trades("CLOSED")[0]
-    assert c["exit_reason"] == "AI_EXIT" and c["r_net"] < 0
+    assert c["exit_reason"].startswith("AI_") and c["r_net"] < 0
     ks = [d["kind"] for d in store.decisions()]
     assert ks.count("MANAGE") == 1 and ks.count("ENTRY") == 1
     assert "[INVALID]" in store.decisions()[0]["thesis"]
@@ -836,7 +836,7 @@ def test_trades_view_attaches_gpts_entry_and_exit_reasoning(tmpdb):
     px = price * 0.987
     m.step(NOW + 240, px, _ticker(px))                                                       # invalidation reached -> AI exits
     t = service.trades_view()[0]
-    assert t["status"] == "CLOSED" and t["exit_reason"] == "AI_EXIT"
+    assert t["status"] == "CLOSED" and t["exit_reason"] == "AI_INVALID" and t["exit_wake"]
     assert t["entry_headline"] == "Short the rejection" and t["entry_thesis"] == "t"
     assert "[INVALID] Price reclaimed the level" in t["exit_note"] and "INVALIDATION_LEVEL_HIT" in t["exit_wake"]
     assert t["management_reviews"] == 1 and t["held_minutes"] is not None and t["held_minutes"] < 10

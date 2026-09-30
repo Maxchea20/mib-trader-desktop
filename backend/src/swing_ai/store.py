@@ -10,6 +10,7 @@ import zlib
 from typing import Any, Dict, List, Optional
 
 from ..market_data import database as db
+from .schema import AI_EXIT_REASONS
 
 TABLES = """
 CREATE TABLE IF NOT EXISTS swing_ai_market_snapshots (
@@ -150,8 +151,9 @@ def trades(status: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any
 
 
 def open_counterfactuals(limit: int = 20) -> List[Dict[str, Any]]:
-    return _rows("SELECT * FROM swing_ai_trades WHERE status='CLOSED' AND exit_reason='AI_EXIT' AND (cf_status IS NULL OR cf_status='RUNNING') "
-                 "ORDER BY id LIMIT ?", (limit,))
+    marks = ",".join("?" * len(AI_EXIT_REASONS))
+    return _rows(f"SELECT * FROM swing_ai_trades WHERE status='CLOSED' AND exit_reason IN ({marks}) AND (cf_status IS NULL OR cf_status='RUNNING') "
+                 "ORDER BY id LIMIT ?", (*AI_EXIT_REASONS, limit))
 
 
 def day_stats(now: float) -> Dict[str, Any]:

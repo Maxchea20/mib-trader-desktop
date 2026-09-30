@@ -357,7 +357,8 @@ export const SwingAiPanel = () => {
                         <td className="pr-3">{px(t.sl)}</td>
                         <td className="pr-3">{px(t.tp)}</td>
                         <td className="pr-3">{px(t.exit_price)}</td>
-                        <td className="pr-3">{t.exit_reason || "—"}</td>
+                        <td className={`pr-3 ${String(t.exit_reason || "").startsWith("AI_") ? "text-amber-300" : ""}`}
+                            title={t.exit_wake ? `woken by ${t.exit_wake}` : undefined}>{t.exit_reason || "—"}</td>
                         <td className="pr-3">{t.held_minutes === null || t.held_minutes === undefined ? "—" : `${t.held_minutes}m`}</td>
                         <td className={`pr-3 ${t.r_net > 0 ? "text-emerald-400" : t.r_net < 0 ? "text-rose-400" : ""}`}>
                           {t.r_net === null || t.r_net === undefined ? "—" : Number(t.r_net).toFixed(2)}

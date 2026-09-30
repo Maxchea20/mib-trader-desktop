@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from . import analytics, engine, paper, prompts, raw_data, risk, store
 from .config import SwingConfig
+from .schema import AI_EXIT_BY_STATUS
 from .source import DbSource
 from .wakes import WakeWatcher
 
@@ -201,7 +202,7 @@ class SwingManager:
         elif md.action == "EXIT":
             q = ticker or {}
             px = (q.get("bid") if pos["side"] == "LONG" else q.get("ask")) or price
-            paper.close_now(pos, float(px), "AI_EXIT", now)
+            paper.close_now(pos, float(px), AI_EXIT_BY_STATUS.get(md.thesis_status, "AI_EXIT"), now)
             result["applied"] = True
         if md.reversal_candidate and not self.cfg.allow_reverse:
             result["reversal_ignored"] = True

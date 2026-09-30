@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 from . import paper, store
+from .schema import AI_EXIT_REASONS
 
 CONF_BINS = ((0.0, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 1.01))
 
@@ -86,12 +87,13 @@ def report(decision_limit: int = 100000) -> Dict[str, Any]:
                           "mean_confidence": sum(t["confidence"] for t in g) / len(g),
                           "win_rate": sum(1 for t in g if t["r_net"] > 0) / len(g),
                           "mean_net_r": sum(t["r_net"] for t in g) / len(g)})
-    ai_exits = [t for t in closed if t["exit_reason"] == "AI_EXIT"]
+    ai_exits = [t for t in closed if t["exit_reason"] in AI_EXIT_REASONS]
     judged = [t for t in ai_exits if t.get("cf_status") in ("DONE", "TIMEOUT") and t.get("cf_r_net") is not None]
     saved = [t["r_net"] - t["cf_r_net"] for t in judged]                     # > 0: exiting was better than holding
     ai_exit_value = {"ai_exits": len(ai_exits), "judged": len(judged), "still_running": sum(1 for t in ai_exits if t.get("cf_status") not in ("DONE", "TIMEOUT")),
                      "avg_r_saved_by_exiting": (sum(saved) / len(saved)) if saved else None,
-                     "exit_was_better": sum(1 for x in saved if x > 0), "exit_was_worse": sum(1 for x in saved if x < 0)}
+                     "exit_was_better": sum(1 for x in saved if x > 0), "exit_was_worse": sum(1 for x in saved if x < 0),
+                     "by_reason": {r: sum(1 for t in ai_exits if t["exit_reason"] == r) for r in AI_EXIT_REASONS if any(t["exit_reason"] == r for t in ai_exits)}}
     all_rows = store.decisions(decision_limit)
     char = character(trades)
     return {

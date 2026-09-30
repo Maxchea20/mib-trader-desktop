@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from . import manager as mgr, settings as sett, store
 from .config import SwingConfig
 from .llm import OpenAILLM
+from .schema import AI_EXIT_REASONS
 
 logger = logging.getLogger(__name__)
 _manager: Optional[mgr.SwingManager] = None
@@ -126,7 +127,7 @@ def trades_view(limit: int = 200) -> list:
                     "exit_wake": (f"{last['wake_kind']}: {last['wake_detail']}" if last and last.get("wake_detail") else (last or {}).get("wake_kind")),
                     "management_reviews": len(ms),
                     "if_held": ({"status": t.get("cf_status"), "r_net": t.get("cf_r_net"), "ended_by": t.get("cf_exit_reason")}
-                                if t.get("exit_reason") == "AI_EXIT" else None),
+                                if t.get("exit_reason") in AI_EXIT_REASONS else None),
                     "held_minutes": round((end - start) / 60, 1) if end and start else None})
     return out
 
