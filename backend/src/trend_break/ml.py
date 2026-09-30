@@ -74,20 +74,55 @@ def _race(hi, lo, cl, i, s, a):
     return -1, MAX_BARS
 
 
-def build_dataset(frames: Dict[str, pd.DataFrame]) -> Dict:
+RAW_WINDOWS = {"5m": 24, "15m": 32, "1h": 24, "4h": 20, "1d": 14}    # bars of raw candles the model may look at
+
+
+def raw_windows(frames: Dict[str, pd.DataFrame], close_ts: np.ndarray) -> pd.DataFrame:
+    """No engineered indicators: the last W raw candles of each timeframe, scaled only by that timeframe's
+    ATR and anchored on its latest close (prices) / its 20-bar mean volume (volume)."""
+    cols, names = [], []
+    for tf, W in RAW_WINDOWS.items():
+        d = frames[tf].reset_index(drop=True)
+        atr = _atr(d).to_numpy()
+        o, h, l, c, v = (d[k].to_numpy() for k in ("open", "high", "low", "close", "volume"))
+        vm = pd.Series(v).rolling(20).mean().to_numpy()
+        j = np.searchsorted(d["ts"].to_numpy() + TFS[tf], close_ts, side="right") - 1
+        for k in range(W):
+            jj = j - k
+            bad = jj < 0
+            jc = np.where(bad, 0, jj)
+            ref = np.where(j < 0, 0, j)
+            for nm, arr in (("o", o), ("h", h), ("l", l), ("c", c)):
+                if nm == "c" and k == 0:
+                    continue
+                val = (arr[jc] - c[ref]) / atr[ref]
+                val[bad | (j < 0)] = np.nan
+                cols.append(val.astype(np.float32))
+                names.append(f"{tf}_{nm}{k}")
+            val = v[jc] / vm[ref]
+            val[bad | (j < 0)] = np.nan
+            cols.append(val.astype(np.float32))
+            names.append(f"{tf}_v{k}")
+    return pd.DataFrame(np.column_stack(cols), columns=names)
+
+
+def build_dataset(frames: Dict[str, pd.DataFrame], inputs: str = "features", stride: int = 1) -> Dict:
     base = frames[BASE].reset_index(drop=True)
     close_ts = base["ts"].to_numpy() + BASE_SEC
-    cols = []
-    for tf, sec in TFS.items():
-        d = frames[tf].reset_index(drop=True)
-        ft = tf_features(d, tf)
-        idx = np.searchsorted(d["ts"].to_numpy() + sec, close_ts, side="right") - 1
-        ok = idx >= 0
-        m = ft.iloc[np.where(ok, idx, 0)].reset_index(drop=True)
-        m.loc[~ok, :] = np.nan
-        cols.append(m)
-    X = pd.concat(cols, axis=1)
     hour = ((close_ts % 86400) / 3600.0)
+    if inputs == "raw":
+        X = raw_windows(frames, close_ts)
+    else:
+        cols = []
+        for tf, sec in TFS.items():
+            d = frames[tf].reset_index(drop=True)
+            ft = tf_features(d, tf)
+            idx = np.searchsorted(d["ts"].to_numpy() + sec, close_ts, side="right") - 1
+            ok = idx >= 0
+            m = ft.iloc[np.where(ok, idx, 0)].reset_index(drop=True)
+            m.loc[~ok, :] = np.nan
+            cols.append(m)
+        X = pd.concat(cols, axis=1)
     X["hour_sin"], X["hour_cos"] = np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24)
     X["dow"] = ((close_ts // 86400 + 3) % 7).astype(float)
     hi, lo, cl = base["high"].to_numpy(), base["low"].to_numpy(), base["close"].to_numpy()
@@ -104,23 +139,53 @@ def build_dataset(frames: Dict[str, pd.DataFrame]) -> Dict:
             if r >= 0:
                 y[s][i], dur[s][i] = r, d
     fee_r = FEE_RT * cl / (SL_ATR * np.where(atr > 0, atr, np.nan))
-    return {"X": X, "y": y, "dur": dur, "fee_r": fee_r, "ts": close_ts, "atr": atr}
+    out = {"X": X, "y": y, "dur": dur, "fee_r": fee_r, "ts": close_ts, "atr": atr}
+    if stride > 1:                                            # thin the decision bars (saves memory in raw mode)
+        keep = np.arange(0, n, stride)
+        out = {"X": X.iloc[keep].reset_index(drop=True), "y": {k: v[keep] for k, v in y.items()},
+               "dur": {k: v[keep] for k, v in dur.items()}, "fee_r": fee_r[keep], "ts": close_ts[keep], "atr": atr[keep]}
+    return out
 
 
-def _model():
+def _model(kind: str = "gbm"):
+    if kind == "tree":
+        from sklearn.tree import DecisionTreeClassifier
+        return DecisionTreeClassifier(max_depth=4, min_samples_leaf=800, random_state=7)
     import lightgbm as lgb
     return lgb.LGBMClassifier(n_estimators=150, learning_rate=0.05, num_leaves=15, min_child_samples=300,
                               subsample=0.8, subsample_freq=1, colsample_bytree=0.5, reg_lambda=5.0,
                               max_bin=63, verbose=-1, n_jobs=-1, random_state=7)
 
 
+def tree_rules(model, names: Sequence[str], min_p: float = THRESH_P) -> List[Dict]:
+    """Readable IF-THEN rules: every leaf of a fitted decision tree whose training win rate is >= min_p."""
+    t = model.tree_
+    out: List[Dict] = []
+
+    def walk(node, conds):
+        if t.children_left[node] == -1:
+            v = t.value[node][0]
+            tot = float(v.sum())
+            p = float(v[1] / tot) if tot and len(v) > 1 else 0.0
+            if p >= min_p:
+                out.append({"rule": " AND ".join(conds) or "always", "p_train": p, "n_train": int(t.n_node_samples[node])})
+            return
+        nm, th = names[t.feature[node]], t.threshold[node]
+        walk(t.children_left[node], conds + [f"{nm} <= {th:.3f}"])
+        walk(t.children_right[node], conds + [f"{nm} > {th:.3f}"])
+
+    walk(0, [])
+    return sorted(out, key=lambda r: -r["p_train"])
+
+
 def walk_forward(data: Dict, first_test: int, last_ts: int, fold_days: int = 91,
-                 log=print) -> Dict[int, np.ndarray]:
+                 log=print, kind: str = "gbm") -> Dict[int, np.ndarray]:
     """Expanding-window walk-forward.  Returns out-of-sample probabilities (NaN where not scored)."""
     ts, X, y = data["ts"], data["X"], data["y"]
     oos = {1: np.full(len(ts), np.nan), -1: np.full(len(ts), np.nan)}
     start = first_test
     imp = None
+    rules: Dict[int, List[Dict]] = {1: [], -1: []}
     while start < last_ts:
         end = min(start + fold_days * 86400, last_ts)
         tr = np.where((ts < start - EMBARGO))[0]
@@ -128,14 +193,17 @@ def walk_forward(data: Dict, first_test: int, last_ts: int, fold_days: int = 91,
         if len(te) and len(tr) > 5000:
             for s in (1, -1):
                 lab = ~np.isnan(y[s][tr])
-                m = _model().fit(X.iloc[tr[lab]], y[s][tr][lab].astype(int))
+                m = _model(kind).fit(X.iloc[tr[lab]], y[s][tr][lab].astype(int))
                 oos[s][te] = m.predict_proba(X.iloc[te])[:, 1]
-                if s == 1:
+                if kind == "tree":
+                    rules[s] = tree_rules(m, list(X.columns))
+                elif s == 1:
                     imp = pd.Series(m.booster_.feature_importance("gain"), index=X.columns)
             log(f"  fold {pd.to_datetime(start, unit='s').date()} -> {pd.to_datetime(end, unit='s').date()}: "
                 f"train {len(tr)}, test {len(te)}")
         start = end
     oos["imp"] = imp
+    oos["rules"] = rules                       # the rules of the LAST fold (trained on the most data)
     return oos
 
 
@@ -145,7 +213,7 @@ def simulate(data: Dict, pred: Dict[int, np.ndarray], lo_ts: int, hi_ts: int, th
     n = len(ts)
     trades, busy = [], -1
     for i in range(n):
-        if ts[i] < lo_ts or ts[i] >= hi_ts or i <= busy:
+        if ts[i] < lo_ts or ts[i] >= hi_ts or ts[i] <= busy:
             continue
         pl, ps = pred[1][i], pred[-1][i]
         cand = [(p, s) for p, s in ((pl, 1), (ps, -1)) if not math.isnan(p) and p >= thresh]
@@ -156,7 +224,7 @@ def simulate(data: Dict, pred: Dict[int, np.ndarray], lo_ts: int, hi_ts: int, th
         if math.isnan(r):
             continue
         trades.append({"i": i, "ts": int(ts[i]), "s": s, "p": p, "win": int(r), "fee_r": float(data["fee_r"][i])})
-        busy = i + int(data["dur"][s][i])
+        busy = int(ts[i]) + int(data["dur"][s][i]) * BASE_SEC
     return trades
 
 

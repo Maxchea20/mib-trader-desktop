@@ -626,3 +626,30 @@ def test_ml_pipeline_learns_a_planted_relationship():
         data["y"][s] = np.where(ok, (rng.random(len(key)) < p).astype(float), np.nan)
     oos = ml.walk_forward(data, int(data["ts"][0]) + 60 * 86400, int(data["ts"][-1]) - 5 * 86400, fold_days=30, log=lambda *_: None)
     assert ml.auc(data["y"][1], oos[1]) > 0.62
+
+
+def test_ml_raw_inputs_are_causal_and_tree_rules_are_readable():
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("sklearn")
+    import numpy as np
+    from src.trend_break import ml
+    fr = _multi_tf_frames(days=120, seed=12)
+    data = ml.build_dataset(fr, inputs="raw")
+    sec = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
+    cut = int(len(data["ts"]) * 0.6)
+    t_cut = int(data["ts"][cut])
+    pre = {tf: d[d["ts"] + sec[tf] <= t_cut].reset_index(drop=True) for tf, d in fr.items()}
+    pdata = ml.build_dataset(pre, inputs="raw")
+    k = cut - 5
+    assert np.allclose(pdata["X"].iloc[k].to_numpy(dtype=float), data["X"].iloc[k].to_numpy(dtype=float), equal_nan=True)
+    assert data["X"].shape[1] > 300                                      # raw candles only, no indicators
+    assert len(ml.build_dataset(fr, stride=4)["ts"]) == (len(fr["15m"]) + 3) // 4
+    small = ml.build_dataset(_multi_tf_frames(days=220, seed=13))
+    key = small["X"]["15m_ret3"].to_numpy()
+    thr = np.nanmedian(key)
+    for s in (1, -1):                                                    # plant a rule the tree must recover
+        rng = np.random.default_rng(20 + s)
+        small["y"][s] = np.where(np.isnan(key), np.nan, (rng.random(len(key)) < np.where(key > thr, 0.6, 0.15)).astype(float))
+    oos = ml.walk_forward(small, int(small["ts"][0]) + 100 * 86400, int(small["ts"][-1]) - 3 * 86400, 30, log=lambda *_: None, kind="tree")
+    rules = oos["rules"][1]
+    assert rules and "15m_ret3" in rules[0]["rule"] and rules[0]["p_train"] > 0.5

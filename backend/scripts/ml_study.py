@@ -57,12 +57,17 @@ def main():
     ap.add_argument("--sealed-days", type=int, default=365)
     ap.add_argument("--first-test-days", type=int, default=365)
     ap.add_argument("--fold-days", type=int, default=91)
+    ap.add_argument("--inputs", choices=["features", "raw"], default="features",
+                    help="features = multi-timeframe indicators; raw = only raw normalised candles, the model builds its own")
+    ap.add_argument("--model", choices=["gbm", "tree"], default="gbm",
+                    help="gbm = black-box booster; tree = small decision tree whose leaves are readable IF-THEN rules (the setup)")
+    ap.add_argument("--stride", type=int, default=1, help="use every Nth 15m bar as a decision point (saves memory)")
     ap.add_argument("--final", action="store_true")
     a = ap.parse_args()
     t0 = time.time()
     frames = {tf: ml.load_tf(a.db, SYMBOL, tf) for tf in ml.TFS}
     line("[data] " + "  ".join(f"{tf}:{len(d)}" for tf, d in frames.items()))
-    data = ml.build_dataset(frames)
+    data = ml.build_dataset(frames, inputs=a.inputs, stride=a.stride)
     ts = data["ts"]
     n_feat = data["X"].shape[1]
     line(f"[dataset] {len(ts)} decision bars x {n_feat} features, built in {time.time() - t0:.0f}s "
@@ -71,7 +76,7 @@ def main():
     first_test = int(ts[0]) + a.first_test_days * 86400
     line(f"[plan] walk-forward tests {pd.to_datetime(first_test, unit='s').date()} -> "
          f"{pd.to_datetime(sealed_start, unit='s').date()}; sealed from {pd.to_datetime(sealed_start, unit='s').date()}")
-    oos = ml.walk_forward(data, first_test, sealed_start, a.fold_days, log=line)
+    oos = ml.walk_forward(data, first_test, sealed_start, a.fold_days, log=line, kind=a.model)
 
     m = (ts >= first_test) & (ts < sealed_start)
     base_rate = {s: float(np.nanmean(np.where(m, data["y"][s], np.nan))) for s in (1, -1)}
@@ -102,6 +107,11 @@ def main():
     if oos.get("imp") is not None:
         top = oos["imp"].sort_values(ascending=False).head(12)
         line("\n    most used features (last fold): " + ", ".join(f"{k}" for k in top.index))
+    if a.model == "tree":
+        line("\n=== THE SETUP THE AI LEARNED (last fold, trained on all data before it; leaves with training win rate >= 40%)")
+        for s_, nm in ((1, "LONG"), (-1, "SHORT")):
+            for r in oos["rules"][s_][:6]:
+                line(f"    {nm}: IF {r['rule']}  ->  trained win rate {r['p_train']:.1%} on {r['n_train']} bars")
     line(f"\nWALK-FORWARD RESULT: {'PASS' if ok else 'no edge found'}")
     if not a.final:
         line("[sealed] the last period was not opened." + (" Run again with --final to open it once." if ok else ""))
@@ -114,7 +124,7 @@ def main():
     fin = {1: np.full(len(ts), np.nan), -1: np.full(len(ts), np.nan)}
     for s in (1, -1):
         lab = ~np.isnan(data["y"][s][tr])
-        mdl = ml._model().fit(data["X"].iloc[tr[lab]], data["y"][s][tr][lab].astype(int))
+        mdl = ml._model(a.model).fit(data["X"].iloc[tr[lab]], data["y"][s][tr][lab].astype(int))
         fin[s][te] = mdl.predict_proba(data["X"].iloc[te])[:, 1]
     ft = ml.simulate(data, fin, sealed_start, int(ts[-1]) + 1)
     fsm = ml.summarize(ft)
