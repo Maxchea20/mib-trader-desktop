@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getSwingAiLatest, getSwingAiTrades, updateSwingAiSettings, getMexcAccount } from "@/lib/api";
+import { getSwingAiLatest, getSwingAiTrades, updateSwingAiSettings, getMexcAccount, getSwingAiModels } from "@/lib/api";
 
 /**
  * SwingAiPanel
@@ -42,6 +42,7 @@ export const SwingAiPanel = () => {
   const [riskInput, setRiskInput] = useState(1);
   const [notionalInput, setNotionalInput] = useState(50000);
   const [saveMsg, setSaveMsg] = useState(null);
+  const [models, setModels] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -65,6 +66,12 @@ export const SwingAiPanel = () => {
     if (st?.risk_pct != null) setRiskInput(st.risk_pct);
     if (st?.max_position_usd != null) setNotionalInput(st.max_position_usd);
   }, [st?.risk_pct, st?.max_position_usd]);
+
+  useEffect(() => {                                   // models this OpenAI key can actually use
+    let alive = true;
+    getSwingAiModels().then((r) => { if (alive) setModels(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {                                   // MEXC account is only read while the live inputs are open
     if (!liveSelected) { setAcct(null); return undefined; }
@@ -174,9 +181,11 @@ export const SwingAiPanel = () => {
           <label className="flex items-center gap-1">Model
             <select value={data?.model || ""} onChange={(e) => save({ model: e.target.value })} data-testid="swing-model-select"
               className="bg-[#0d121b] border border-[#1d2635] text-slate-200 rounded-sm px-1 py-0.5">
-              {Array.from(new Set(["gpt-5.4-mini", "gpt-5.4", data?.model].filter(Boolean))).map((o) => <option key={o} value={o}>{o}</option>)}
+              {Array.from(new Set([...(models?.models?.length ? models.models : ["gpt-5.4-mini", "gpt-5.4"]), data?.model].filter(Boolean)))
+                .map((o) => <option key={o} value={o}>{o}{models?.models?.length && !models.models.includes(o) ? " (no access)" : ""}</option>)}
             </select>
           </label>
+          {models?.error && <span className="text-amber-300">models: {models.error}</span>}
           {[
             ["Reasoning", "reasoning", ["default", "low", "medium", "high"]],
             ["Context", "context", ["FULL", "COMPACT"]],

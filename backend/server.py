@@ -344,6 +344,11 @@ async def swing_ai_put_settings(req: SwingAiSettingsReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@api_router.get("/swing-ai/models")
+async def swing_ai_models(refresh: bool = False):
+    from src.swing_ai import service as swing_service
+    return await asyncio.to_thread(swing_service.accessible_models, refresh)
+
 @api_router.get("/swing-ai/status")
 async def swing_ai_status():
     from src.swing_ai import service as swing_service

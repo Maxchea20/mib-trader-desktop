@@ -81,6 +81,30 @@ def latest() -> Dict[str, Any]:
             "analytics": mgr.report()}
 
 
+_models_cache: Dict[str, Any] = {"at": 0.0, "data": None}
+_SKIP = ("audio", "realtime", "image", "tts", "transcribe", "search", "embedding", "instruct", "moderation", "whisper", "dall", "codex")
+
+
+def accessible_models(force: bool = False) -> Dict[str, Any]:
+    """Chat models the CURRENT OpenAI key/project can use (cached 10 minutes).  Never returns the key."""
+    now = time.time()
+    if not force and _models_cache["data"] is not None and now - _models_cache["at"] < 600:
+        return _models_cache["data"]
+    out: Dict[str, Any] = {"models": [], "error": None, "key_tail": key_tail()}
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        out["error"] = "OPENAI_API_KEY not set"
+    else:
+        try:
+            from openai import OpenAI
+            ids = sorted({m.id for m in OpenAI(api_key=key, timeout=30).models.list()})
+            out["models"] = [i for i in ids if (i.startswith("gpt-") or i.startswith("o")) and not any(x in i for x in _SKIP)]
+        except Exception as e:
+            out["error"] = str(e)[:300]
+    _models_cache.update({"at": now, "data": out})
+    return out
+
+
 def status() -> Dict[str, Any]:
     m = get_manager()
     return {"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "model": m.cfg.model,

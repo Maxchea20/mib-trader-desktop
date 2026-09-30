@@ -723,3 +723,20 @@ def test_model_can_be_switched_from_the_panel(tmpdb, tmp_path, monkeypatch):
         assert service.get_manager().cfg.model == "gpt-5.4-mini"                                # persisted, beats the env value
     finally:
         service._manager = None
+
+
+def test_accessible_models_lists_only_usable_chat_models_and_never_the_key(monkeypatch):
+    import sys, types
+    from src.swing_ai import service
+    ids = ["gpt-5.4", "gpt-5.4-audio-preview", "text-embedding-3-large", "gpt-5.4-realtime", "o3", "whisper-1", "gpt-4.1"]
+
+    class _Client:
+        def __init__(self, **kw):
+            self.models = types.SimpleNamespace(list=lambda: [types.SimpleNamespace(id=i) for i in ids])
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_Client))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-abcd")
+    r = service.accessible_models(force=True)
+    assert r["models"] == ["gpt-4.1", "gpt-5.4", "o3"] and r["error"] is None and r["key_tail"] == "...abcd"
+    assert "sk-secret" not in json.dumps(r)
+    monkeypatch.delenv("OPENAI_API_KEY")
+    assert service.accessible_models(force=True)["error"] == "OPENAI_API_KEY not set"
