@@ -134,4 +134,8 @@ before anyone changes a rule.
   no minimum reward/risk, no cooldown, no trade-count or daily-loss limit, stop only needs to be 0.05% to 25% of price.
   Always enforced, in both modes: stop/target on the correct side, valid numbers, MARKET entries at the market price, LIMIT entries on the passive side,
   spread and data freshness, one position at a time, minimum order size, 1% risk sizing and the leverage/notional caps.
+* **OFF** (default for paper): every LONG/SHORT the AI proposes is simulated exactly as given. Nothing is refused for reward/risk, stop size, spread, stale data,
+  cooldown, limits, confidence, or lot size. Your entry price decides the order type: at the market = MARKET, passive side = LIMIT, aggressive side = STOP breakout
+  entry (fills when price trades through). The only refusals are proposals that cannot be simulated at all: missing or non-positive levels, or a stop/target on the wrong
+  side of the entry. Sizing still risks 1% and respects the leverage/notional caps (they only shrink size; R results are unaffected).
 * The mode in force is stored on every decision (`safety_mode`). Whenever a live executor exists, STRICT is forced regardless of this setting.

@@ -67,9 +67,9 @@ def position_state(pos: Dict[str, Any], price: float, now: float) -> Dict[str, A
     common = {"trade_id": pos["id"], "side": pos["side"], "stop_loss": pos["sl"], "take_profit": pos["tp"], "quantity_btc": pos["qty"],
               "your_thesis": pos["thesis"], "your_invalidation": pos["invalidation"], "your_invalidation_price": pos["invalidation_price"]}
     if pos["status"] == "PENDING":
-        return {**common, "status": "PENDING_NOT_FILLED", "order_type": "LIMIT", "limit_price": pos["plan_entry"],
+        return {**common, "status": "PENDING_NOT_FILLED", "order_type": pos["entry_type"], "trigger_price": pos["plan_entry"],
                 "placed_unix": pos["created_ts"], "expires_unix": pos["expires_ts"],
-                "note": "You are NOT in a trade. This LIMIT order has not filled; it fills only if price trades to limit_price."}
+                "note": "You are NOT in a trade. This pending order has not filled: a LIMIT fills if price trades back to trigger_price, a STOP fills if price trades through it."}
     d = 1 if pos["side"] == "LONG" else -1
     fill = pos["fill_price"] or pos["plan_entry"]
     rd = pos["risk_dist"] or 1.0

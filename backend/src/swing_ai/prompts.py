@@ -24,7 +24,7 @@ DECISION
   waiting for a perfect one. Choose NO_TRADE when no setup with reward/risk of at least 1.5 exists; never force a trade, but do not stand
   aside just because price is mid-range: a LIMIT order at a range edge or pullback level you already identified is a valid trade
   (it is only a pending order until price fills it, and it expires).
-- For a trade give entry, entry_type (MARKET if you would enter at the current price, LIMIT for a fill on the passive side of price),
+- For a trade give entry, entry_type (MARKET at the current price, LIMIT on the passive side of price, STOP for a breakout entry through price),
   sl, tp, confidence (0 to 1, your honest confidence), thesis, invalidation, and invalidation_price (the price at which the thesis is wrong).
 - For NO_TRADE set entry, entry_type, sl, tp and invalidation_price to null, and say in the thesis what would make you trade.
 - BE BRIEF. headline: at most 12 words, the bottom line a trader reads first (e.g. "Range mid-point, wait for 84.1k break"). Every analysis
@@ -51,7 +51,13 @@ exit and set reversal_candidate true. Put your reassessment in "reason": ONE or 
 
 
 def system_prompt(cfg) -> str:
-    if getattr(cfg, "safety_mode", "STRICT") == "RELAXED":
+    mode = getattr(cfg, "safety_mode", "STRICT")
+    if mode == "OFF":
+        limits = ("- no checks on your levels: your entry, stop and target are used exactly as given, and every LONG or SHORT you propose is simulated as a paper trade\n"
+                  "- the only requirement is that the stop and target sit on opposite sides of the entry (LONG: stop < entry < target; SHORT: target < entry < stop)\n"
+                  "- your entry price decides the order type: at the live price it is a market order, on the passive side (LONG below price, SHORT above) it is a LIMIT,\n"
+                  "  and on the aggressive side (LONG above price, SHORT below) it is a STOP breakout entry that fills when price trades through it")
+    elif mode == "RELAXED":
         limits = ("- structural checks only: stop and target on the correct side of entry, a MARKET entry at the live price, a LIMIT entry on the passive side of price,\n"
                   "  one position at a time, and entries are skipped when the spread is wide or the data is stale\n"
                   "- there is no minimum reward/risk and no trade or loss limit: propose only trades whose reward justifies the risk in your own judgement")

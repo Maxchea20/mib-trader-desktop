@@ -178,10 +178,10 @@ export const SwingAiPanel = () => {
       {st && (
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono-t text-[10px] text-slate-400" data-testid="swing-cost-controls">
           <span className="widget-label">COST CONTROLS</span>
-          <label className="flex items-center gap-1" title="RELAXED (paper only): no minimum reward/risk, cooldown or daily limits. Order-geometry, spread, data-freshness, one-position and size checks always stay. LIVE would always use STRICT.">Safety rules
+          <label className="flex items-center gap-1" title="OFF (paper only): every LONG/SHORT the AI proposes is simulated; only a stop or target on the wrong side of the entry is refused. RELAXED: no min reward/risk, cooldown or daily limits. STRICT: all rules. LIVE would always use STRICT.">Safety rules
             <select value={st.safety} onChange={(e) => save({ safety: e.target.value })} data-testid="swing-safety-select"
-              className={`bg-[#0d121b] border rounded-sm px-1 py-0.5 ${st.safety === "RELAXED" ? "border-amber-500/50 text-amber-300" : "border-[#1d2635] text-slate-200"}`}>
-              {["STRICT", "RELAXED"].map((o) => <option key={o} value={o}>{o}</option>)}
+              className={`bg-[#0d121b] border rounded-sm px-1 py-0.5 ${st.safety === "OFF" ? "border-rose-500/50 text-rose-300" : st.safety === "RELAXED" ? "border-amber-500/50 text-amber-300" : "border-[#1d2635] text-slate-200"}`}>
+              {["STRICT", "RELAXED", "OFF"].map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </label>
           <label className="flex items-center gap-1">Model

@@ -15,10 +15,10 @@ BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd
           "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0)}
 REASONING = ("default", "low", "medium", "high")
 CONTEXTS = ("FULL", "COMPACT", "LEAN")
-SAFETY = ("STRICT", "RELAXED")
+SAFETY = ("STRICT", "RELAXED", "OFF")
 MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$"
 DEFAULTS = {"model": None, "enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
-            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "RELAXED"}
+            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "OFF"}
 LIVE_EXECUTION_IMPLEMENTED = False          # flipped only by a reviewed live-executor change, never by a setting
 
 

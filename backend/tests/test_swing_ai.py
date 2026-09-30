@@ -165,7 +165,7 @@ def test_schema_accepts_valid_and_rejects_everything_else():
     assert e.decision == "LONG" and e.daily_analysis == "d" and e.wake_levels[0]["direction"] == "ABOVE"
     nt = _good(decision="NO_TRADE", entry=0, sl=None, tp=None, entry_type=None, invalidation="", invalidation_price=None, wake_levels=[])
     assert schema.parse_entry(nt).decision == "NO_TRADE"
-    bads = ["not json", "[]", _good(decision="BUY"), _good(confidence=1.5), _good(sl=None), _good(entry_type="STOP"), _good(thesis=""),
+    bads = ["not json", "[]", _good(decision="BUY"), _good(confidence=1.5), _good(sl=None), _good(entry_type="SPREAD"), _good(thesis=""),
             _good(market_state="BULLISH"), _good(entry="100"), _good(tp=float("nan")), _good(daily_analysis=""), _good(h1_analysis=None), _good(headline=""),
             _good(invalidation=""), _good(wake_levels=[{"price": 1, "direction": "SIDEWAYS", "reason": ""}])]
     for bad in bads:
@@ -556,11 +556,11 @@ def test_pending_order_is_never_described_as_a_filled_position(tmpdb):
     from src.swing_ai import prompts
     pend = _open(_plan(typ="LIMIT", entry=98.0, sl=94.0, tp=106.0), 3000, None, None)
     v = raw_data.position_state(pend, 100.0, 3100)
-    assert v["status"] == "PENDING_NOT_FILLED" and v["limit_price"] == 98.0 and "NOT in a trade" in v["note"]
+    assert v["status"] == "PENDING_NOT_FILLED" and v["order_type"] == "LIMIT" and v["trigger_price"] == 98.0 and "NOT in a trade" in v["note"]
     assert "entry_price" not in v and "unrealized_r" not in v
     filled = paper.process_bar(pend, _bar(3120, 100, 101, 97, 99), SwingConfig())
     o = raw_data.position_state(filled, 100.0, 3200)
-    assert o["status"] == "OPEN" and o["entry_price"] == 98.0 and "limit_price" not in o
+    assert o["status"] == "OPEN" and o["entry_price"] == 98.0 and "trigger_price" not in o
     assert "PENDING_NOT_FILLED" in prompts.system_prompt(SwingConfig())
     r = risk.validate_entry(_dec(entry=60000.0, sl=59400.0, tp=61800.0), _mk(price=60000.0), SwingConfig(equity_usd=12345.0), {"now": 0})
     assert r.ok and r.plan["qty"] == round(r.plan["qty"], 3)                                 # no float artefacts like 0.20800000000000002
@@ -895,7 +895,7 @@ def test_relaxed_safety_drops_discretionary_limits_but_keeps_structural_checks(t
     assert "no minimum reward/risk" in prompts.system_prompt(relaxed) and "reward/risk at least" in prompts.system_prompt(strict)
     # the panel setting: default RELAXED for paper, forced STRICT whenever the effective mode is LIVE
     monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
-    assert sett.load()["safety"] == "RELAXED"
+    assert sett.load()["safety"] == "OFF"
     service._manager = None
     try:
         service.update_settings({"safety": "STRICT"})
@@ -917,3 +917,43 @@ def test_decisions_record_which_safety_mode_was_in_force(tmpdb):
     m = SwingManager(cfg, ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
     m.step(NOW, snap["live"]["price"], _ticker(snap["live"]["price"]))
     assert store.decisions()[0]["safety_mode"] == "RELAXED"
+
+
+def test_safety_off_turns_every_simulatable_proposal_into_a_paper_trade(tmpdb):
+    from src.swing_ai import prompts
+    off = SwingConfig(safety_mode="OFF")
+    stale = {**_mk(spread=None, age=999), "bid": None, "ask": None}
+    ctx = {"now": 1000, "connected": False, "last_loss_ts": 900, "trades_today": 99, "daily_r": -99.0}
+    assert risk.validate_entry(_dec(tp=104.2, confidence=0.01), stale, off, ctx).ok               # no spread/stale/feed/rr/cooldown/confidence gate
+    assert risk.validate_entry(_dec(sl=99.99, tp=100.02), _mk(), off, {"now": 0}).ok               # micro stop and target are fine
+    assert risk.validate_entry(_dec(entry=100.0, sl=60.0, tp=400.0), _mk(), off, {"now": 0}).ok      # very wide levels are fine
+    far = risk.validate_entry(_dec(entry=90.0, entry_type="LIMIT", sl=85.0, tp=110.0), _mk(), off, {"now": 0})
+    assert far.ok and far.plan["entry_type"] == "LIMIT"                                              # a far limit is fine
+    brk = risk.validate_entry(_dec(entry=101.0, entry_type="STOP", sl=98.0, tp=108.0), _mk(), off, {"now": 0})
+    assert brk.ok and brk.plan["entry_type"] == "STOP" and brk.plan["fee_entry"] == off.taker_fee   # a breakout entry becomes a STOP order, not a rejection
+    mk_far = risk.validate_entry(_dec(entry=103.0, entry_type="MARKET", tp=115.0), _mk(), off, {"now": 0})
+    assert mk_far.ok and mk_far.plan["entry_type"] == "STOP"                                         # the AI's price decides the order type
+    tiny = risk.validate_entry(_dec(entry=60000.0, sl=15000.0, tp=90000.0), _mk(price=60000.0), off, {"now": 0})
+    assert tiny.ok and tiny.plan["qty"] >= 0.001                                                    # lot size never costs a data point
+    for bad in (_dec(sl=104.0), _dec(tp=98.0), _dec(entry=None), _dec(sl=100.0)):                    # only the unsimulatable is refused
+        assert not risk.validate_entry(bad, _mk(), off, {"now": 0}).ok
+    assert "no checks on your levels" in prompts.system_prompt(off)
+    md = schema.ManageDecision(action="MOVE_SL", new_sl=95.0)                                        # loosening a stop is allowed in OFF
+    assert risk.validate_manage(md, {"side": "LONG", "sl": 96.0}, 101.0, off).ok
+    assert not risk.validate_manage(md, {"side": "LONG", "sl": 96.0}, 101.0, SwingConfig(safety_mode="STRICT")).ok
+
+
+def test_stop_entry_orders_fill_only_when_price_trades_through(tmpdb):
+    cfg = SwingConfig()
+    p = _open(_plan(typ="STOP", entry=101.0, sl=98.0, tp=108.0), 5000, None, None)
+    assert p["status"] == "PENDING" and p["entry_type"] == "STOP"
+    p = paper.process_bar(p, _bar(5060, 100, 100.9, 99.5, 100.5), cfg)
+    assert p["status"] == "PENDING"                                                                    # has not reached the trigger
+    p = paper.process_bar(p, _bar(5120, 100.6, 102.0, 100.4, 101.5), cfg)
+    assert p["status"] == "OPEN" and p["fill_price"] == 101.0                                          # triggered on the way up
+    s = _open(_plan(side="SHORT", typ="STOP", entry=99.0, sl=102.0, tp=92.0), 6000, None, None)
+    assert paper.process_bar(s, _bar(6060, 100, 100.4, 99.2, 99.6), cfg)["status"] == "PENDING"
+    assert paper.process_bar(s, _bar(6120, 99.6, 99.8, 98.5, 98.9), cfg)["fill_price"] == 99.0        # a short breakout fills on the way down
+    w = _open(_plan(side="SHORT", typ="STOP", entry=99.0, sl=102.0, tp=92.0), 7000, None, None)
+    v = raw_data.position_state(w, 100.0, 7000)
+    assert v["status"] == "PENDING_NOT_FILLED" and v["order_type"] == "STOP" and v["trigger_price"] == 99.0

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
 ENTRY_DECISIONS = ("LONG", "SHORT", "NO_TRADE")
-ENTRY_TYPES = ("MARKET", "LIMIT")
+ENTRY_TYPES = ("MARKET", "LIMIT", "STOP")
 MARKET_STATES = ("TRENDING_UP", "TRENDING_DOWN", "RANGE", "TRANSITION", "UNCLEAR")
 THESIS_STATUS = ("VALID", "WEAKENING", "INVALID", "OPPOSITE_STRONG")
 MANAGE_ACTIONS = ("HOLD", "MOVE_SL", "EXIT")

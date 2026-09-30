@@ -69,7 +69,10 @@ def process_bar(p: Dict[str, Any], bar: Dict[str, Any], cfg: SwingConfig) -> Dic
             cancel(p, "EXPIRED", ts_close)
             return {**p, "status": "EXPIRED"}
         lim = p["plan_entry"]
-        filled = (lo <= lim) if p["side"] == "LONG" else (hi >= lim)
+        if p["entry_type"] == "STOP":                     # breakout entry: triggers when price trades THROUGH the level
+            filled = (hi >= lim) if p["side"] == "LONG" else (lo <= lim)
+        else:                                             # limit: fills when price trades back to the level
+            filled = (lo <= lim) if p["side"] == "LONG" else (hi >= lim)
         if not filled:
             return p
         p = {**p, "status": "OPEN", "fill_price": lim, "opened_ts": ts_close,
