@@ -43,7 +43,7 @@ def main():
         ev = res["events"]
         fee = sorted(res["fee_atr"])[len(res["fee_atr"]) // 2] if res["fee_atr"] else 0.0
         w, n, p0, z, p = j["tp"]
-        print(f"\n=== {a.tf} sweep-and-reject, look-back {lb} bars: {len(ev)} events, {j["n_used"]} after de-clustering (median round-trip fee = {fee:.2f} ATR)")
+        print(f"\n=== {a.tf} sweep-and-reject, look-back {lb} bars: {len(ev)} events, {j['n_used']} after de-clustering (median round-trip fee = {fee:.2f} ATR)")
         print(f"    TP-first {w}/{n} = {w / max(1, n):.1%}   same-direction baseline {p0:.1%}   z={z:+.2f}  p={p:.4f}")
         for name, d in (("LONG (low swept)", 1), ("SHORT (high swept)", -1)):
             r = j["full"][d]
