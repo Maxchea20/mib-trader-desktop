@@ -51,7 +51,11 @@ def main():
           + ", ".join(f"{tf}:{len(v['candles'])}" for tf, v in snap["timeframes"].items()) + f"; price {price}")
     if a.no_call:
         return
-    dec, raw, err, ms = engine.review_entry(OpenAILLM(cfg.model, cfg.llm_timeout_seconds), cfg, snap, None, None)
+    llm = OpenAILLM(cfg.model, cfg.llm_timeout_seconds)
+    dec, raw, err, ms = engine.review_entry(llm, cfg, snap, None, None)
+    if llm.last_usage:
+        u = llm.last_usage
+        print(f"\nBILLED TOKENS for this one call: input {u['input']:,} (cached {u['cached']:,}), output {u['output']:,}")
     _k = os.environ.get("OPENAI_API_KEY") or ""
     print(f"\nOPENAI_API_KEY in use ends with ...{_k[-4:]}" if _k else "\nOPENAI_API_KEY: not set")
     print(f"model {cfg.model}: {ms} ms" + (f"   ERROR: {err}" if err else ""))
