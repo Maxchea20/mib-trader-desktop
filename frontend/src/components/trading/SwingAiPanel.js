@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getSwingAiLatest, getSwingAiTrades } from "@/lib/api";
+import { getSwingAiLatest, getSwingAiTrades, updateSwingAiSettings, getMexcAccount } from "@/lib/api";
 
 /**
  * SwingAiPanel
@@ -38,6 +38,10 @@ export const SwingAiPanel = () => {
   const [error, setError] = useState(null);
   const [trades, setTrades] = useState([]);
   const [tab, setTab] = useState("open");
+  const [acct, setAcct] = useState(null);
+  const [riskInput, setRiskInput] = useState(1);
+  const [notionalInput, setNotionalInput] = useState(50000);
+  const [saveMsg, setSaveMsg] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -53,6 +57,31 @@ export const SwingAiPanel = () => {
     const id = setInterval(load, 30000);
     return () => { alive = false; clearInterval(id); };
   }, []);
+
+  const st = data?.settings;
+  const liveSelected = st?.mode === "LIVE";
+
+  useEffect(() => {
+    if (st?.risk_pct != null) setRiskInput(st.risk_pct);
+    if (st?.max_position_usd != null) setNotionalInput(st.max_position_usd);
+  }, [st?.risk_pct, st?.max_position_usd]);
+
+  useEffect(() => {                                   // MEXC account is only read while the live inputs are open
+    if (!liveSelected) { setAcct(null); return undefined; }
+    let alive = true;
+    getMexcAccount().then((r) => { if (alive) setAcct(r); }).catch((e) => { if (alive) setAcct({ connected: false, error: e?.message || "request failed" }); });
+    return () => { alive = false; };
+  }, [liveSelected]);
+
+  const save = async (payload) => {
+    try {
+      await updateSwingAiSettings(payload);
+      setSaveMsg(null);
+      setData(await getSwingAiLatest());
+    } catch (e) {
+      setSaveMsg(e?.response?.data?.detail || "could not save");
+    }
+  };
 
   const a = data?.last_analysis;
   const dec = a ? DECISION_COLOR[a.decision] || DECISION_COLOR.NO_TRADE : null;
@@ -70,15 +99,73 @@ export const SwingAiPanel = () => {
           <span className="widget-label">BTC/USDT</span>
           <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-500/50 text-amber-300 bg-amber-500/10">PAPER</span>
         </div>
-        <div className="font-mono-t text-[10px] text-slate-500">
-          {data ? `${data.model} · ${data.enabled ? data.state?.state || "on" : "OFF"}` : "…"}
+        <div className="flex items-center gap-2">
+          <span className="font-mono-t text-[10px] text-slate-500 mr-2">
+            {data ? `${data.model} · ${data.enabled ? data.state?.state || "on" : "OFF"}` : "…"}
+          </span>
+          {st && (
+            <>
+              <button type="button" onClick={() => save({ enabled: !st.enabled })} data-testid="swing-toggle-enabled"
+                className={`px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${st.enabled ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-300" : "border-[#1d2635] text-slate-500"}`}>
+                AUTO-TRADE {st.enabled ? "ON" : "OFF"}
+              </button>
+              <button type="button" onClick={() => save({ mode: liveSelected ? "PAPER" : "LIVE" })} data-testid="swing-toggle-mode"
+                className={`px-3 py-1.5 rounded-sm border font-mono-t text-[11px] ${liveSelected ? "border-amber-500/60 bg-amber-500/10 text-amber-300" : "border-emerald-500/60 bg-emerald-500/10 text-emerald-300"}`}>
+                MODE {liveSelected ? "LIVE" : "PAPER"}
+              </button>
+            </>
+          )}
         </div>
       </div>
+      {saveMsg && <div className="font-mono-t text-[11px] text-rose-400 mb-2">{saveMsg}</div>}
+
+      {liveSelected && st && (
+        <div className="mb-4 p-3 border border-amber-500/40 bg-amber-500/5 rounded-sm" data-testid="swing-live-controls">
+          <div className="font-head font-bold text-slate-200 tracking-wide mb-2">LIVE INPUTS</div>
+          <div className="mb-3 px-2 py-1.5 border border-amber-500/40 bg-amber-500/10 font-mono-t text-[11px] text-amber-300" data-testid="swing-live-notice">
+            LIVE is selected, but Swing AI has no live order execution yet. It keeps trading on PAPER and cannot send a real order.
+            {st.env_live_armed ? " (MEXC_LIVE_TRADING_ENABLED=true is set in .env.)" : " MEXC_LIVE_TRADING_ENABLED is not set in .env."}
+          </div>
+          {acct && !acct.connected && (
+            <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300">MEXC account not connected: {acct.error || "unknown error"}</div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <Stat label="MEXC equity" value={acct?.connected ? `${Number(acct.equity).toFixed(2)} USDT` : "? USDT"} />
+            <Stat label="Available" value={acct?.connected ? `${Number(acct.available_balance).toFixed(2)} USDT` : "? USDT"} />
+            <Stat label="Unrealized PnL" value={acct?.connected ? Number(acct.unrealized_pnl).toFixed(2) : "?"} />
+            <Stat label="Margin" value="Isolated" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <div className="widget-label mb-1">RISK PER TRADE (% of equity)</div>
+              <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
+                onBlur={() => save({ risk_pct: Number(riskInput) })}
+                className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm" />
+            </div>
+            <div>
+              <div className="widget-label mb-1">MAX LEVERAGE (ISOLATED)</div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 5, 10].map((x) => (
+                  <button key={x} type="button" onClick={() => save({ max_leverage: x })}
+                    className={`flex-1 px-2 py-1.5 border font-mono-t text-[10px] rounded-sm ${Number(st.max_leverage) === x ? "border-amber-500/60 bg-amber-500/10 text-amber-300" : "border-[#1d2635] text-slate-400"}`}>{x}x</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="widget-label mb-1">MAX POSITION SIZE (USD notional)</div>
+              <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
+                onBlur={() => save({ max_position_usd: Number(notionalInput) })}
+                className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm" />
+            </div>
+          </div>
+          <div className="font-mono-t text-[10px] text-slate-500 mt-2">These limits size every Swing AI trade (paper now, live later). GPT never sets size or leverage.</div>
+        </div>
+      )}
 
       {error && <div className="font-mono-t text-[11px] text-rose-400">{error}</div>}
       {data && !data.enabled && (
         <div className="font-mono-t text-[11px] text-slate-500 mb-3">
-          Swing AI is off. Start the engine with SWING_AI_ENABLED=1 and OPENAI_API_KEY set (paper mode only).
+          Swing AI is OFF: no AI reviews are running. Press AUTO-TRADE above to switch it ON (needs OPENAI_API_KEY in the backend .env).
         </div>
       )}
       {data?.enabled && !a && !data?.last_review && (

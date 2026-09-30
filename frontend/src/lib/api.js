@@ -56,6 +56,7 @@ export const probeMexc = async () => (await client.get("/mexc/probe", { timeout:
 export const pingMexc = async () => (await client.post("/mexc/ping", {}, { timeout: 40000 })).data;
 export const getAiThesis = async () => (await client.get("/ai/thesis")).data;
 export const getSwingAiLatest = async () => (await client.get("/swing-ai/latest")).data;
+export const updateSwingAiSettings = async (payload) => (await client.put("/swing-ai/settings", payload)).data;
 export const getSwingAiDecisions = async (limit = 50) =>
   (await client.get("/swing-ai/decisions", { params: { limit } })).data;
 export const getSwingAiTrades = async (limit = 100) =>

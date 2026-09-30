@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from . import manager as mgr, store
+from . import manager as mgr, settings as sett, store
 from .config import SwingConfig
 from .llm import OpenAILLM
 
@@ -27,13 +27,27 @@ def key_tail() -> Optional[str]:
 
 
 def enabled() -> bool:
-    return os.environ.get("SWING_AI_ENABLED", "").strip().lower() in ("1", "true", "yes")
+    return bool(sett.load()["enabled"])
+
+
+def settings_view() -> Dict[str, Any]:
+    s = sett.load()
+    return {**s, "effective_mode": sett.effective_mode(s), "live_execution_implemented": sett.LIVE_EXECUTION_IMPLEMENTED,
+            "env_live_armed": os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true", "bounds": sett.BOUNDS}
+
+
+def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Saves and applies to the running engine.  Raises ValueError on a bad value."""
+    sett.save(payload)
+    sett.apply_to_config(get_manager().cfg)
+    return settings_view()
 
 
 def get_manager() -> mgr.SwingManager:
     global _manager
     if _manager is None:
         cfg = SwingConfig()
+        sett.apply_to_config(cfg)
         _manager = mgr.SwingManager(cfg, llm=OpenAILLM(cfg.model, cfg.llm_timeout_seconds))
     return _manager
 
@@ -57,8 +71,8 @@ def latest() -> Dict[str, Any]:
     if trade:
         rows = [d for d in store.decisions(50) if d["kind"] == "MANAGE" and d["trade_id"] == trade["id"] and d["valid"]]
         mgmt = _view(rows[0]) if rows else None
-    return {"enabled": enabled(), "mode": "PAPER", "symbol": "BTC/USDT", "model": m.cfg.model, "openai_key_tail": key_tail(),
-            "state": m.status,
+    return {"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "symbol": "BTC/USDT", "model": m.cfg.model,
+            "openai_key_tail": key_tail(), "state": m.status,
             "last_analysis": _view(store.latest_entry_decision()), "last_review": _view(store.latest_decision()),
             "latest_management": mgmt, "active_trade": trade,
             "analytics": mgr.report()}
@@ -66,21 +80,26 @@ def latest() -> Dict[str, Any]:
 
 def status() -> Dict[str, Any]:
     m = get_manager()
-    return {"enabled": enabled(), "mode": "PAPER", "model": m.cfg.model, "openai_key_tail": key_tail(), "state": m.status,
+    return {"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "model": m.cfg.model,
+            "openai_key_tail": key_tail(), "state": m.status,
             "active_trade": store.active_trade(), **mgr.report()}
 
 
+def run_once(m: mgr.SwingManager, st: Dict[str, Any]) -> Dict[str, Any]:
+    """One engine tick from the live market state.  The AI is called only when enabled in the settings."""
+    q = dict(st.get("last_ticker") or {})
+    q["age_seconds"] = (int(time.time()) - st["last_tick_ts"]) if st.get("last_tick_ts") else None
+    return m.step(time.time(), st.get("last_price"), q, bool(st.get("connected")), ai_enabled=enabled())
+
+
 async def loop() -> None:
-    """Started from the app's startup hook only when SWING_AI_ENABLED=1."""
+    """Always running (cheap); the AI only acts while Swing AI is switched ON in the panel."""
     from ..market_data import manager as md
     await asyncio.sleep(15)
     m = get_manager()
     while True:
         try:
-            st = md.STATE
-            q = dict(st.get("last_ticker") or {})
-            q["age_seconds"] = (int(time.time()) - st["last_tick_ts"]) if st.get("last_tick_ts") else None
-            await asyncio.to_thread(m.step, time.time(), st.get("last_price"), q, bool(st.get("connected")))
+            await asyncio.to_thread(run_once, m, md.STATE)
         except Exception:
             logger.exception("swing_ai step failed")
         await asyncio.sleep(5)

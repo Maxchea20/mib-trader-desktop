@@ -59,6 +59,14 @@ limit entries passive and within 3%, spread <= 0.03%, fresh ticker, one position
 cooldown after a loss (the AI's confidence is not gated), 1% equity risk per trade, max 5x leverage, max notional. GPT's levels are never edited: valid as given
 or rejected with reasons. GPT is told these limits up front so its proposals fit them.
 
+## Controls in the Swing AI panel
+
+* **AUTO-TRADE ON/OFF**: switches the AI reviews on or off (persisted in `swing_ai_settings.json` next to the database; `SWING_AI_ENABLED=1`
+  is only the default before you touch it). While OFF, no AI calls are made, but open paper positions keep being tracked (SL/TP).
+* **MODE PAPER/LIVE**: LIVE only *records the request* and opens the **LIVE INPUTS** block (MEXC balance read-out, risk % per trade,
+  max leverage, max position size). Swing AI has **no live order path**, so the effective mode is always PAPER; a banner says so.
+  Live execution would be a separate, reviewed build. The inputs already size every paper trade.
+
 ## Run it (paper only)
 
 ```

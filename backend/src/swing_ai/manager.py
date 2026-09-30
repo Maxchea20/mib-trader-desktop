@@ -67,7 +67,7 @@ class SwingManager:
 
     # ------------------------------------------------------------------ main step
     def step(self, now: float, live_price: Optional[float], ticker: Optional[Dict[str, Any]] = None,
-             connected: bool = True) -> Dict[str, Any]:
+             connected: bool = True, ai_enabled: bool = True) -> Dict[str, Any]:
         out: Dict[str, Any] = {"now": int(now), "reviewed": None, "wakes": [], "decision": None}
         if not connected or not live_price:
             self.status["state"] = "paused (no live feed)"
@@ -75,6 +75,9 @@ class SwingManager:
         if not self._restored:
             self._restore()
         pos = self._advance_paper(now, live_price)
+        if not ai_enabled:                                # AI switched off: paper fills/stops still tracked, no AI calls
+            self.status["state"] = "off (AI paused)"
+            return out
         pview = raw_data.position_state(pos, live_price, now) if pos else None
         wakes = self.watch.check(now, live_price, self.source, pview if pos and pos["status"] == "OPEN" else None)
         for w in wakes:

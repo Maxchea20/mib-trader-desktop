@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPException
 from dotenv import load_dotenv
 import os
 import sys
@@ -319,6 +319,26 @@ async def swing_ai_latest():
     from src.swing_ai import service as swing_service
     return await asyncio.to_thread(swing_service.latest)
 
+class SwingAiSettingsReq(BaseModel):
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None
+    risk_pct: Optional[float] = None
+    max_leverage: Optional[float] = None
+    max_position_usd: Optional[float] = None
+
+@api_router.get("/swing-ai/settings")
+async def swing_ai_get_settings():
+    from src.swing_ai import service as swing_service
+    return await asyncio.to_thread(swing_service.settings_view)
+
+@api_router.put("/swing-ai/settings")
+async def swing_ai_put_settings(req: SwingAiSettingsReq):
+    from src.swing_ai import service as swing_service
+    try:
+        return await asyncio.to_thread(swing_service.update_settings, req.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @api_router.get("/swing-ai/status")
 async def swing_ai_status():
     from src.swing_ai import service as swing_service
@@ -462,6 +482,5 @@ async def startup():
     await manager.initial_load()
     asyncio.create_task(ai_thesis.loop())
     from src.swing_ai import service as swing_service
-    if swing_service.enabled():                      # opt-in: SWING_AI_ENABLED=1 (paper mode only)
-        logger.info("Swing AI paper mode enabled")
-        asyncio.create_task(swing_service.loop())
+    logger.info("Swing AI loop started (AI %s, paper mode only)", "ON" if swing_service.enabled() else "OFF - switch it on in the panel")
+    asyncio.create_task(swing_service.loop())

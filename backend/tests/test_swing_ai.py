@@ -562,3 +562,69 @@ def test_pending_order_is_never_described_as_a_filled_position(tmpdb):
     assert "PENDING_NOT_FILLED" in prompts.system_prompt(SwingConfig())
     r = risk.validate_entry(_dec(entry=60000.0, sl=59400.0, tp=61800.0), _mk(price=60000.0), SwingConfig(equity_usd=12345.0), {"now": 0})
     assert r.ok and r.plan["qty"] == round(r.plan["qty"], 3)                                 # no float artefacts like 0.20800000000000002
+
+
+# ------------------------------------------------------------------ UI settings: AUTO-TRADE on/off, PAPER/LIVE request, live inputs
+def test_settings_are_validated_persisted_and_live_is_only_a_request(tmpdb, tmp_path, monkeypatch):
+    from src.swing_ai import service, settings as sett
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.delenv("SWING_AI_ENABLED", raising=False)
+    service._manager = None
+    try:
+        s = sett.load()
+        assert s["enabled"] is False and s["mode"] == "PAPER"                                # off until switched on in the UI
+        monkeypatch.setenv("SWING_AI_ENABLED", "1")
+        assert sett.load()["enabled"] is True                                                # env flag is only the default
+        v = service.update_settings({"enabled": False, "mode": "LIVE", "risk_pct": 0.5, "max_leverage": 3, "max_position_usd": 2000})
+        assert v["enabled"] is False and v["mode"] == "LIVE"
+        assert v["effective_mode"] == "PAPER" and v["live_execution_implemented"] is False    # LIVE is only a request
+        assert service.status()["mode"] == "PAPER" and service.latest()["mode"] == "PAPER"
+        assert sett.load()["risk_pct"] == 0.5                                                 # persisted to disk
+        cfg = service.get_manager().cfg
+        assert (cfg.risk_pct, cfg.max_leverage, cfg.max_position_usd) == (0.5, 3.0, 2000.0)   # applied to the running engine
+        for bad in ({"mode": "REAL"}, {"risk_pct": 50}, {"max_leverage": 0}, {"enabled": "yes"}, {"max_position_usd": -1}, {"risk_pct": True}):
+            with pytest.raises(ValueError):
+                service.update_settings(bad)
+        assert sett.load()["risk_pct"] == 0.5                                                 # a rejected update changes nothing
+    finally:
+        service._manager = None
+
+
+def test_ai_off_stops_ai_calls_but_paper_positions_keep_being_tracked(tmpdb):
+    cfg = SwingConfig()
+    snap = snap_at()
+    price = snap["live"]["price"]
+    llm = FakeLLM(lambda msgs, sc: _entry_json(snap))
+    m = SwingManager(cfg, ListSource(DATA), llm)
+    m.step(NOW, price, _ticker(price))
+    assert store.active_trade()["status"] == "OPEN" and len(llm.calls) == 1
+    ramp = _ramp(DATA, NOW, price, 0.0009)
+    m.source = ListSource(ramp)
+    t = NOW
+    for _ in range(120):
+        t += 60
+        px = price_at(t, ramp)
+        o = m.step(t, px, _ticker(px), ai_enabled=False)
+        assert o["reviewed"] is None
+        if store.active_trade() is None:
+            break
+    assert len(llm.calls) == 1                                                                # AI never called while OFF
+    assert store.trades("CLOSED") and store.trades("CLOSED")[0]["exit_reason"] == "TP"        # but the take-profit was still simulated
+    assert m.status["state"].startswith("off")
+
+
+def test_run_once_respects_the_enabled_setting(tmp_path, monkeypatch):
+    from src.swing_ai import service, settings as sett
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.delenv("SWING_AI_ENABLED", raising=False)
+    seen = []
+
+    class _M:
+        def step(self, now, price, ticker, connected, ai_enabled=True):
+            seen.append(ai_enabled)
+            return {}
+    st = {"last_price": 1.0, "connected": True, "last_ticker": {}, "last_tick_ts": None}
+    service.run_once(_M(), st)
+    sett.save({"enabled": True})
+    service.run_once(_M(), st)
+    assert seen == [False, True]

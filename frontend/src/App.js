@@ -12,7 +12,6 @@ import { AppHeader } from "@/components/trading/AppHeader";
 import { CandleChart } from "@/components/trading/CandleChart";
 import { SwingAiPanel } from "@/components/trading/SwingAiPanel";
 import { BrainHeroPanel } from "@/components/trading/BrainHeroPanel";
-import { ObservationLayer } from "@/components/trading/ObservationLayer";
 import { MultiTimeframeRegime } from "@/components/trading/MultiTimeframeRegime";
 import { KeyLevelsPanel } from "@/components/trading/KeyLevelsPanel";
 import { SettingsPanel } from "@/components/trading/SettingsPanel";
@@ -234,9 +233,6 @@ function App() {
         </div>
         <div className="mt-4">
           <SwingAiPanel />
-        </div>
-        <div className="mt-4">
-          <ObservationLayer observations={analysis?.observations || []} />
         </div>
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} syncStatus={syncStatus} auto={auto} />
