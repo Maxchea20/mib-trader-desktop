@@ -142,7 +142,7 @@ class SwingManager:
         sid = store.add_snapshot(int(now), SYMBOL, price, snap)
         self._prepare_llm()
         dec, raw, err, ms = engine.review_entry(self.llm, self.cfg, snap, wake, self.previous)
-        row = dict(**self._usage(), ts=int(now), symbol=SYMBOL, kind="ENTRY", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
+        row = dict(safety_mode=self.cfg.safety_mode, **self._usage(), ts=int(now), symbol=SYMBOL, kind="ENTRY", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
                    snapshot_id=sid, model=self.cfg.model, prompt_version=prompts.PROMPT_VERSION, raw=raw, latency_ms=ms,
                    error=err, valid=int(dec is not None))
         if dec is None:                                   # unparseable / failed call = NO_TRADE, never a guess
@@ -181,7 +181,7 @@ class SwingManager:
         sid = store.add_snapshot(int(now), SYMBOL, price, snap)
         self._prepare_llm()
         md, raw, err, ms = engine.review_manage(self.llm, self.cfg, snap, wake)
-        row = dict(**self._usage(), ts=int(now), symbol=SYMBOL, kind="MANAGE", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
+        row = dict(safety_mode=self.cfg.safety_mode, **self._usage(), ts=int(now), symbol=SYMBOL, kind="MANAGE", wake_kind=wk["kind"], wake_detail=wk.get("detail"), price=price,
                    snapshot_id=sid, model=self.cfg.model, prompt_version=prompts.PROMPT_VERSION, raw=raw, latency_ms=ms,
                    error=err, valid=int(md is not None), trade_id=pos["id"])
         if md is None:                                    # a failed review never closes or changes anything

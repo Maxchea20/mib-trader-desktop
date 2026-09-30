@@ -42,6 +42,7 @@ class SwingConfig:
     max_daily_loss_r: float = 3.0
     cooldown_after_loss_minutes: int = 60
     max_ticker_age_seconds: int = 30
+    safety_mode: str = "STRICT"           # STRICT | RELAXED (paper only): RELAXED drops the discretionary limits below, never the structural checks
     allow_reverse: bool = False           # AI may suggest a reversal; code never flips a position on its own
 
     # --- fees (MEXC BTCUSDT perpetual) ---

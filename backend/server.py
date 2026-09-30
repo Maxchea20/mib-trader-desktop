@@ -330,6 +330,7 @@ class SwingAiSettingsReq(BaseModel):
     reasoning: Optional[str] = None
     context: Optional[str] = None
     model: Optional[str] = None
+    safety: Optional[str] = None
 
 @api_router.get("/swing-ai/settings")
 async def swing_ai_get_settings():

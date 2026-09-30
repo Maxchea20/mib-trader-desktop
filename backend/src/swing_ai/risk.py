@@ -10,6 +10,7 @@ from .config import SwingConfig
 from .schema import EntryDecision, ManageDecision
 
 QTY_STEP = 0.001          # BTC
+SANE_MIN_STOP_PCT, SANE_MAX_STOP_PCT, SANE_MAX_ENTRY_DISTANCE_PCT = 0.05, 25.0, 10.0     # RELAXED mode: sanity range only
 
 
 @dataclass
@@ -32,6 +33,9 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
     price = float(market["price"])
     now = ctx.get("now", time.time())
     long_ = dec.decision == "LONG"
+    strict = cfg.safety_mode != "RELAXED"
+    min_stop, max_stop = (cfg.min_stop_pct, cfg.max_stop_pct) if strict else (SANE_MIN_STOP_PCT, SANE_MAX_STOP_PCT)
+    max_dist = cfg.max_entry_distance_pct if strict else SANE_MAX_ENTRY_DISTANCE_PCT
 
     if not ctx.get("connected", True):
         why.append("market feed not connected")
@@ -47,13 +51,14 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
         why.append(f"confidence {dec.confidence} below {cfg.min_confidence}")
     if ctx.get("has_active"):
         why.append("a position or pending order already exists")
-    if ctx.get("trades_today", 0) >= cfg.max_trades_per_day:
-        why.append("daily trade limit reached")
-    if ctx.get("daily_r", 0.0) <= -cfg.max_daily_loss_r:
-        why.append("daily loss limit reached")
-    ll = ctx.get("last_loss_ts")
-    if ll and now - ll < cfg.cooldown_after_loss_minutes * 60:
-        why.append("cooling down after a loss")
+    if strict:                                          # discretionary limits: only in STRICT mode
+        if ctx.get("trades_today", 0) >= cfg.max_trades_per_day:
+            why.append("daily trade limit reached")
+        if ctx.get("daily_r", 0.0) <= -cfg.max_daily_loss_r:
+            why.append("daily loss limit reached")
+        ll = ctx.get("last_loss_ts")
+        if ll and now - ll < cfg.cooldown_after_loss_minutes * 60:
+            why.append("cooling down after a loss")
 
     entry, sl, tp = dec.entry, dec.sl, dec.tp
     if entry is None or sl is None or tp is None:
@@ -71,7 +76,7 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
     if dec.entry_type == "MARKET" and not near_market:
         why.append("entry is not at the market price for a MARKET order")
     if not near_market:
-        if dist_pct > cfg.max_entry_distance_pct:
+        if dist_pct > max_dist:
             why.append("limit entry too far from price")
         if (long_ and entry > price) or (not long_ and entry < price):
             why.append("limit entry is on the wrong side of price (it would be a stop entry)")
@@ -86,11 +91,11 @@ def validate_entry(dec: EntryDecision, market: Dict[str, Any], cfg: SwingConfig,
         why.append("zero stop distance")
     else:
         stop_pct = risk_dist / fill * 100.0
-        if stop_pct < cfg.min_stop_pct:
-            why.append(f"stop {stop_pct:.2f}% is tighter than {cfg.min_stop_pct}%")
-        if stop_pct > cfg.max_stop_pct:
-            why.append(f"stop {stop_pct:.2f}% is wider than {cfg.max_stop_pct}%")
-        if reward / risk_dist < cfg.min_rr:
+        if stop_pct < min_stop:
+            why.append(f"stop {stop_pct:.2f}% is tighter than {min_stop}%")
+        if stop_pct > max_stop:
+            why.append(f"stop {stop_pct:.2f}% is wider than {max_stop}%")
+        if strict and reward / risk_dist < cfg.min_rr:
             why.append(f"reward/risk {reward / risk_dist:.2f} below {cfg.min_rr}")
     if why:
         return RiskResult(False, why)

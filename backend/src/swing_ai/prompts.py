@@ -2,7 +2,7 @@
 import json
 from typing import Any, Dict, Optional
 
-PROMPT_VERSION = "swing-v4-slim"
+PROMPT_VERSION = "swing-v4-slim"   # the safety mode in force is stored on every decision
 
 SYSTEM = """You are the sole market analyst and decision brain of a SWING trading system for BTCUSDT perpetual futures on MEXC.
 You are given RAW market data only: the live quote, closed OHLCV candles for 1D, 4H, 1H, 15M, 5M and 1M, and the current
@@ -51,10 +51,15 @@ exit and set reversal_candidate true. Put your reassessment in "reason": ONE or 
 
 
 def system_prompt(cfg) -> str:
-    limits = (f"- stop distance between {cfg.min_stop_pct}% and {cfg.max_stop_pct}% of price; reward/risk at least {cfg.min_rr}\n"
-              f"- a MARKET entry must be within {cfg.market_tolerance_pct}% of the live price\n"
-              f"- limit entries on the passive side of price and within {cfg.max_entry_distance_pct}% of it\n"
-              f"- max {cfg.max_trades_per_day} trades/day; one open position at a time; entries are skipped when the spread is above {cfg.max_spread_pct}%")
+    if getattr(cfg, "safety_mode", "STRICT") == "RELAXED":
+        limits = ("- structural checks only: stop and target on the correct side of entry, a MARKET entry at the live price, a LIMIT entry on the passive side of price,\n"
+                  "  one position at a time, and entries are skipped when the spread is wide or the data is stale\n"
+                  "- there is no minimum reward/risk and no trade or loss limit: propose only trades whose reward justifies the risk in your own judgement")
+    else:
+        limits = (f"- stop distance between {cfg.min_stop_pct}% and {cfg.max_stop_pct}% of price; reward/risk at least {cfg.min_rr}\n"
+                  f"- a MARKET entry must be within {cfg.market_tolerance_pct}% of the live price\n"
+                  f"- limit entries on the passive side of price and within {cfg.max_entry_distance_pct}% of it\n"
+                  f"- max {cfg.max_trades_per_day} trades/day; one open position at a time; entries are skipped when the spread is above {cfg.max_spread_pct}%")
     return SYSTEM.replace("{limits}", limits)
 
 

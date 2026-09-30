@@ -868,3 +868,52 @@ def test_counterfactual_follows_an_ai_exit_to_its_original_stop_or_target(tmpdb)
     u = _open(_plan(side="SHORT", sl=104.0, tp=92.0), 3000, 99.9, 100.0)
     paper.close_now(u, 101.0, "AI_EXIT", 3100)
     assert paper.advance_counterfactual(store.get_trade(u["id"]), [_bar(3160, 100, 101, 99, 100)], 3200)["cf_status"] == "RUNNING"
+
+
+def test_relaxed_safety_drops_discretionary_limits_but_keeps_structural_checks(tmpdb, tmp_path, monkeypatch):
+    from src.swing_ai import prompts, service, settings as sett
+    strict, relaxed = SwingConfig(safety_mode="STRICT"), SwingConfig(safety_mode="RELAXED")
+    low_rr = _dec(tp=104.3)                                                             # reward/risk about 1.05
+    assert not risk.validate_entry(low_rr, _mk(), strict, {"now": 0}).ok
+    assert risk.validate_entry(low_rr, _mk(), relaxed, {"now": 0}).ok                   # no minimum reward/risk in RELAXED
+    ctx = {"now": 1000, "last_loss_ts": 900, "trades_today": 9, "daily_r": -9.0}
+    assert not risk.validate_entry(_dec(), _mk(), strict, ctx).ok
+    assert risk.validate_entry(_dec(), _mk(), relaxed, ctx).ok                          # no cooldown, trade count or daily-loss limit
+    tight = _dec(sl=99.8, tp=101.0)                                                     # a 0.2% stop is fine when relaxed, not when strict
+    assert not risk.validate_entry(tight, _mk(), strict, {"now": 0}).ok and risk.validate_entry(tight, _mk(), relaxed, {"now": 0}).ok
+    for bad in (_dec(sl=104.0),                                                         # SL on the wrong side
+                _dec(tp=98.0),                                                          # TP on the wrong side
+                _dec(entry=103.0, tp=115.0),                                            # MARKET far from the market price
+                _dec(entry=101.0, entry_type="LIMIT", sl=97.0, tp=112.0),               # limit on the wrong side of price
+                _dec(sl=99.99, tp=110.0)):                                              # stop below the 0.05% sanity floor
+        assert not risk.validate_entry(bad, _mk(), relaxed, {"now": 0}).ok
+    assert not risk.validate_entry(_dec(), _mk(spread=0.2), relaxed, {"now": 0}).ok      # spread
+    assert not risk.validate_entry(_dec(), _mk(age=99), relaxed, {"now": 0}).ok          # stale feed
+    assert not risk.validate_entry(_dec(), _mk(), relaxed, {"now": 0, "has_active": True}).ok   # duplicate position
+    r = risk.validate_entry(_dec(entry=60000.0, sl=59400.0, tp=61800.0), _mk(price=60000.0), SwingConfig(safety_mode="RELAXED", max_leverage=0.5), {"now": 0})
+    assert r.ok and r.plan["leverage"] <= 0.5 + 1e-9                                    # sizing and leverage caps still apply
+    assert "no minimum reward/risk" in prompts.system_prompt(relaxed) and "reward/risk at least" in prompts.system_prompt(strict)
+    # the panel setting: default RELAXED for paper, forced STRICT whenever the effective mode is LIVE
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    assert sett.load()["safety"] == "RELAXED"
+    service._manager = None
+    try:
+        service.update_settings({"safety": "STRICT"})
+        assert service.get_manager().cfg.safety_mode == "STRICT"
+        service.update_settings({"safety": "RELAXED"})
+        assert service.get_manager().cfg.safety_mode == "RELAXED"
+        monkeypatch.setattr(sett, "LIVE_EXECUTION_IMPLEMENTED", True)                   # simulate a future live executor
+        service.update_settings({"mode": "LIVE"})
+        assert sett.effective_safety() == "STRICT" and service.get_manager().cfg.safety_mode == "STRICT"
+        with pytest.raises(ValueError):
+            service.update_settings({"safety": "NONE"})
+    finally:
+        service._manager = None
+
+
+def test_decisions_record_which_safety_mode_was_in_force(tmpdb):
+    cfg = SwingConfig(safety_mode="RELAXED")
+    snap = snap_at()
+    m = SwingManager(cfg, ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    m.step(NOW, snap["live"]["price"], _ticker(snap["live"]["price"]))
+    assert store.decisions()[0]["safety_mode"] == "RELAXED"

@@ -15,9 +15,10 @@ BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd
           "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0)}
 REASONING = ("default", "low", "medium", "high")
 CONTEXTS = ("FULL", "COMPACT", "LEAN")
+SAFETY = ("STRICT", "RELAXED")
 MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$"
 DEFAULTS = {"model": None, "enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
-            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL"}
+            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "RELAXED"}
 LIVE_EXECUTION_IMPLEMENTED = False          # flipped only by a reviewed live-executor change, never by a setting
 
 
@@ -61,6 +62,10 @@ def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload["reasoning"] not in REASONING:
             raise ValueError(f"reasoning must be one of {REASONING}")
         clean["reasoning"] = payload["reasoning"]
+    if "safety" in payload and payload["safety"] is not None:
+        if payload["safety"] not in SAFETY:
+            raise ValueError(f"safety must be one of {SAFETY}")
+        clean["safety"] = payload["safety"]
     if "context" in payload and payload["context"] is not None:
         if payload["context"] not in CONTEXTS:
             raise ValueError(f"context must be one of {CONTEXTS}")
@@ -89,8 +94,15 @@ def effective_mode(s: Optional[Dict[str, Any]] = None) -> str:
     return "LIVE" if (s["mode"] == "LIVE" and LIVE_EXECUTION_IMPLEMENTED) else "PAPER"
 
 
+def effective_safety(s: Optional[Dict[str, Any]] = None) -> str:
+    """RELAXED exists for paper research only: whenever the effective mode is LIVE, STRICT is always enforced."""
+    s = s or load()
+    return "STRICT" if effective_mode(s) == "LIVE" else s["safety"]
+
+
 def apply_to_config(cfg, s: Optional[Dict[str, Any]] = None) -> None:
     s = s or load()
+    cfg.safety_mode = effective_safety(s)
     cfg.risk_pct, cfg.max_leverage, cfg.max_position_usd = float(s["risk_pct"]), float(s["max_leverage"]), float(s["max_position_usd"])
     cfg.heartbeat_seconds = int(float(s["heartbeat_minutes"]) * 60)
     cfg.management_seconds = int(float(s["management_minutes"]) * 60)

@@ -126,3 +126,12 @@ After an `AI_EXIT`, the engine keeps following that trade in the background with
 after that) and stores what it would have made. The trades table shows it under each exit, the performance strip shows the average R saved by exiting
 (positive = exiting helped), and `swing_ai_report.py` prints the totals. This never affects trading; it is how we tell whether GPT exits too eagerly
 before anyone changes a rule.
+
+## Safety rules: STRICT vs RELAXED (paper only)
+
+* **STRICT**: everything described above (reward/risk >= 1.5, stop 0.3% to 8%, cooldown after a loss, 3 trades/day, -3R daily stop).
+* **RELAXED** (default for paper, set in the panel): the discretionary limits are dropped so the record measures the AI itself, not the AI plus MIB's rules:
+  no minimum reward/risk, no cooldown, no trade-count or daily-loss limit, stop only needs to be 0.05% to 25% of price.
+  Always enforced, in both modes: stop/target on the correct side, valid numbers, MARKET entries at the market price, LIMIT entries on the passive side,
+  spread and data freshness, one position at a time, minimum order size, 1% risk sizing and the leverage/notional caps.
+* The mode in force is stored on every decision (`safety_mode`). Whenever a live executor exists, STRICT is forced regardless of this setting.
