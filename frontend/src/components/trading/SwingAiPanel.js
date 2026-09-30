@@ -332,7 +332,7 @@ export const SwingAiPanel = () => {
             <table className="w-full font-mono-t text-[11px] text-slate-300">
               <thead>
                 <tr className="text-left text-slate-500 text-[10px]">
-                  {["OPENED", "SIDE", "STATUS", "ENTRY", "SL", "TP", "EXIT", "WHY", "R (NET)", "MFE", "MAE", "FEES", "OUTCOME"].map((h) => (
+                  {["OPENED", "SIDE", "STATUS", "ENTRY", "SL", "TP", "EXIT", "WHY", "HELD", "R (NET)", "MFE", "MAE", "FEES", "OUTCOME"].map((h) => (
                     <th key={h} className="pr-3 pb-1 font-normal">{h}</th>
                   ))}
                 </tr>
@@ -342,26 +342,39 @@ export const SwingAiPanel = () => {
                   .filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING"))
                   .slice(0, 20)
                   .map((t) => (
-                    <tr key={t.id} className="border-t border-[#141c29]">
-                      <td className="pr-3 py-1">{when(t.opened_ts || t.created_ts)}</td>
-                      <td className={`pr-3 ${t.side === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{t.side}</td>
-                      <td className="pr-3">{t.status}</td>
-                      <td className="pr-3">{px(t.fill_price || t.plan_entry)}</td>
-                      <td className="pr-3">{px(t.sl)}</td>
-                      <td className="pr-3">{px(t.tp)}</td>
-                      <td className="pr-3">{px(t.exit_price)}</td>
-                      <td className="pr-3">{t.exit_reason || "—"}</td>
-                      <td className={`pr-3 ${t.r_net > 0 ? "text-emerald-400" : t.r_net < 0 ? "text-rose-400" : ""}`}>
-                        {t.r_net === null || t.r_net === undefined ? "—" : Number(t.r_net).toFixed(2)}
-                      </td>
-                      <td className="pr-3">{Number(t.mfe_r || 0).toFixed(2)}</td>
-                      <td className="pr-3">{Number(t.mae_r || 0).toFixed(2)}</td>
-                      <td className="pr-3">{t.fees_usd === null || t.fees_usd === undefined ? "—" : `$${Number(t.fees_usd).toFixed(2)}`}</td>
-                      <td className="pr-3">{t.outcome || "—"}</td>
-                    </tr>
+                    <React.Fragment key={t.id}>
+                      <tr className="border-t border-[#141c29]">
+                        <td className="pr-3 py-1">{when(t.opened_ts || t.created_ts)}</td>
+                        <td className={`pr-3 ${t.side === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{t.side}</td>
+                        <td className="pr-3">{t.status}</td>
+                        <td className="pr-3">{px(t.fill_price || t.plan_entry)}</td>
+                        <td className="pr-3">{px(t.sl)}</td>
+                        <td className="pr-3">{px(t.tp)}</td>
+                        <td className="pr-3">{px(t.exit_price)}</td>
+                        <td className="pr-3">{t.exit_reason || "—"}</td>
+                        <td className="pr-3">{t.held_minutes === null || t.held_minutes === undefined ? "—" : `${t.held_minutes}m`}</td>
+                        <td className={`pr-3 ${t.r_net > 0 ? "text-emerald-400" : t.r_net < 0 ? "text-rose-400" : ""}`}>
+                          {t.r_net === null || t.r_net === undefined ? "—" : Number(t.r_net).toFixed(2)}
+                        </td>
+                        <td className="pr-3">{Number(t.mfe_r || 0).toFixed(2)}</td>
+                        <td className="pr-3">{Number(t.mae_r || 0).toFixed(2)}</td>
+                        <td className="pr-3">{t.fees_usd === null || t.fees_usd === undefined ? "—" : `$${Number(t.fees_usd).toFixed(2)}`}</td>
+                        <td className="pr-3">{t.outcome || "—"}</td>
+                      </tr>
+                      {(t.entry_headline || t.entry_thesis || t.exit_note) && (
+                        <tr>
+                          <td colSpan={14} className="pb-2 text-[10px] text-slate-500 leading-snug" data-testid="swing-trade-why">
+                            <div><span className="text-slate-400">GPT entered:</span> {t.entry_headline || t.entry_thesis}{t.entry_headline && t.entry_thesis ? ` — ${t.entry_thesis}` : ""}</div>
+                            {t.exit_note && (
+                              <div><span className="text-slate-400">GPT then said</span> ({t.management_reviews} review{t.management_reviews === 1 ? "" : "s"}{t.exit_wake ? `, woken by ${t.exit_wake}` : ""}): {t.exit_note}</div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 {trades.filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING")).length === 0 && (
-                  <tr><td colSpan={13} className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</td></tr>
+                  <tr><td colSpan={14} className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</td></tr>
                 )}
               </tbody>
             </table>

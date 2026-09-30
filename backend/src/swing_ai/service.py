@@ -105,6 +105,30 @@ def accessible_models(force: bool = False) -> Dict[str, Any]:
     return out
 
 
+def trades_view(limit: int = 200) -> list:
+    """Paper trades with GPT's own words attached: why it entered, and what it said when it managed or exited (all stored text)."""
+    rows = store.trades(None, limit)
+    decs = store.decisions(5000)
+    by_id = {d["id"]: d for d in decs}
+    manage: Dict[int, list] = {}
+    for d in decs:                                              # newest first
+        if d["kind"] == "MANAGE" and d.get("trade_id") and d["valid"]:
+            manage.setdefault(d["trade_id"], []).append(d)
+    out = []
+    for t in rows:
+        e = by_id.get(t.get("decision_id")) or {}
+        ms = manage.get(t["id"], [])
+        last = ms[0] if ms else None
+        end = t.get("closed_ts")
+        start = t.get("opened_ts") or t.get("created_ts")
+        out.append({**t, "entry_headline": e.get("headline"), "entry_thesis": e.get("thesis"),
+                    "exit_note": last["thesis"] if last else None,
+                    "exit_wake": (f"{last['wake_kind']}: {last['wake_detail']}" if last and last.get("wake_detail") else (last or {}).get("wake_kind")),
+                    "management_reviews": len(ms),
+                    "held_minutes": round((end - start) / 60, 1) if end and start else None})
+    return out
+
+
 def status() -> Dict[str, Any]:
     m = get_manager()
     return {"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "model": m.cfg.model,

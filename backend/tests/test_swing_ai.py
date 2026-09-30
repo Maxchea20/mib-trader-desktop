@@ -818,3 +818,25 @@ def test_cache_hints_are_sent_and_dropped_safely_if_rejected(monkeypatch):
     n = len(sent)
     llm.complete([{"role": "user", "content": "hi"}], schema.entry_json_schema())
     assert len(sent) == n + 1 and "prompt_cache_retention" not in sent[-1]                          # remembered: not retried every call
+
+
+def test_trades_view_attaches_gpts_entry_and_exit_reasoning(tmpdb):
+    from src.swing_ai import service
+    cfg = SwingConfig()
+    snap = snap_at()
+    price = snap["live"]["price"]
+
+    def script(msgs, sc):
+        if sc["name"] == "swing_entry_decision":
+            return _entry_json(snap, headline="Short the rejection")
+        return json.dumps({"thesis_status": "INVALID", "action": "EXIT", "new_sl": None, "confidence": 0.7,
+                           "reason": "Price reclaimed the level, thesis broken.", "reversal_candidate": False, "wake_levels": []})
+    m = SwingManager(cfg, ListSource(DATA), FakeLLM(script))
+    m.step(NOW, price, _ticker(price))
+    px = price * 0.987
+    m.step(NOW + 240, px, _ticker(px))                                                       # invalidation reached -> AI exits
+    t = service.trades_view()[0]
+    assert t["status"] == "CLOSED" and t["exit_reason"] == "AI_EXIT"
+    assert t["entry_headline"] == "Short the rejection" and t["entry_thesis"] == "t"
+    assert "[INVALID] Price reclaimed the level" in t["exit_note"] and "INVALIDATION_LEVEL_HIT" in t["exit_wake"]
+    assert t["management_reviews"] == 1 and t["held_minutes"] is not None and t["held_minutes"] < 10

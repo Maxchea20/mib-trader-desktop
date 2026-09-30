@@ -361,8 +361,8 @@ async def swing_ai_decisions(limit: int = 100):
 
 @api_router.get("/swing-ai/trades")
 async def swing_ai_trades(limit: int = 200):
-    from src.swing_ai import store as swing_store
-    return await asyncio.to_thread(swing_store.trades, None, min(max(limit, 1), 1000))
+    from src.swing_ai import service as swing_service
+    return await asyncio.to_thread(swing_service.trades_view, min(max(limit, 1), 1000))
 
 @api_router.get("/learning/status")
 async def learning_status():
