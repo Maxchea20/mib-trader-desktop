@@ -52,7 +52,8 @@ def latest() -> Dict[str, Any]:
         rows = [d for d in store.decisions(50) if d["kind"] == "MANAGE" and d["trade_id"] == trade["id"] and d["valid"]]
         mgmt = _view(rows[0]) if rows else None
     return {"enabled": enabled(), "mode": "PAPER", "symbol": "BTC/USDT", "model": m.cfg.model, "state": m.status,
-            "last_analysis": _view(store.latest_entry_decision()), "latest_management": mgmt, "active_trade": trade,
+            "last_analysis": _view(store.latest_entry_decision()), "last_review": _view(store.latest_decision()),
+            "latest_management": mgmt, "active_trade": trade,
             "analytics": mgr.report()}
 
 

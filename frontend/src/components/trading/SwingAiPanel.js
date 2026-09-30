@@ -79,8 +79,17 @@ export const SwingAiPanel = () => {
           Swing AI is off. Start the engine with SWING_AI_ENABLED=1 and OPENAI_API_KEY set (paper mode only).
         </div>
       )}
-      {data?.enabled && !a && (
+      {data?.enabled && !a && !data?.last_review && (
         <div className="font-mono-t text-[11px] text-slate-500 mb-3">Waiting for the first GPT analysis…</div>
+      )}
+      {data?.enabled && !a && data?.last_review && (
+        <div className="font-mono-t text-[11px] text-rose-300 mb-3 whitespace-pre-wrap" data-testid="swing-last-failure">
+          Last review at {when(data.last_review.ts)} ({data.last_review.wake_kind}) produced no valid analysis.
+          {data.last_review.error ? ` Error: ${data.last_review.error}` : ` ${data.last_review.risk_reasons || ""}`}
+        </div>
+      )}
+      {data?.state?.last_error && a && (
+        <div className="font-mono-t text-[10px] text-amber-300 mb-2">Latest AI error: {data.state.last_error}</div>
       )}
 
       {a && (

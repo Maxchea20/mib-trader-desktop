@@ -474,7 +474,7 @@ def test_ui_endpoint_serves_only_stored_gpt_output(tmpdb):
     m = SwingManager(cfg, ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
     service._manager = m
     try:
-        assert service.latest()["last_analysis"] is None                                    # nothing invented before GPT has spoken
+        assert service.latest()["last_analysis"] is None and service.latest()["last_review"] is None    # nothing invented before GPT has spoken
         m.step(NOW, price, _ticker(price))
         out = service.latest()
         json.dumps(out)                                                                     # JSON-serialisable for the API
