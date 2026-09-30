@@ -84,9 +84,22 @@ def _z_prop(w1, n1, p0):
     return z, _p_two_sided(z)
 
 
+DECLUSTER_BARS = 24      # events closer than this share most of their price path; keep one
+
+
+def decluster(events: List[Dict], gap: int = DECLUSTER_BARS) -> List[Dict]:
+    out, last = [], -10 ** 9
+    for e in events:
+        if e["i"] - last >= gap:
+            out.append(e)
+            last = e["i"]
+    return out
+
+
 def judge(res: Dict, sides=(1, -1)) -> Dict:
-    """Excess over the same-direction baseline, split by side and by time half."""
-    ev, base, hz = res["events"], res["base"], res["horizons"]
+    """Excess over the same-direction baseline, split by side and by time half.
+    Events are de-clustered first so overlapping outcomes are not counted as independent."""
+    ev, base, hz = decluster(res["events"]), res["base"], res["horizons"]
 
     def excess(evs):
         out = {}
@@ -117,5 +130,5 @@ def judge(res: Dict, sides=(1, -1)) -> Dict:
     same_half = (h1[-1]["tp_rate"] - h1[-1]["tp_base"]) * (h2[-1]["tp_rate"] - h2[-1]["tp_base"]) > 0 if -1 in sides else True
     edge_h = [(x["tp_rate"] - x["tp_base"]) for x in (h1[1], h2[1], h1[-1], h2[-1])] if set(sides) == {1, -1} else []
     consistent = bool(edge_h) and all(d > 0 for d in edge_h)      # both sides, both halves beat baseline
-    return {"full": full, "h1": h1, "h2": h2, "tp": (tot_w, tot_n, p0, z, p), "consistent": consistent,
+    return {"n_raw": len(res["events"]), "n_used": len(ev), "full": full, "h1": h1, "h2": h2, "tp": (tot_w, tot_n, p0, z, p), "consistent": consistent,
             "pass": bool(p < 0.05 / 3 and consistent)}                # 3 look-back variants -> Bonferroni
