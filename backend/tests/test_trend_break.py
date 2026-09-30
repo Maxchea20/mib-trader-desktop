@@ -497,3 +497,19 @@ def test_sweep_study_random_walk_has_no_edge_and_planted_reversal_is_found():
             for key in ("open", "high", "low", "close"):
                 p[i + 1][key] += e["s"] * 4.0
     assert W.judge(W.tag_sweeps(p, 48))["pass"]
+
+
+def test_momentum_study_calibrated_on_noise_and_finds_planted_trend_following():
+    from src.trend_break import momentum as M
+    passes = 0
+    for seed in range(12):
+        passes += M.judge(M.tag_momentum(_walk(n=9000, seed=seed), 48))["pass"]
+    assert passes == 0                                         # no false PASS on random walks
+    p = _walk(n=9000, seed=3)
+    res = M.tag_momentum(p, 48)
+    for e in res["events"]:                                    # plant: a breakout keeps running for 64 bars, then holds
+        i = e["i"]
+        for k in range(i + 1, len(p)):
+            for key in ("open", "high", "low", "close"):
+                p[k][key] += e["s"] * 0.15 * min(k - i, 64)
+    assert M.judge(M.tag_momentum(p, 48))["pass"]
