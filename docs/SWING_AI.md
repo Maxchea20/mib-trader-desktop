@@ -176,14 +176,16 @@ and each closed trade stores `funding_usd`. Position value uses the entry price,
 
 ## Live trading (real money) - read before arming
 
-Swing AI can now send the AI's plan to MEXC (`backend/src/swing_ai/live.py`, wired in `manager.py`). It is OFF by default and every switch below must be set:
+Swing AI can send the AI's plan to MEXC (`backend/src/swing_ai/live.py`, wired in `manager.py`). It is OFF by default.
 
-1. Panel MODE = LIVE.
-2. Environment (the `.env` the backend loads): `MEXC_LIVE_TRADING_ENABLED=true` (the existing app-wide switch) AND `SWING_AI_LIVE_ARMED=YES`, plus `MEXC_API_KEY` / `MEXC_API_SECRET` (trade permission only, no withdrawal).
-3. Restart the backend. If any switch is missing the panel keeps trading PAPER and shows why.
+Two keys must both be turned (a deliberate interlock):
+1. Environment (the `.env` the backend loads): `MEXC_LIVE_TRADING_ENABLED=true` (the existing app-wide switch) AND `SWING_AI_LIVE_ARMED=YES`, plus `MEXC_API_KEY` / `MEXC_API_SECRET` (trade permission only, no withdrawal). Restart the backend after editing. The panel says exactly what the running backend sees if it is not armed.
+2. Panel MODE = LIVE.
 
-Hard limits no setting or AI answer can raise: `SWING_AI_LIVE_MAX_USD` (default 200 notional), `SWING_AI_LIVE_MAX_RISK_PCT` (default 0.5% of available USDT), isolated margin, one position at a time, safety forced to STRICT, nothing is sent while MEXC already holds any position or open order on BTC_USDT (a manual trade is never touched), sizes below the minimum contract are refused rather than rounded up.
+Everything else is controlled from the panel (saved in `swing_ai_settings.json`): **Live risk per trade %** (of your real available balance), **leverage** (isolated), **Live max size (USD)** and **Allow LIMIT entries**. Defaults are deliberately small (0.5%, $100, LIMIT off). GPT never sets size or leverage.
 
-Supported: MARKET entries with stop-loss and take-profit attached to the order (same mechanism as the Hunt live path). LIMIT entries are refused until you confirm on MEXC that a stop attached to an unfilled limit order is kept and set `SWING_AI_LIVE_ALLOW_LIMIT=YES`. STOP (breakout) entries are never sent live. AI MOVE_SL requests are not applied live (the exchange stop stays as placed). AI exits close the bot's own volume at market. The exchange is the truth: pending fills, cancellations and exchange-side closes are reconciled every tick, and paper SL/TP act as a backstop that also flattens.
+Always enforced: one position at a time, safety forced to STRICT, nothing is sent while MEXC already holds any position or open order on BTC_USDT (a manual or Hunt trade is never touched), and a size below the minimum contract is refused rather than rounded up (so very small balances or wide stops can be refused).
 
-KILL (button in the LIVE panel, `POST /api/swing-ai/kill`): cancels the bot's own order, closes the bot's own position at market, switches to PAPER and pauses the AI. Always keep the MEXC app open as the manual kill. Not verified against the live exchange from the build environment: test with the smallest size and watch MEXC for the first orders.
+Supported: MARKET entries with stop-loss and take-profit attached to the order (same mechanism as the Hunt live path). LIMIT entries only when ticked, after you confirm on MEXC that a stop attached to an unfilled limit order is kept. STOP (breakout) entries are never sent live. AI MOVE_SL requests are not applied live. AI exits close the bot's own volume at market. The exchange is the truth: pending fills, cancellations and exchange-side closes are reconciled every tick; paper SL/TP act as a backstop that also flattens.
+
+KILL (button in the LIVE panel, `POST /api/swing-ai/kill`): cancels the bot's own order, closes the bot's own position at market, switches to PAPER and pauses the AI. Keep the MEXC app open as the manual kill. Not verified against the live exchange from the build environment: test with the smallest size and check the stop and target appear on the position.

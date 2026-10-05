@@ -43,6 +43,9 @@ class SwingConfig:
     cooldown_after_loss_minutes: int = 60
     max_ticker_age_seconds: int = 30
     safety_mode: str = "STRICT"           # STRICT | RELAXED (paper only): RELAXED drops the discretionary limits below, never the structural checks
+    live_risk_pct: float = 0.5            # LIVE only (panel setting): % of the real available balance risked per trade
+    live_max_usd: float = 100.0           # LIVE only (panel setting): hard cap on position notional in USD
+    live_allow_limit: bool = False        # LIVE only (panel setting): let resting LIMIT entries go to the exchange
     allow_reverse: bool = False           # AI may suggest a reversal; code never flips a position on its own
 
     # --- fees (MEXC BTCUSDT perpetual) ---

@@ -12,13 +12,15 @@ from typing import Any, Dict, Optional
 
 MODES = ("PAPER", "LIVE")
 BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd": (100.0, 1_000_000.0),
-          "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0)}
+          "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0),
+          "live_risk_pct": (0.05, 5.0), "live_max_usd": (5.0, 1_000_000.0)}
 REASONING = ("default", "low", "medium", "high")
 CONTEXTS = ("FULL", "COMPACT", "LEAN")
 SAFETY = ("STRICT", "RELAXED", "OFF")
 MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$"
 DEFAULTS = {"model": None, "enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
-            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "OFF"}
+            "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "OFF",
+            "live_risk_pct": 0.5, "live_max_usd": 100.0, "live_allow_limit": False}
 LIVE_EXECUTION_IMPLEMENTED = True           # the executor exists (live.py); whether it may fire is decided by live_block_reason()
 
 
@@ -53,6 +55,10 @@ def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload["mode"] not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         clean["mode"] = payload["mode"]
+    if "live_allow_limit" in payload and payload["live_allow_limit"] is not None:
+        if not isinstance(payload["live_allow_limit"], bool):
+            raise ValueError("live_allow_limit must be true or false")
+        clean["live_allow_limit"] = payload["live_allow_limit"]
     if "model" in payload and payload["model"] is not None:
         import re
         if not isinstance(payload["model"], str) or not re.match(MODEL_RE, payload["model"]):
@@ -116,6 +122,7 @@ def apply_to_config(cfg, s: Optional[Dict[str, Any]] = None) -> None:
     cfg.risk_pct, cfg.max_leverage, cfg.max_position_usd = float(s["risk_pct"]), float(s["max_leverage"]), float(s["max_position_usd"])
     cfg.heartbeat_seconds = int(float(s["heartbeat_minutes"]) * 60)
     cfg.management_seconds = int(float(s["management_minutes"]) * 60)
+    cfg.live_risk_pct, cfg.live_max_usd, cfg.live_allow_limit = float(s["live_risk_pct"]), float(s["live_max_usd"]), bool(s["live_allow_limit"])
     cfg.reasoning = None if s["reasoning"] == "default" else s["reasoning"]
     cfg.context = s["context"]
     if s.get("model"):                                # a model picked in the panel overrides SWING_AI_MODEL / the default

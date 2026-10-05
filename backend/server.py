@@ -331,6 +331,9 @@ class SwingAiSettingsReq(BaseModel):
     context: Optional[str] = None
     model: Optional[str] = None
     safety: Optional[str] = None
+    live_risk_pct: Optional[float] = None
+    live_max_usd: Optional[float] = None
+    live_allow_limit: Optional[bool] = None
 
 @api_router.get("/swing-ai/settings")
 async def swing_ai_get_settings():

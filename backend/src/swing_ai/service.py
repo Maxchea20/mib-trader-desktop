@@ -35,7 +35,7 @@ def settings_view() -> Dict[str, Any]:
     s = sett.load()
     return {**s, "effective_mode": sett.effective_mode(s), "live_execution_implemented": sett.LIVE_EXECUTION_IMPLEMENTED,
             "env_live_armed": live.env_armed(), "live_block_reason": sett.live_block_reason(s),
-            "live_limits": {"max_notional_usd": live.max_usd(), "max_risk_pct": live.max_risk_pct()}, "bounds": sett.BOUNDS}
+            "bounds": sett.BOUNDS}
 
 
 def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:

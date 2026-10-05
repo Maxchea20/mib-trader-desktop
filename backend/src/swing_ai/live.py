@@ -5,9 +5,9 @@ Real orders are sent only when ALL of these hold (see `block_reason`):
   1. the panel is in LIVE mode,
   2. MEXC_LIVE_TRADING_ENABLED=true (the app-wide switch) AND SWING_AI_LIVE_ARMED=YES in the environment,
   3. MEXC_API_KEY / MEXC_API_SECRET are present.
-Hard limits that no setting or AI answer can raise: notional <= SWING_AI_LIVE_MAX_USD (default 200), risk <= SWING_AI_LIVE_MAX_RISK_PCT
-(default 0.5) of the available USDT balance, one position at a time, and nothing is sent while MEXC already holds any position or open
-order on the symbol (a manual trade is never touched).  MARKET entries are supported (same attached stop/target as the Hunt live path); LIMIT only after SWING_AI_LIVE_ALLOW_LIMIT=YES;
+Limits you set in the panel (saved in swing_ai_settings.json, never an AI answer): live_max_usd (notional cap), live_risk_pct (% of the
+available USDT balance risked per trade), live_allow_limit, plus the panel leverage.  Always: one position at a time, and nothing is sent while MEXC already holds any position or open
+order on the symbol (a manual trade is never touched).  MARKET entries are supported (same attached stop/target as the Hunt live path); LIMIT only when you tick "allow LIMIT" in the panel;
 STOP entries never.  The stop and target are attached to the order so they live on the exchange.  The existing client in market_data/mexc_private.py is reused unchanged."""
 import logging
 import math
@@ -39,20 +39,6 @@ def _detail() -> Dict[str, Any]:
         raise LiveError("contract detail not available")
     d = d["data"]
     return (d[0] if isinstance(d, list) and d else d) or {}
-
-
-def max_usd() -> float:
-    try:
-        return float(os.environ.get("SWING_AI_LIVE_MAX_USD") or DEFAULT_MAX_USD)
-    except ValueError:
-        return DEFAULT_MAX_USD
-
-
-def max_risk_pct() -> float:
-    try:
-        return float(os.environ.get("SWING_AI_LIVE_MAX_RISK_PCT") or DEFAULT_MAX_RISK_PCT)
-    except ValueError:
-        return DEFAULT_MAX_RISK_PCT
 
 
 def env_armed() -> bool:
@@ -134,8 +120,8 @@ def open_order(plan: Dict[str, Any], cfg, client=None, detail: Optional[Dict[str
 
 def _open(plan, cfg, c, detail) -> Dict[str, Any]:
     side, etype = plan["side"], plan["entry_type"]
-    if etype == "LIMIT" and os.environ.get("SWING_AI_LIVE_ALLOW_LIMIT", "").strip() != "YES":
-        return {"ok": False, "error": "live LIMIT entries are off: first confirm on MEXC that a stop-loss attached to an unfilled limit order is kept, then set SWING_AI_LIVE_ALLOW_LIMIT=YES"}
+    if etype == "LIMIT" and not getattr(cfg, "live_allow_limit", False):
+        return {"ok": False, "error": "live LIMIT entries are off: tick 'allow LIMIT' in the panel once you have confirmed on MEXC that a stop-loss attached to an unfilled limit order is kept"}
     if etype not in ("MARKET", "LIMIT"):
         return {"ok": False, "error": f"live trading supports MARKET entries (and LIMIT when allowed), not {etype}"}
     if c.get_open_positions(SYMBOL):
@@ -159,8 +145,8 @@ def _open(plan, cfg, c, detail) -> Dict[str, Any]:
         return {"ok": False, "error": "no available USDT balance"}
     lev = int(max(1, min(float(cfg.max_leverage), max_lev)))
     risk_dist = abs(px - sl)
-    risk_usd = avail * min(float(cfg.risk_pct), max_risk_pct()) / 100.0
-    notional_cap = min(float(cfg.max_position_usd), max_usd(), avail * lev / (1 + BUFFER))
+    risk_usd = avail * float(cfg.live_risk_pct) / 100.0
+    notional_cap = min(float(cfg.live_max_usd), avail * lev / (1 + BUFFER))
     raw = min(risk_usd / (risk_dist * cs), notional_cap / (px * cs))
     vol = math.floor(raw / vol_unit + 1e-9) * vol_unit
     if vol < min_vol:

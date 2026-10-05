@@ -1093,19 +1093,18 @@ def test_live_is_blocked_unless_every_switch_is_set(monkeypatch):
 
 def test_live_order_sizing_caps_and_refusals(monkeypatch):
     from src.swing_ai import live
-    cfg = SwingConfig(risk_pct=1.0, max_leverage=5)
-    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
+    cfg = SwingConfig(max_leverage=5, live_risk_pct=0.5, live_max_usd=1_000_000)
     f = FakeMexc()
     r = live.open_order(_lplan(), cfg, client=f, detail=DETAIL)
-    assert r["ok"] and r["vol"] == 333 and r["fill_price"] == 100.0                     # 0.5% hard risk cap (not the 1% setting): 500 / 1.5
+    assert r["ok"] and r["vol"] == 333 and r["fill_price"] == 100.0                     # the panel's live risk 0.5%: 500 / 1.5
     k = f.sent[0]
     assert k["stop_loss_price"] == 98.5 and k["take_profit_price"] == 105.0 and k["leverage"] == 5 and k["order_type"] == 5   # SL/TP ride on the order
-    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "100")                                  # notional cap
+    cfg.live_max_usd = 100                                                              # notional cap set in the panel
     r = live.open_order(_lplan(), cfg, client=FakeMexc(), detail=DETAIL)
     assert r["ok"] and r["vol"] == 1 and r["notional"] <= 100
-    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "50")                                   # would need less than the minimum order: refused, never rounded up
+    cfg.live_max_usd = 50                                                               # would need less than the minimum order: refused, never rounded up
     assert not live.open_order(_lplan(), cfg, client=FakeMexc(), detail=DETAIL)["ok"]
-    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
+    cfg.live_max_usd = 1_000_000
     busy = FakeMexc(); busy.positions = [{"positionType": 1, "holdVol": 5, "holdAvgPrice": 90.0}]
     assert "not touching" in live.open_order(_lplan(), cfg, client=busy, detail=DETAIL)["error"]       # a manual position is never touched
     busy = FakeMexc(); busy.orders = [{"orderId": "x"}]
@@ -1114,7 +1113,7 @@ def test_live_order_sizing_caps_and_refusals(monkeypatch):
     assert not live.open_order(_lplan(sl=101.0), cfg, client=FakeMexc(), detail=DETAIL)["ok"]          # wrong-side stop
     assert not live.open_order(_lplan(), cfg, client=FakeMexc(avail=0.0), detail=DETAIL)["ok"]
     assert "LIMIT entries are off" in live.open_order(_lplan(entry_type="LIMIT", entry=99.0, sl=97.5, tp=104.0), cfg, client=FakeMexc(), detail=DETAIL)["error"]
-    monkeypatch.setenv("SWING_AI_LIVE_ALLOW_LIMIT", "YES")
+    cfg.live_allow_limit = True
     lim = FakeMexc()
     r = live.open_order(_lplan(entry_type="LIMIT", entry=99.0, sl=97.5, tp=104.0), cfg, client=lim, detail=DETAIL)
     assert r["ok"] and r["fill_price"] is None and lim.sent[0]["order_type"] == 1 and lim.sent[0]["price"] == 99.0
@@ -1127,7 +1126,6 @@ def test_live_order_sizing_caps_and_refusals(monkeypatch):
 
 def test_manager_sends_the_ai_trade_to_the_exchange_only_when_live_is_armed(tmpdb, monkeypatch):
     from src.swing_ai import live, settings as sett
-    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
     fake = FakeMexc()
     monkeypatch.setattr(live, "_client", lambda: fake)
     monkeypatch.setattr(live, "_detail", lambda: {**DETAIL, "contractSize": 0.001})        # BTC-sized prices need a small contract
@@ -1140,7 +1138,7 @@ def test_manager_sends_the_ai_trade_to_the_exchange_only_when_live_is_armed(tmpd
     store.update_trade(store.active_trade()["id"], status="CANCELLED")
     # live armed: the same decision becomes a real (fake) order and the trade remembers it
     monkeypatch.setattr(sett, "effective_mode", lambda s=None: "LIVE")
-    m = SwingManager(SwingConfig(), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    m = SwingManager(SwingConfig(live_max_usd=1_000_000), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
     o = m.step(NOW + 1000, price, _ticker(price))
     assert o["decision"]["risk_ok"] and len(fake.sent) == 1, o["decision"]
     tr = store.active_trade()
@@ -1154,7 +1152,7 @@ def test_manager_sends_the_ai_trade_to_the_exchange_only_when_live_is_armed(tmpd
     # an exchange refusal means NO trade, and the reason is recorded
     fake2 = FakeMexc(); fake2.positions = [{"positionType": 1, "holdVol": 3}]
     monkeypatch.setattr(live, "_client", lambda: fake2)
-    m2 = SwingManager(SwingConfig(safety_mode="OFF"), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    m2 = SwingManager(SwingConfig(safety_mode="OFF", live_max_usd=1_000_000), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
     o2 = m2.step(NOW + 3000, price, _ticker(price))
     assert not o2["decision"]["risk_ok"] and any("live:" in r for r in o2["decision"]["risk_reasons"]) and fake2.sent == [], o2
     assert store.active_trade() is None
@@ -1175,5 +1173,22 @@ def test_kill_cancels_the_order_flattens_and_returns_to_paper(tmpdb, tmp_path, m
         out = service.kill()
         assert out["cancelled_order"] and "o9" in fake.cancelled and store.get_trade(pid)["status"] == "CANCELLED"
         assert sett.load()["mode"] == "PAPER" and sett.load()["enabled"] is False
+    finally:
+        service._manager = None
+
+
+def test_live_limits_are_panel_settings_validated_and_applied(tmpdb, tmp_path, monkeypatch):
+    from src.swing_ai import service, settings as sett
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    service._manager = None
+    try:
+        d = sett.load()
+        assert d["live_risk_pct"] == 0.5 and d["live_max_usd"] == 100.0 and d["live_allow_limit"] is False        # small, conservative defaults
+        service.update_settings({"live_risk_pct": 1.25, "live_max_usd": 40, "live_allow_limit": True})
+        cfg = service.get_manager().cfg
+        assert (cfg.live_risk_pct, cfg.live_max_usd, cfg.live_allow_limit) == (1.25, 40.0, True)                 # applied to the running engine
+        for bad in ({"live_risk_pct": 50}, {"live_max_usd": 0}, {"live_allow_limit": "yes"}):
+            with pytest.raises(ValueError):
+                service.update_settings(bad)
     finally:
         service._manager = None

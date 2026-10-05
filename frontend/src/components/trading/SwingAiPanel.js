@@ -154,6 +154,8 @@ export const SwingAiPanel = () => {
   const [acct, setAcct] = useState(null);
   const [riskInput, setRiskInput] = useState(1);
   const [notionalInput, setNotionalInput] = useState(50000);
+  const [liveRiskInput, setLiveRiskInput] = useState(0.5);
+  const [liveMaxInput, setLiveMaxInput] = useState(100);
   const [saveMsg, setSaveMsg] = useState(null);
   const [models, setModels] = useState(null);
 
@@ -178,7 +180,9 @@ export const SwingAiPanel = () => {
   useEffect(() => {
     if (st?.risk_pct != null) setRiskInput(st.risk_pct);
     if (st?.max_position_usd != null) setNotionalInput(st.max_position_usd);
-  }, [st?.risk_pct, st?.max_position_usd]);
+    if (st?.live_risk_pct != null) setLiveRiskInput(st.live_risk_pct);
+    if (st?.live_max_usd != null) setLiveMaxInput(st.live_max_usd);
+  }, [st?.risk_pct, st?.max_position_usd, st?.live_risk_pct, st?.live_max_usd]);
 
   useEffect(() => {                                   // models this OpenAI key can actually use
     let alive = true;
@@ -253,7 +257,7 @@ export const SwingAiPanel = () => {
                 <span className={`font-semibold tracking-wide ${armed ? "text-rose-300" : "text-amber-300"}`}>
                   {armed ? "LIVE ARMED · real orders on MEXC" : "LIVE NOT ARMED · still paper"}
                 </span>
-                {armed && <span className="text-slate-500">cap ${st.live_limits?.max_notional_usd} · risk ≤ {st.live_limits?.max_risk_pct}%</span>}
+                {armed && <span className="text-slate-500">size ≤ ${st.live_max_usd} · risk {st.live_risk_pct}% · {st.max_leverage}x</span>}
               </div>
               <button type="button" data-testid="swing-kill"
                 onClick={async () => {
@@ -280,13 +284,13 @@ export const SwingAiPanel = () => {
               <div className="px-3 py-2"><Stat label="UNREALIZED P&L" value={num(acct?.unrealized_pnl)} /></div>
             </div>
             <div className="flex flex-wrap items-end gap-x-6 gap-y-3 px-3 py-3">
-              <label className="flex flex-col gap-1">
-                <span className="widget-label">RISK PER TRADE %</span>
-                <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
-                  onBlur={() => save({ risk_pct: Number(riskInput) })} className={`${field} w-20`} />
+              <label className="flex flex-col gap-1" title="LIVE only: % of your real available MEXC balance risked if the stop is hit. One contract is the smallest size, so very small balances may be refused.">
+                <span className="widget-label">LIVE RISK PER TRADE %</span>
+                <input type="number" min="0.05" max="5" step="0.05" value={liveRiskInput} onChange={(e) => setLiveRiskInput(e.target.value)}
+                  onBlur={() => save({ live_risk_pct: Number(liveRiskInput) })} className={`${field} w-24`} data-testid="swing-live-risk" />
               </label>
               <div className="flex flex-col gap-1">
-                <span className="widget-label">MAX LEVERAGE</span>
+                <span className="widget-label">LEVERAGE (ISOLATED)</span>
                 <div className="flex gap-1">
                   {[1, 2, 3, 5, 10].map((x) => (
                     <button key={x} type="button" onClick={() => save({ max_leverage: x })}
@@ -294,13 +298,29 @@ export const SwingAiPanel = () => {
                   ))}
                 </div>
               </div>
-              <label className="flex flex-col gap-1">
-                <span className="widget-label">MAX SIZE (USD)</span>
-                <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
-                  onBlur={() => save({ max_position_usd: Number(notionalInput) })} className={`${field} w-28`} />
+              <label className="flex flex-col gap-1" title="LIVE only: the largest position (USD notional) the AI may open.">
+                <span className="widget-label">LIVE MAX SIZE (USD)</span>
+                <input type="number" min="5" step="5" value={liveMaxInput} onChange={(e) => setLiveMaxInput(e.target.value)}
+                  onBlur={() => save({ live_max_usd: Number(liveMaxInput) })} className={`${field} w-28`} data-testid="swing-live-max" />
               </label>
-              <span className="font-mono-t text-[10px] text-slate-600 pb-1.5">Isolated margin · live also capped by the backend limits · GPT never sets size</span>
+              <label className="flex items-center gap-2 pb-1.5 font-mono-t text-[11px] text-slate-300 cursor-pointer"
+                title="Off by default: confirm on MEXC first that a stop-loss attached to an unfilled limit order is kept. Breakout (STOP) entries are never sent live.">
+                <input type="checkbox" checked={!!st.live_allow_limit} onChange={(e) => save({ live_allow_limit: e.target.checked })} data-testid="swing-live-allow-limit" />
+                Allow LIMIT entries
+              </label>
             </div>
+            <details className="px-3 py-2 border-t border-[#1d2635] font-mono-t text-[10px] text-slate-500">
+              <summary className="cursor-pointer text-slate-400">Paper sizing (used when the mode is PAPER)</summary>
+              <div className="flex flex-wrap items-end gap-x-6 gap-y-2 mt-2">
+                <label className="flex flex-col gap-1"><span className="widget-label">PAPER RISK %</span>
+                  <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
+                    onBlur={() => save({ risk_pct: Number(riskInput) })} className={`${field} w-20`} /></label>
+                <label className="flex flex-col gap-1"><span className="widget-label">PAPER MAX SIZE (USD)</span>
+                  <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
+                    onBlur={() => save({ max_position_usd: Number(notionalInput) })} className={`${field} w-28`} /></label>
+                <span className="pb-1.5">Isolated margin · GPT never sets size</span>
+              </div>
+            </details>
           </div>
         );
       })()}
