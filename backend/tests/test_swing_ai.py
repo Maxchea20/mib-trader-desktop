@@ -584,7 +584,7 @@ def test_settings_are_validated_persisted_and_live_is_only_a_request(tmpdb, tmp_
         assert sett.load()["risk_pct"] == 0.5                                                 # persisted to disk
         cfg = service.get_manager().cfg
         assert (cfg.risk_pct, cfg.max_leverage, cfg.max_position_usd) == (0.5, 3.0, 2000.0)   # applied to the running engine
-        for bad in ({"mode": "REAL"}, {"risk_pct": 50}, {"max_leverage": 0}, {"enabled": "yes"}, {"max_position_usd": -1}, {"risk_pct": True}):
+        for bad in ({"mode": "REAL"}, {"risk_pct": 500}, {"max_leverage": 0}, {"enabled": "yes"}, {"max_position_usd": -1}, {"risk_pct": True}):
             with pytest.raises(ValueError):
                 service.update_settings(bad)
         assert sett.load()["risk_pct"] == 0.5                                                 # a rejected update changes nothing
@@ -659,7 +659,7 @@ def test_cost_controls_context_profile_cache_friendly_prompt_and_settings(tmp_pa
         v = service.update_settings({"heartbeat_minutes": 60, "management_minutes": 10, "reasoning": "low", "context": "COMPACT"})
         c = service.get_manager().cfg
         assert (c.heartbeat_seconds, c.management_seconds, c.reasoning, c.context) == (3600, 600, "low", "COMPACT") and v["reasoning"] == "low"
-        for bad in ({"heartbeat_minutes": 1}, {"reasoning": "extreme"}, {"context": "HUGE"}, {"management_minutes": 0}):
+        for bad in ({"heartbeat_minutes": 0}, {"reasoning": "extreme"}, {"context": "HUGE"}, {"management_minutes": 0}):
             with pytest.raises(ValueError):
                 service.update_settings(bad)
     finally:
@@ -1184,10 +1184,10 @@ def test_live_limits_are_panel_settings_validated_and_applied(tmpdb, tmp_path, m
     try:
         d = sett.load()
         assert d["live_risk_pct"] == 0.5 and d["live_max_usd"] == 100.0 and d["live_allow_limit"] is False        # small, conservative defaults
-        service.update_settings({"live_risk_pct": 1.25, "live_max_usd": 40, "live_allow_limit": True})
+        service.update_settings({"live_risk_pct": 10, "live_max_usd": 40, "live_allow_limit": True, "max_leverage": 25})      # your call: no policy cap
         cfg = service.get_manager().cfg
-        assert (cfg.live_risk_pct, cfg.live_max_usd, cfg.live_allow_limit) == (1.25, 40.0, True)                 # applied to the running engine
-        for bad in ({"live_risk_pct": 50}, {"live_max_usd": 0}, {"live_allow_limit": "yes"}):
+        assert (cfg.live_risk_pct, cfg.live_max_usd, cfg.live_allow_limit, cfg.max_leverage) == (10.0, 40.0, True, 25.0)                 # applied to the running engine
+        for bad in ({"live_risk_pct": 500}, {"live_max_usd": 0}, {"live_allow_limit": "yes"}):
             with pytest.raises(ValueError):
                 service.update_settings(bad)
     finally:

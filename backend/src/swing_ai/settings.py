@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 MODES = ("PAPER", "LIVE")
-BOUNDS = {"risk_pct": (0.1, 2.0), "max_leverage": (1.0, 10.0), "max_position_usd": (100.0, 1_000_000.0),
-          "heartbeat_minutes": (5.0, 240.0), "management_minutes": (1.0, 60.0),
-          "live_risk_pct": (0.05, 5.0), "live_max_usd": (5.0, 1_000_000.0)}
+# Sanity limits only (a number must be positive and not absurd).  They are NOT risk policy: how much you risk, how large and how often is your call.
+# MEXC itself still enforces its own leverage and size limits on every live order.
+BOUNDS = {"risk_pct": (0.001, 100.0), "max_leverage": (1.0, 500.0), "max_position_usd": (0.01, 1e9),
+          "heartbeat_minutes": (1.0, 1440.0), "management_minutes": (0.5, 1440.0),
+          "live_risk_pct": (0.001, 100.0), "live_max_usd": (0.01, 1e9)}
 REASONING = ("default", "low", "medium", "high")
 CONTEXTS = ("FULL", "COMPACT", "LEAN")
 SAFETY = ("STRICT", "RELAXED", "OFF")

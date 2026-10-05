@@ -156,6 +156,7 @@ export const SwingAiPanel = () => {
   const [notionalInput, setNotionalInput] = useState(50000);
   const [liveRiskInput, setLiveRiskInput] = useState(0.5);
   const [liveMaxInput, setLiveMaxInput] = useState(100);
+  const [levInput, setLevInput] = useState(5);
   const [saveMsg, setSaveMsg] = useState(null);
   const [models, setModels] = useState(null);
 
@@ -182,7 +183,8 @@ export const SwingAiPanel = () => {
     if (st?.max_position_usd != null) setNotionalInput(st.max_position_usd);
     if (st?.live_risk_pct != null) setLiveRiskInput(st.live_risk_pct);
     if (st?.live_max_usd != null) setLiveMaxInput(st.live_max_usd);
-  }, [st?.risk_pct, st?.max_position_usd, st?.live_risk_pct, st?.live_max_usd]);
+    if (st?.max_leverage != null) setLevInput(st.max_leverage);
+  }, [st?.risk_pct, st?.max_position_usd, st?.live_risk_pct, st?.live_max_usd, st?.max_leverage]);
 
   useEffect(() => {                                   // models this OpenAI key can actually use
     let alive = true;
@@ -208,7 +210,7 @@ export const SwingAiPanel = () => {
         : Array.isArray(d) ? d.map((x) => x.msg).join("; ")
         : e?.response ? `could not save (HTTP ${e.response.status})` : "could not save: backend not reachable");
       if (st) {                                       // put the boxes back to the values that are actually saved
-        setRiskInput(st.risk_pct); setNotionalInput(st.max_position_usd); setLiveRiskInput(st.live_risk_pct); setLiveMaxInput(st.live_max_usd);
+        setRiskInput(st.risk_pct); setNotionalInput(st.max_position_usd); setLiveRiskInput(st.live_risk_pct); setLiveMaxInput(st.live_max_usd); setLevInput(st.max_leverage);
       }
     }
   };
@@ -291,22 +293,24 @@ export const SwingAiPanel = () => {
             </div>
             <div className="flex flex-wrap items-end gap-x-6 gap-y-3 px-3 py-3">
               <label className="flex flex-col gap-1" title="LIVE only: % of your real available MEXC balance risked if the stop is hit. One contract is the smallest size, so very small balances may be refused.">
-                <span className="widget-label">LIVE RISK PER TRADE %</span>
-                <input type="number" min="0.05" max="5" step="0.05" value={liveRiskInput} onChange={(e) => setLiveRiskInput(e.target.value)}
+                <span className="widget-label">LIVE RISK PER TRADE %{acct?.connected && Number(liveRiskInput) > 0 ? ` (≈ $${(Number(acct.available_balance) * Number(liveRiskInput) / 100).toFixed(2)} if stopped)` : ""}</span>
+                <input type="number" min="0" step="any" value={liveRiskInput} onChange={(e) => setLiveRiskInput(e.target.value)}
                   onBlur={() => save({ live_risk_pct: Number(liveRiskInput) })} className={`${field} w-24`} data-testid="swing-live-risk" />
               </label>
               <div className="flex flex-col gap-1">
                 <span className="widget-label">LEVERAGE (ISOLATED)</span>
                 <div className="flex gap-1">
-                  {[1, 2, 3, 5, 10].map((x) => (
+                  {[1, 2, 3, 5, 10, 20].map((x) => (
                     <button key={x} type="button" onClick={() => save({ max_leverage: x })}
                       className={`w-9 py-1 border font-mono-t text-[10px] rounded-sm ${Number(st.max_leverage) === x ? "border-amber-500/60 bg-amber-500/10 text-amber-300" : "border-[#1d2635] text-slate-400"}`}>{x}x</button>
                   ))}
+                  <input type="number" min="1" step="any" value={levInput} onChange={(e) => setLevInput(e.target.value)}
+                    onBlur={() => save({ max_leverage: Number(levInput) })} className={`${field} w-16`} title="any leverage you type (MEXC enforces its own maximum)" data-testid="swing-live-leverage" />
                 </div>
               </div>
               <label className="flex flex-col gap-1" title="LIVE only: the largest position (USD notional) the AI may open.">
                 <span className="widget-label">LIVE MAX SIZE (USD)</span>
-                <input type="number" min="5" step="5" value={liveMaxInput} onChange={(e) => setLiveMaxInput(e.target.value)}
+                <input type="number" min="0" step="any" value={liveMaxInput} onChange={(e) => setLiveMaxInput(e.target.value)}
                   onBlur={() => save({ live_max_usd: Number(liveMaxInput) })} className={`${field} w-28`} data-testid="swing-live-max" />
               </label>
               <label className="flex items-center gap-2 pb-1.5 font-mono-t text-[11px] text-slate-300 cursor-pointer"
@@ -319,10 +323,10 @@ export const SwingAiPanel = () => {
               <summary className="cursor-pointer text-slate-400">Paper sizing (used when the mode is PAPER)</summary>
               <div className="flex flex-wrap items-end gap-x-6 gap-y-2 mt-2">
                 <label className="flex flex-col gap-1"><span className="widget-label">PAPER RISK %</span>
-                  <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
+                  <input type="number" min="0" step="any" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
                     onBlur={() => save({ risk_pct: Number(riskInput) })} className={`${field} w-20`} /></label>
                 <label className="flex flex-col gap-1"><span className="widget-label">PAPER MAX SIZE (USD)</span>
-                  <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
+                  <input type="number" min="0" step="any" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
                     onBlur={() => save({ max_position_usd: Number(notionalInput) })} className={`${field} w-28`} /></label>
                 <span className="pb-1.5">Isolated margin · GPT never sets size</span>
               </div>
