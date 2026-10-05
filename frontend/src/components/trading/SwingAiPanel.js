@@ -241,62 +241,69 @@ export const SwingAiPanel = () => {
       </div>
       {saveMsg && <div className="font-mono-t text-[11px] text-rose-400 mb-2">{saveMsg}</div>}
 
-      {liveSelected && st && (
-        <div className="mb-4 p-3 border border-amber-500/40 bg-amber-500/5 rounded-sm" data-testid="swing-live-controls">
-          <div className="font-head font-bold text-slate-200 tracking-wide mb-2">LIVE INPUTS</div>
-          {st.live_block_reason ? (
-            <div className="mb-3 px-2 py-1.5 border border-amber-500/40 bg-amber-500/10 font-mono-t text-[11px] text-amber-300" data-testid="swing-live-notice">
-              LIVE is selected but NOT armed, so it keeps trading on PAPER and no real order is sent. Reason: {st.live_block_reason}
-            </div>
-          ) : (
-            <div className="mb-3 px-2 py-1.5 border border-rose-500/60 bg-rose-500/10 font-mono-t text-[11px] text-rose-300" data-testid="swing-live-notice">
-              LIVE ARMED: the AI's trades are sent to MEXC as REAL orders. Hard caps: position up to ${st.live_limits?.max_notional_usd} and risk up to {st.live_limits?.max_risk_pct}% of available balance. Only MARKET and LIMIT entries; stop and target are placed on the exchange and are not moved.
-            </div>
-          )}
-          <button type="button" data-testid="swing-kill"
-            onClick={async () => {
-              if (!window.confirm("KILL: cancel Swing AI's open order, close its position at market, switch to PAPER and pause the AI?")) return;
-              try { const r = await killSwingAi(); setSaveMsg(`Killed. Order cancelled: ${r.cancelled_order ? "yes" : "no"}, position closed: ${r.flattened ? "yes" : "no"}. Check MEXC.`); setData(await getSwingAiLatest()); }
-              catch (e) { setSaveMsg("KILL FAILED - close it by hand on MEXC: " + (e?.response?.data?.detail || e?.message || "")); }
-            }}
-            className="mb-3 px-3 py-1.5 rounded-sm border border-rose-500/70 bg-rose-500/10 text-rose-300 font-mono-t text-[11px]">
-            KILL · cancel order + close position + back to PAPER
-          </button>
-          {acct && !acct.connected && (
-            <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300">MEXC account not connected: {acct.error || "unknown error"}</div>
-          )}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <Stat label="MEXC equity" value={acct?.connected ? `${Number(acct.equity).toFixed(2)} USDT` : "? USDT"} />
-            <Stat label="Available" value={acct?.connected ? `${Number(acct.available_balance).toFixed(2)} USDT` : "? USDT"} />
-            <Stat label="Unrealized PnL" value={acct?.connected ? Number(acct.unrealized_pnl).toFixed(2) : "?"} />
-            <Stat label="Margin" value="Isolated" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <div className="widget-label mb-1">RISK PER TRADE (% of equity)</div>
-              <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
-                onBlur={() => save({ risk_pct: Number(riskInput) })}
-                className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm" />
-            </div>
-            <div>
-              <div className="widget-label mb-1">MAX LEVERAGE (ISOLATED)</div>
-              <div className="flex gap-1">
-                {[1, 2, 3, 5, 10].map((x) => (
-                  <button key={x} type="button" onClick={() => save({ max_leverage: x })}
-                    className={`flex-1 px-2 py-1.5 border font-mono-t text-[10px] rounded-sm ${Number(st.max_leverage) === x ? "border-amber-500/60 bg-amber-500/10 text-amber-300" : "border-[#1d2635] text-slate-400"}`}>{x}x</button>
-                ))}
+      {liveSelected && st && (() => {
+        const armed = !st.live_block_reason;
+        const num = (v) => (acct?.connected ? Number(v).toFixed(2) : "—");
+        const field = "px-2 py-1 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm";
+        return (
+          <div className={`mb-3 rounded-sm border ${armed ? "border-rose-500/40" : "border-amber-500/30"} bg-[#0d1119]`} data-testid="swing-live-controls">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-[#1d2635]">
+              <div className="flex items-center gap-2 font-mono-t text-[11px]" data-testid="swing-live-notice">
+                <span className={`inline-block w-2 h-2 rounded-full ${armed ? "bg-rose-500" : "bg-amber-400"}`} />
+                <span className={`font-semibold tracking-wide ${armed ? "text-rose-300" : "text-amber-300"}`}>
+                  {armed ? "LIVE ARMED · real orders on MEXC" : "LIVE NOT ARMED · still paper"}
+                </span>
+                {armed && <span className="text-slate-500">cap ${st.live_limits?.max_notional_usd} · risk ≤ {st.live_limits?.max_risk_pct}%</span>}
               </div>
+              <button type="button" data-testid="swing-kill"
+                onClick={async () => {
+                  if (!window.confirm("KILL: cancel Swing AI's open order, close its position at market, switch to PAPER and pause the AI?")) return;
+                  try { const r = await killSwingAi(); setSaveMsg(`Killed. Order cancelled: ${r.cancelled_order ? "yes" : "no"}, position closed: ${r.flattened ? "yes" : "no"}. Check MEXC.`); setData(await getSwingAiLatest()); }
+                  catch (e) { setSaveMsg("KILL FAILED - close it by hand on MEXC: " + (e?.response?.data?.detail || e?.message || "")); }
+                }}
+                className="px-2.5 py-1 rounded-sm border border-rose-500/60 text-rose-300 hover:bg-rose-500/10 font-mono-t text-[10px] tracking-wide">
+                KILL
+              </button>
             </div>
-            <div>
-              <div className="widget-label mb-1">MAX POSITION SIZE (USD notional)</div>
-              <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
-                onBlur={() => save({ max_position_usd: Number(notionalInput) })}
-                className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm" />
+            {!armed && (
+              <details className="px-3 py-1.5 border-b border-[#1d2635] font-mono-t text-[10px] text-slate-500">
+                <summary className="cursor-pointer text-slate-400">Why is it not armed?</summary>
+                <div className="mt-1 leading-snug">{st.live_block_reason}</div>
+              </details>
+            )}
+            {acct && !acct.connected && (
+              <div className="px-3 py-1.5 border-b border-[#1d2635] font-mono-t text-[11px] text-rose-300">MEXC account not connected: {acct.error || "unknown error"}</div>
+            )}
+            <div className="grid grid-cols-3 divide-x divide-[#1d2635] border-b border-[#1d2635]">
+              <div className="px-3 py-2"><Stat label="EQUITY" value={`${num(acct?.equity)} USDT`} /></div>
+              <div className="px-3 py-2"><Stat label="AVAILABLE" value={`${num(acct?.available_balance)} USDT`} /></div>
+              <div className="px-3 py-2"><Stat label="UNREALIZED P&L" value={num(acct?.unrealized_pnl)} /></div>
+            </div>
+            <div className="flex flex-wrap items-end gap-x-6 gap-y-3 px-3 py-3">
+              <label className="flex flex-col gap-1">
+                <span className="widget-label">RISK PER TRADE %</span>
+                <input type="number" min="0.1" max="2" step="0.1" value={riskInput} onChange={(e) => setRiskInput(e.target.value)}
+                  onBlur={() => save({ risk_pct: Number(riskInput) })} className={`${field} w-20`} />
+              </label>
+              <div className="flex flex-col gap-1">
+                <span className="widget-label">MAX LEVERAGE</span>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 5, 10].map((x) => (
+                    <button key={x} type="button" onClick={() => save({ max_leverage: x })}
+                      className={`w-9 py-1 border font-mono-t text-[10px] rounded-sm ${Number(st.max_leverage) === x ? "border-amber-500/60 bg-amber-500/10 text-amber-300" : "border-[#1d2635] text-slate-400"}`}>{x}x</button>
+                  ))}
+                </div>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="widget-label">MAX SIZE (USD)</span>
+                <input type="number" min="100" step="100" value={notionalInput} onChange={(e) => setNotionalInput(e.target.value)}
+                  onBlur={() => save({ max_position_usd: Number(notionalInput) })} className={`${field} w-28`} />
+              </label>
+              <span className="font-mono-t text-[10px] text-slate-600 pb-1.5">Isolated margin · live also capped by the backend limits · GPT never sets size</span>
             </div>
           </div>
-          <div className="font-mono-t text-[10px] text-slate-500 mt-2">These limits size every Swing AI trade. In LIVE the size is also capped by SWING_AI_LIVE_MAX_USD and SWING_AI_LIVE_MAX_RISK_PCT (smaller of the two applies) and uses your real available balance. GPT never sets size or leverage.</div>
-        </div>
-      )}
+        );
+      })()}
 
       {error && <div className="font-mono-t text-[11px] text-rose-400">{error}</div>}
       {data && !data.enabled && (
