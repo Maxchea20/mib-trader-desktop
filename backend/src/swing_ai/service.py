@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from . import funding, manager as mgr, settings as sett, store
+from . import funding, live, manager as mgr, settings as sett, store
 from .config import SwingConfig
 from .llm import OpenAILLM
 from .schema import AI_EXIT_REASONS
@@ -34,7 +34,8 @@ def enabled() -> bool:
 def settings_view() -> Dict[str, Any]:
     s = sett.load()
     return {**s, "effective_mode": sett.effective_mode(s), "live_execution_implemented": sett.LIVE_EXECUTION_IMPLEMENTED,
-            "env_live_armed": os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").lower() == "true", "bounds": sett.BOUNDS}
+            "env_live_armed": live.env_armed(), "live_block_reason": sett.live_block_reason(s),
+            "live_limits": {"max_notional_usd": live.max_usd(), "max_risk_pct": live.max_risk_pct()}, "bounds": sett.BOUNDS}
 
 
 def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,6 +46,31 @@ def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     if hasattr(m.llm, "model"):
         m.llm.model = m.cfg.model
     return settings_view()
+
+
+def kill() -> Dict[str, Any]:
+    """Emergency stop: cancel the bot's own resting order, close the bot's own position at market, switch to PAPER and pause the AI.
+    Only the bot's own order/volume is touched (never a manual position).  Safe to call in paper mode too."""
+    m = get_manager()
+    out: Dict[str, Any] = {"cancelled_order": False, "flattened": False, "trade": None}
+    t = store.active_trade()
+    if t:
+        lm = m._live_meta(t)
+        out["trade"] = t["id"]
+        if lm:
+            if t["status"] == "PENDING":
+                out["cancelled_order"] = live.cancel_order(lm.get("order_id"))
+            out["flattened"] = live.flatten(t["side"], lm.get("vol"))
+        if t["status"] == "PENDING":
+            from . import paper
+            paper.cancel(t, "KILLED", time.time())
+        elif t["status"] == "OPEN":
+            from . import paper
+            paper.close_now(t, float(t.get("fill_price") or t["plan_entry"]), "KILLED", time.time())
+    sett.save({"mode": "PAPER", "enabled": False})
+    sett.apply_to_config(m.cfg)
+    out["settings"] = settings_view()
+    return out
 
 
 def get_manager() -> mgr.SwingManager:

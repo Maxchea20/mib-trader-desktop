@@ -579,7 +579,7 @@ def test_settings_are_validated_persisted_and_live_is_only_a_request(tmpdb, tmp_
         assert sett.load()["enabled"] is True                                                # env flag is only the default
         v = service.update_settings({"enabled": False, "mode": "LIVE", "risk_pct": 0.5, "max_leverage": 3, "max_position_usd": 2000})
         assert v["enabled"] is False and v["mode"] == "LIVE"
-        assert v["effective_mode"] == "PAPER" and v["live_execution_implemented"] is False    # LIVE is only a request
+        assert v["effective_mode"] == "PAPER" and v["live_execution_implemented"] is True and v["live_block_reason"]   # requested, but not armed: still PAPER
         assert service.status()["mode"] == "PAPER" and service.latest()["mode"] == "PAPER"
         assert sett.load()["risk_pct"] == 0.5                                                 # persisted to disk
         cfg = service.get_manager().cfg
@@ -902,7 +902,7 @@ def test_relaxed_safety_drops_discretionary_limits_but_keeps_structural_checks(t
         assert service.get_manager().cfg.safety_mode == "STRICT"
         service.update_settings({"safety": "RELAXED"})
         assert service.get_manager().cfg.safety_mode == "RELAXED"
-        monkeypatch.setattr(sett, "LIVE_EXECUTION_IMPLEMENTED", True)                   # simulate a future live executor
+        monkeypatch.setattr(sett, "live_block_reason", lambda s=None: None)             # simulate an armed live executor
         service.update_settings({"mode": "LIVE"})
         assert sett.effective_safety() == "STRICT" and service.get_manager().cfg.safety_mode == "STRICT"
         with pytest.raises(ValueError):
@@ -1020,3 +1020,159 @@ def test_funding_is_charged_per_8h_settlement_and_included_in_net_r(tmpdb):
         paid = sign * 6 * 100.0 * funding.DEFAULT_RATE
         assert c["funding_usd"] == pytest.approx(paid) and c["r_net"] == pytest.approx(-paid / 10.0)
         assert store.get_trade(pid)["funding_usd"] == pytest.approx(paid)
+
+
+# ------------------------------------------------------------------ live executor (fake exchange: nothing here can reach MEXC)
+class FakeMexc:
+    POSITION_TYPE_LONG, POSITION_TYPE_SHORT = 1, 2
+    SIDE_OPEN_LONG, SIDE_CLOSE_SHORT, SIDE_OPEN_SHORT, SIDE_CLOSE_LONG = 1, 2, 3, 4
+    ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, OPEN_TYPE_ISOLATED = 1, 5, 1
+
+    def __init__(self, avail=100_000.0):
+        self.avail, self.positions, self.orders, self.sent, self.cancelled, self.closed, self.lev = avail, [], [], [], [], [], []
+
+    def keys_present(self):
+        return True
+
+    def get_open_positions(self, symbol=None):
+        return list(self.positions)
+
+    def get_open_orders(self, symbol, page_num=1, page_size=20):
+        return list(self.orders)
+
+    def get_assets(self):
+        return [{"currency": "USDT", "availableBalance": self.avail}]
+
+    def change_leverage(self, **k):
+        self.lev.append(k)
+
+    def submit_order(self, **k):
+        self.sent.append(k)
+        oid = f"o{len(self.sent)}"
+        if k["order_type"] == self.ORDER_TYPE_MARKET:
+            self.positions.append({"positionType": 1 if k["side"] == self.SIDE_OPEN_LONG else 2, "holdVol": k["vol"], "holdAvgPrice": k["price"]})
+        else:
+            self.orders.append({"orderId": oid})
+        return {"success": True, "data": oid}
+
+    def cancel_orders(self, ids):
+        self.cancelled += ids
+        self.orders = [o for o in self.orders if o["orderId"] not in ids]
+
+    def close_position(self, symbol, opened_side, vol, price=None, open_type=1):
+        self.closed.append((opened_side, vol))
+        self.positions = []
+
+
+DETAIL = {"contractSize": 1.0, "volUnit": 1.0, "minVol": 1.0, "maxVol": 1e9, "priceUnit": 0.01, "priceScale": 2, "maxLeverage": 20, "apiAllowed": True}
+
+
+def _lplan(**kw):
+    p = {"side": "LONG", "entry_type": "MARKET", "entry": 100.0, "sl": 98.5, "tp": 105.0}
+    p.update(kw)
+    return p
+
+
+def test_live_is_blocked_unless_every_switch_is_set(monkeypatch):
+    from src.swing_ai import live
+    fake = FakeMexc()
+    for k in ("MEXC_LIVE_TRADING_ENABLED", "SWING_AI_LIVE_ARMED"):
+        monkeypatch.delenv(k, raising=False)
+    assert "PAPER" in live.block_reason({"mode": "PAPER"}, fake)
+    assert "not armed" in live.block_reason({"mode": "LIVE"}, fake)
+    monkeypatch.setenv("MEXC_LIVE_TRADING_ENABLED", "true")
+    assert "not armed" in live.block_reason({"mode": "LIVE"}, fake)                     # the Swing-specific key is also required
+    monkeypatch.setenv("SWING_AI_LIVE_ARMED", "yes")
+    assert "not armed" in live.block_reason({"mode": "LIVE"}, fake)                     # must be exactly YES
+    monkeypatch.setenv("SWING_AI_LIVE_ARMED", "YES")
+    assert live.block_reason({"mode": "LIVE"}, fake) is None
+    fake.keys_present = lambda: False
+    assert "API_KEY" in live.block_reason({"mode": "LIVE"}, fake)
+
+
+def test_live_order_sizing_caps_and_refusals(monkeypatch):
+    from src.swing_ai import live
+    cfg = SwingConfig(risk_pct=1.0, max_leverage=5)
+    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
+    f = FakeMexc()
+    r = live.open_order(_lplan(), cfg, client=f, detail=DETAIL)
+    assert r["ok"] and r["vol"] == 333 and r["fill_price"] == 100.0                     # 0.5% hard risk cap (not the 1% setting): 500 / 1.5
+    k = f.sent[0]
+    assert k["stop_loss_price"] == 98.5 and k["take_profit_price"] == 105.0 and k["leverage"] == 5 and k["order_type"] == 5   # SL/TP ride on the order
+    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "100")                                  # notional cap
+    r = live.open_order(_lplan(), cfg, client=FakeMexc(), detail=DETAIL)
+    assert r["ok"] and r["vol"] == 1 and r["notional"] <= 100
+    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "50")                                   # would need less than the minimum order: refused, never rounded up
+    assert not live.open_order(_lplan(), cfg, client=FakeMexc(), detail=DETAIL)["ok"]
+    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
+    busy = FakeMexc(); busy.positions = [{"positionType": 1, "holdVol": 5, "holdAvgPrice": 90.0}]
+    assert "not touching" in live.open_order(_lplan(), cfg, client=busy, detail=DETAIL)["error"]       # a manual position is never touched
+    busy = FakeMexc(); busy.orders = [{"orderId": "x"}]
+    assert not live.open_order(_lplan(), cfg, client=busy, detail=DETAIL)["ok"]
+    assert "not STOP" in live.open_order(_lplan(entry_type="STOP"), cfg, client=FakeMexc(), detail=DETAIL)["error"]
+    assert not live.open_order(_lplan(sl=101.0), cfg, client=FakeMexc(), detail=DETAIL)["ok"]          # wrong-side stop
+    assert not live.open_order(_lplan(), cfg, client=FakeMexc(avail=0.0), detail=DETAIL)["ok"]
+    assert "LIMIT entries are off" in live.open_order(_lplan(entry_type="LIMIT", entry=99.0, sl=97.5, tp=104.0), cfg, client=FakeMexc(), detail=DETAIL)["error"]
+    monkeypatch.setenv("SWING_AI_LIVE_ALLOW_LIMIT", "YES")
+    lim = FakeMexc()
+    r = live.open_order(_lplan(entry_type="LIMIT", entry=99.0, sl=97.5, tp=104.0), cfg, client=lim, detail=DETAIL)
+    assert r["ok"] and r["fill_price"] is None and lim.sent[0]["order_type"] == 1 and lim.sent[0]["price"] == 99.0
+    assert live.flatten("LONG", 10, client=FakeMexc()) is False                          # nothing of ours to close
+    held = FakeMexc(); held.positions = [{"positionType": 1, "holdVol": 7}]
+    assert live.flatten("LONG", 10, client=held) and held.closed == [("LONG", 7)]       # never closes more than the exchange holds
+    other = FakeMexc(); other.positions = [{"positionType": 2, "holdVol": 7}]
+    assert live.flatten("LONG", 10, client=other) is False and other.closed == []       # an opposite-side position is left alone
+
+
+def test_manager_sends_the_ai_trade_to_the_exchange_only_when_live_is_armed(tmpdb, monkeypatch):
+    from src.swing_ai import live, settings as sett
+    monkeypatch.setenv("SWING_AI_LIVE_MAX_USD", "1000000")
+    fake = FakeMexc()
+    monkeypatch.setattr(live, "_client", lambda: fake)
+    monkeypatch.setattr(live, "_detail", lambda: {**DETAIL, "contractSize": 0.001})        # BTC-sized prices need a small contract
+    snap = snap_at()
+    price = snap["live"]["price"]
+    # paper mode: nothing is sent
+    monkeypatch.setattr(sett, "effective_mode", lambda s=None: "PAPER")
+    m = SwingManager(SwingConfig(), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    assert m.step(NOW, price, _ticker(price))["decision"]["risk_ok"] and fake.sent == []
+    store.update_trade(store.active_trade()["id"], status="CANCELLED")
+    # live armed: the same decision becomes a real (fake) order and the trade remembers it
+    monkeypatch.setattr(sett, "effective_mode", lambda s=None: "LIVE")
+    m = SwingManager(SwingConfig(), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    o = m.step(NOW + 1000, price, _ticker(price))
+    assert o["decision"]["risk_ok"] and len(fake.sent) == 1, o["decision"]
+    tr = store.active_trade()
+    lm = m._live_meta(tr)
+    assert lm and lm["order_id"] == "o1" and tr["status"] == "OPEN" and tr["qty"] == lm["vol"] * lm["contract_size"]
+    # the AI exits: the exchange position is closed first
+    m.llm = FakeLLM(lambda msgs, sc: json.dumps({"thesis_status": "INVALID", "action": "EXIT", "new_sl": None, "confidence": 0.8, "reason": "broken",
+                                                  "reversal_candidate": False, "wake_levels": []}))
+    m._manage({"snap": 1}, None, tr, NOW + 2000, price, _ticker(price))
+    assert fake.closed and store.trades("CLOSED")[0]["exit_reason"] == "AI_INVALID"
+    # an exchange refusal means NO trade, and the reason is recorded
+    fake2 = FakeMexc(); fake2.positions = [{"positionType": 1, "holdVol": 3}]
+    monkeypatch.setattr(live, "_client", lambda: fake2)
+    m2 = SwingManager(SwingConfig(safety_mode="OFF"), ListSource(DATA), FakeLLM(lambda msgs, sc: _entry_json(snap)))
+    o2 = m2.step(NOW + 3000, price, _ticker(price))
+    assert not o2["decision"]["risk_ok"] and any("live:" in r for r in o2["decision"]["risk_reasons"]) and fake2.sent == [], o2
+    assert store.active_trade() is None
+
+
+def test_kill_cancels_the_order_flattens_and_returns_to_paper(tmpdb, tmp_path, monkeypatch):
+    from src.swing_ai import live, service, settings as sett
+    monkeypatch.setenv("MARKET_DB_PATH", str(tmp_path / "m.db"))
+    fake = FakeMexc()
+    monkeypatch.setattr(live, "_client", lambda: fake)
+    service._manager = None
+    try:
+        sett.save({"mode": "LIVE", "enabled": True})
+        pid = store.add_trade({"symbol": "BTC_USDT", "status": "PENDING", "side": "LONG", "entry_type": "LIMIT", "plan_entry": 99.0, "sl": 97.0, "sl0": 97.0,
+                               "tp": 104.0, "qty": 5.0, "risk_usd": 10.0, "risk_dist": 2.0, "created_ts": 1,
+                               "meta": json.dumps({"live": {"order_id": "o9", "vol": 5, "contract_size": 1.0, "leverage": 3}})})
+        fake.orders = [{"orderId": "o9"}]
+        out = service.kill()
+        assert out["cancelled_order"] and "o9" in fake.cancelled and store.get_trade(pid)["status"] == "CANCELLED"
+        assert sett.load()["mode"] == "PAPER" and sett.load()["enabled"] is False
+    finally:
+        service._manager = None

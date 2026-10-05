@@ -345,6 +345,11 @@ async def swing_ai_put_settings(req: SwingAiSettingsReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@api_router.post("/swing-ai/kill")
+async def swing_ai_kill():
+    from src.swing_ai import service as swing_service
+    return await asyncio.to_thread(swing_service.kill)
+
 @api_router.get("/swing-ai/models")
 async def swing_ai_models(refresh: bool = False):
     from src.swing_ai import service as swing_service

@@ -19,7 +19,7 @@ SAFETY = ("STRICT", "RELAXED", "OFF")
 MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$"
 DEFAULTS = {"model": None, "enabled": None, "mode": "PAPER", "risk_pct": 1.0, "max_leverage": 5.0, "max_position_usd": 50_000.0,
             "heartbeat_minutes": 15.0, "management_minutes": 5.0, "reasoning": "default", "context": "FULL", "safety": "OFF"}
-LIVE_EXECUTION_IMPLEMENTED = False          # flipped only by a reviewed live-executor change, never by a setting
+LIVE_EXECUTION_IMPLEMENTED = True           # the executor exists (live.py); whether it may fire is decided by live_block_reason()
 
 
 def _path() -> Path:
@@ -89,9 +89,19 @@ def save(update: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def effective_mode(s: Optional[Dict[str, Any]] = None) -> str:
-    """What the engine actually does.  Always PAPER while there is no live executor."""
+    """What the engine actually does.  PAPER unless LIVE is requested AND the executor is armed (environment switches and API keys)."""
     s = s or load()
-    return "LIVE" if (s["mode"] == "LIVE" and LIVE_EXECUTION_IMPLEMENTED) else "PAPER"
+    return "LIVE" if (s["mode"] == "LIVE" and LIVE_EXECUTION_IMPLEMENTED and live_block_reason(s) is None) else "PAPER"
+
+
+def live_block_reason(s: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Why real orders cannot go out right now (None = they can).  Any failure to find out counts as blocked."""
+    s = s or load()
+    try:
+        from . import live
+        return live.block_reason(s)
+    except Exception as e:
+        return f"live executor unavailable: {e}"
 
 
 def effective_safety(s: Optional[Dict[str, Any]] = None) -> str:

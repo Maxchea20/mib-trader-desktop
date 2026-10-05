@@ -7,8 +7,8 @@ Real orders are sent only when ALL of these hold (see `block_reason`):
   3. MEXC_API_KEY / MEXC_API_SECRET are present.
 Hard limits that no setting or AI answer can raise: notional <= SWING_AI_LIVE_MAX_USD (default 200), risk <= SWING_AI_LIVE_MAX_RISK_PCT
 (default 0.5) of the available USDT balance, one position at a time, and nothing is sent while MEXC already holds any position or open
-order on the symbol (a manual trade is never touched).  Only MARKET and LIMIT entries are supported; the stop and target are attached to
-the order so they live on the exchange.  The existing client in market_data/mexc_private.py is reused unchanged."""
+order on the symbol (a manual trade is never touched).  MARKET entries are supported (same attached stop/target as the Hunt live path); LIMIT only after SWING_AI_LIVE_ALLOW_LIMIT=YES;
+STOP entries never.  The stop and target are attached to the order so they live on the exchange.  The existing client in market_data/mexc_private.py is reused unchanged."""
 import logging
 import math
 import os
@@ -117,8 +117,10 @@ def open_order(plan: Dict[str, Any], cfg, client=None, detail: Optional[Dict[str
 
 def _open(plan, cfg, c, detail) -> Dict[str, Any]:
     side, etype = plan["side"], plan["entry_type"]
+    if etype == "LIMIT" and os.environ.get("SWING_AI_LIVE_ALLOW_LIMIT", "").strip() != "YES":
+        return {"ok": False, "error": "live LIMIT entries are off: first confirm on MEXC that a stop-loss attached to an unfilled limit order is kept, then set SWING_AI_LIVE_ALLOW_LIMIT=YES"}
     if etype not in ("MARKET", "LIMIT"):
-        return {"ok": False, "error": f"live trading supports MARKET and LIMIT entries only (got {etype})"}
+        return {"ok": False, "error": f"live trading supports MARKET entries (and LIMIT when allowed), not {etype}"}
     if c.get_open_positions(SYMBOL):
         return {"ok": False, "error": "MEXC already has an open position on the symbol - not touching it"}
     if c.get_open_orders(SYMBOL):

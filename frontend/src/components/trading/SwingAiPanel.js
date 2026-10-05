@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getSwingAiLatest, getSwingAiTrades, updateSwingAiSettings, getMexcAccount, getSwingAiModels } from "@/lib/api";
+import { getSwingAiLatest, getSwingAiTrades, updateSwingAiSettings, getMexcAccount, getSwingAiModels, killSwingAi } from "@/lib/api";
 
 /**
  * SwingAiPanel
@@ -217,7 +217,9 @@ export const SwingAiPanel = () => {
         <div className="flex items-center gap-2">
           <span className="font-head font-bold text-slate-200 tracking-wide">SWING AI</span>
           <span className="widget-label">BTC/USDT</span>
-          <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-500/50 text-amber-300 bg-amber-500/10">PAPER</span>
+          {data?.mode === "LIVE"
+            ? <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-rose-500/60 text-rose-300 bg-rose-500/10" data-testid="swing-mode-badge">LIVE · REAL MONEY</span>
+            : <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-500/50 text-amber-300 bg-amber-500/10" data-testid="swing-mode-badge">PAPER</span>}
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono-t text-[10px] text-slate-500 mr-2">
@@ -242,10 +244,24 @@ export const SwingAiPanel = () => {
       {liveSelected && st && (
         <div className="mb-4 p-3 border border-amber-500/40 bg-amber-500/5 rounded-sm" data-testid="swing-live-controls">
           <div className="font-head font-bold text-slate-200 tracking-wide mb-2">LIVE INPUTS</div>
-          <div className="mb-3 px-2 py-1.5 border border-amber-500/40 bg-amber-500/10 font-mono-t text-[11px] text-amber-300" data-testid="swing-live-notice">
-            LIVE is selected, but Swing AI has no live order execution yet. It keeps trading on PAPER and cannot send a real order.
-            {st.env_live_armed ? " (MEXC_LIVE_TRADING_ENABLED=true is set in .env.)" : " MEXC_LIVE_TRADING_ENABLED is not set in .env."}
-          </div>
+          {st.live_block_reason ? (
+            <div className="mb-3 px-2 py-1.5 border border-amber-500/40 bg-amber-500/10 font-mono-t text-[11px] text-amber-300" data-testid="swing-live-notice">
+              LIVE is selected but NOT armed, so it keeps trading on PAPER and no real order is sent. Reason: {st.live_block_reason}
+            </div>
+          ) : (
+            <div className="mb-3 px-2 py-1.5 border border-rose-500/60 bg-rose-500/10 font-mono-t text-[11px] text-rose-300" data-testid="swing-live-notice">
+              LIVE ARMED: the AI's trades are sent to MEXC as REAL orders. Hard caps: position up to ${st.live_limits?.max_notional_usd} and risk up to {st.live_limits?.max_risk_pct}% of available balance. Only MARKET and LIMIT entries; stop and target are placed on the exchange and are not moved.
+            </div>
+          )}
+          <button type="button" data-testid="swing-kill"
+            onClick={async () => {
+              if (!window.confirm("KILL: cancel Swing AI's open order, close its position at market, switch to PAPER and pause the AI?")) return;
+              try { const r = await killSwingAi(); setSaveMsg(`Killed. Order cancelled: ${r.cancelled_order ? "yes" : "no"}, position closed: ${r.flattened ? "yes" : "no"}. Check MEXC.`); setData(await getSwingAiLatest()); }
+              catch (e) { setSaveMsg("KILL FAILED - close it by hand on MEXC: " + (e?.response?.data?.detail || e?.message || "")); }
+            }}
+            className="mb-3 px-3 py-1.5 rounded-sm border border-rose-500/70 bg-rose-500/10 text-rose-300 font-mono-t text-[11px]">
+            KILL · cancel order + close position + back to PAPER
+          </button>
           {acct && !acct.connected && (
             <div className="mb-3 px-2 py-1.5 border border-rose-500/40 bg-rose-500/5 font-mono-t text-[11px] text-rose-300">MEXC account not connected: {acct.error || "unknown error"}</div>
           )}

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from . import analytics, engine, funding, paper, prompts, raw_data, risk, store
+from . import analytics, engine, funding, live, paper, prompts, raw_data, risk, settings as sett, store
 from .config import SwingConfig
 from .schema import AI_EXIT_BY_STATUS
 from .source import DbSource
@@ -35,6 +35,7 @@ class SwingManager:
         self.previous: Optional[Dict[str, Any]] = None       # GPT's own last analysis, fed back for continuity
         self._restored = False
         self._last_cf = -1e18
+        self._flat_since: Dict[int, float] = {}
         self.status: Dict[str, Any] = {"state": "idle", "last_error": None}
 
     def _restore(self) -> None:
@@ -76,18 +77,27 @@ class SwingManager:
         pos = store.active_trade()
         if not pos:
             return None
+        lm = self._live_meta(pos)
+        if lm and pos["status"] == "PENDING":             # a real resting order: only the exchange decides whether it filled
+            return self._reconcile_live(pos, now, live_price)
         for bar in self.source.closed("1m", 200, now):
             if int(bar["ts"]) <= int(pos["last_bar_ts"] or 0):
                 continue
             pos = paper.process_bar(pos, bar, self.cfg)
             if pos["status"] in ("CLOSED", "EXPIRED", "CANCELLED"):
+                if lm and pos["status"] == "CLOSED":
+                    live.flatten(pos["side"], lm["vol"])  # backstop: no-op when the exchange already closed it
                 return None
             store.update_trade(pos["id"], last_bar_ts=int(bar["ts"]))
             pos = {**pos, "last_bar_ts": int(bar["ts"])}
         if live_price and pos["status"] == "OPEN":
             pos = paper.process_price(pos, float(live_price), now)
             if pos["status"] == "CLOSED":
+                if lm:
+                    live.flatten(pos["side"], lm["vol"])
                 return None
+            if lm:
+                return self._reconcile_live(pos, now, live_price)
         return pos
 
     # ------------------------------------------------------------------ main step
@@ -160,22 +170,88 @@ class SwingManager:
         result = {"decision": dec.decision, "confidence": dec.confidence}
         if dec.decision == "NO_TRADE":
             if pending and pending["status"] == "PENDING":
-                paper.cancel(pending, "AI_NO_TRADE", now)
+                self._cancel_pending(pending, "AI_NO_TRADE", now)
             row.update(risk_ok=1, risk_reasons="")
             store.add_decision(**row)
             return result
         ctx = {"now": now, "has_active": False, "connected": True, **store.day_stats(now)}
         rr = risk.validate_entry(dec, _market(price, ticker), self.cfg, ctx)
+        live_res = None
+        if rr.ok and sett.effective_mode() == "LIVE":     # REAL ORDER: only when armed (see live.block_reason); any failure means no trade
+            if pending and pending["status"] == "PENDING":
+                self._cancel_pending(pending, "REPLACED", now)      # the old exchange order must go first, live.open_order refuses while one exists
+                pending = None
+            live_res = live.open_order(rr.plan, self.cfg)
+            if not live_res["ok"]:
+                rr = risk.RiskResult(False, ["live: " + str(live_res["error"])])
         row.update(risk_ok=int(rr.ok), risk_reasons="; ".join(rr.reasons))
         did = store.add_decision(**row)
         result.update(risk_ok=rr.ok, risk_reasons=rr.reasons)
         if rr.ok:
             if pending and pending["status"] == "PENDING":
-                paper.cancel(pending, "REPLACED", now)
+                self._cancel_pending(pending, "REPLACED", now)
             q = ticker or {}
-            result["trade_id"] = paper.open_from_plan(rr.plan, dec.to_dict(), did, now, q.get("bid"), q.get("ask"))
+            plan = rr.plan
+            if live_res:                                  # the real order's size and prices are the truth
+                plan = {**plan, "qty": live_res["vol"] * live_res["contract_size"], "risk_usd": live_res["risk_usd"],
+                        "entry": live_res["px"], "sl": live_res["sl"], "tp": live_res["tp"]}
+            tid = paper.open_from_plan(plan, dec.to_dict(), did, now, q.get("bid"), q.get("ask"))
+            if live_res:
+                meta = json.loads((store.get_trade(tid) or {}).get("meta") or "{}")
+                meta["live"] = {k: live_res[k] for k in ("order_id", "vol", "contract_size", "leverage")}
+                store.update_trade(tid, meta=json.dumps(meta))
+                if live_res.get("fill_price"):
+                    store.update_trade(tid, fill_price=live_res["fill_price"], risk_dist=abs(live_res["fill_price"] - plan["sl"]))
+                logger.warning("LIVE ORDER placed: %s %s vol=%s order_id=%s", plan["side"], plan["entry_type"], live_res["vol"], live_res["order_id"])
+            result["trade_id"] = tid
             self.last_manage_review = now                  # the entry review counts as the first management review
         return result
+
+    # ------------------------------------------------------------------ live helpers
+    @staticmethod
+    def _live_meta(t: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        try:
+            return json.loads((t or {}).get("meta") or "{}").get("live")
+        except Exception:
+            return None
+
+    def _cancel_pending(self, p: Dict[str, Any], reason: str, now: float) -> None:
+        lm = self._live_meta(p)
+        if lm:
+            live.cancel_order(lm.get("order_id"))
+        paper.cancel(p, reason, now)
+
+    def _reconcile_live(self, pos: Dict[str, Any], now: float, price: Optional[float]) -> Optional[Dict[str, Any]]:
+        """The exchange is the truth for a live trade.  Returns the updated trade, or None when it ended.  A failed read changes nothing."""
+        lm = self._live_meta(pos)
+        try:
+            st = live.exchange_state(pos["side"], lm.get("order_id"))
+        except Exception:
+            logger.warning("live reconcile: could not read MEXC, leaving the trade as it is", exc_info=False)
+            return pos
+        if pos["status"] == "PENDING":
+            if st["position_vol"] > 0:                    # filled on the exchange
+                fill = st["avg_price"] or pos["plan_entry"]
+                upd = dict(status="OPEN", fill_price=fill, opened_ts=int(now), risk_dist=abs(fill - pos["sl0"]), last_bar_ts=int(now // 60 * 60))
+                store.update_trade(pos["id"], **upd)
+                return {**pos, **upd}
+            if not st["order_open"]:                      # gone without a fill
+                paper.cancel(pos, "EXCHANGE_CANCELLED", now)
+                return None
+            if pos.get("expires_ts") and now > pos["expires_ts"]:
+                live.cancel_order(lm.get("order_id"))
+                paper.cancel(pos, "EXPIRED", now)
+                return None
+            return pos
+        if st["position_vol"] <= 0:                       # open trade, flat on the exchange: closed there (stop, target or by hand)
+            since = self._flat_since.setdefault(pos["id"], now)
+            if now - since >= 20 and price:
+                self._flat_since.pop(pos["id"], None)
+                paper.close_now(pos, float(price), "EXCHANGE_CLOSED", now)
+                return None
+        else:
+            self._flat_since.pop(pos["id"], None)
+        return pos
 
     # ------------------------------------------------------------------ management
     def _manage(self, snap, wake, pos, now, price, ticker):
@@ -197,12 +273,18 @@ class SwingManager:
                    wake_levels=md.wake_levels, risk_ok=int(rr.ok), risk_reasons="; ".join(rr.reasons))
         store.add_decision(**row)
         result = {"decision": md.action, "thesis_status": md.thesis_status, "applied": False}
+        lm = self._live_meta(pos)
         if rr.ok and md.action == "MOVE_SL":
-            store.update_trade(pos["id"], sl=md.new_sl)
-            result["applied"] = True
+            if lm:                                        # the exchange stop cannot be changed through the existing client: do not let paper and MEXC diverge
+                result["live_note"] = "stop move not applied: live stops stay as placed"
+            else:
+                store.update_trade(pos["id"], sl=md.new_sl)
+                result["applied"] = True
         elif md.action == "EXIT":
             q = ticker or {}
             px = (q.get("bid") if pos["side"] == "LONG" else q.get("ask")) or price
+            if lm:
+                live.flatten(pos["side"], lm["vol"])      # real market close first
             paper.close_now(pos, float(px), AI_EXIT_BY_STATUS.get(md.thesis_status, "AI_EXIT"), now)
             result["applied"] = True
         if md.reversal_candidate and not self.cfg.allow_reverse:
