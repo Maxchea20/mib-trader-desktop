@@ -194,7 +194,7 @@ function App() {
       />
       <main className="pt-16 px-3 pb-6 max-w-[1800px] mx-auto">
         <div className="grid grid-cols-12 gap-3 items-start">
-          <section className="col-span-12 xl:col-span-8 flex flex-col gap-3">
+          <section className="col-span-12 xl:col-span-8 flex flex-col gap-3 min-w-0">
             <div className="flex items-center justify-between px-0.5">
               <div className="flex items-center gap-2">
                 <span className="font-head font-bold text-slate-200 tracking-wide text-lg">MARKET DATA</span>
@@ -205,7 +205,7 @@ function App() {
                 <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} /> Recompute
               </button>
             </div>
-            <div className="panel h-[420px] relative">
+            <div className="panel h-[420px] relative overflow-hidden min-w-0">
               <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
                 <button type="button" onClick={() => setStructureVisible((v) => !v)}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${structureVisible ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>
@@ -228,7 +228,7 @@ function App() {
             </div>
             <SwingAiPanel part="trades" />
           </section>
-          <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
+          <section className="col-span-12 xl:col-span-4 flex flex-col gap-3 min-w-0">
             <SwingAiHero />
             <SwingAiPanel part="main" />
           </section>

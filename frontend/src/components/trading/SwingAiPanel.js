@@ -227,7 +227,7 @@ export const SwingAiPanel = ({ part = "all" }) => {        // "main": controls +
   const freq = an?.frequency || {};
 
   return (
-    <div className="panel p-4" data-testid={showMain ? "swing-ai-panel" : "swing-ai-trades-panel"}>
+    <div className="panel p-4 min-w-0 overflow-hidden" data-testid={showMain ? "swing-ai-panel" : "swing-ai-trades-panel"}>
       {!showMain && (
         <div className="flex items-center gap-2 mb-3">
           <span className="font-head font-bold text-slate-200 tracking-wide">SWING AI</span>
@@ -513,12 +513,12 @@ export const SwingAiPanel = ({ part = "all" }) => {        // "main": controls +
               );
             })}
           </div>
-          <div className={`font-mono-t text-[11px] ${showMain ? "" : "xl:columns-2 xl:gap-x-8"}`} data-testid="swing-trade-list">
+          <div className={`font-mono-t text-[11px] min-w-0 break-words ${showMain ? "" : "xl:grid xl:grid-cols-2 xl:gap-x-8"}`} data-testid="swing-trade-list">
             {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).slice(0, 20).map((t) => <TradeCard key={t.id} t={t} />)}
             {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).length === 0 && (
               <div className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</div>
             )}
-            <div className="pt-2 text-[10px] text-slate-600">R = multiples of the money risked on the trade (1R = the loss if the stop is hit). Net = after fees{tab === "history" ? " and funding" : ""}.</div>
+            <div className="pt-2 text-[10px] text-slate-600 xl:col-span-2">R = multiples of the money risked on the trade (1R = the loss if the stop is hit). Net = after fees{tab === "history" ? " and funding" : ""}.</div>
           </div>
         </div>
       )}
