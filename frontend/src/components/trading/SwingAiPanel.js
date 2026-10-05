@@ -203,7 +203,13 @@ export const SwingAiPanel = () => {
       setSaveMsg(null);
       setData(await getSwingAiLatest());
     } catch (e) {
-      setSaveMsg(e?.response?.data?.detail || "could not save");
+      const d = e?.response?.data?.detail;
+      setSaveMsg(typeof d === "string" ? d
+        : Array.isArray(d) ? d.map((x) => x.msg).join("; ")
+        : e?.response ? `could not save (HTTP ${e.response.status})` : "could not save: backend not reachable");
+      if (st) {                                       // put the boxes back to the values that are actually saved
+        setRiskInput(st.risk_pct); setNotionalInput(st.max_position_usd); setLiveRiskInput(st.live_risk_pct); setLiveMaxInput(st.live_max_usd);
+      }
     }
   };
 
