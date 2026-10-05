@@ -165,3 +165,11 @@ that triggered the review (for example `INVALIDATION_LEVEL_HIT`). All `AI_*` exi
 calls, refused proposals, scalp-sized targets, R:R below the prompt's own 1.5, order type not matching the entry price, LONG/SHORT flips
 within an hour, management reviews that contradict themselves (INVALID but HOLD, VALID but EXIT), stops tighter than GPT's own
 invalidation, trades closed far earlier than expected, stale MARKET fills, and AI exits that cost money vs holding.
+
+## Fees and funding
+
+Paper results are net of your MEXC BTCUSDT futures costs: maker 0% (resting limit entries, take-profit exits), taker 0.02% (market and
+stop entries, stop-loss exits). The 20% MX discount is not assumed. Funding is charged every 8 hours (00:00, 08:00, 16:00 UTC) on the
+position value for every settlement a trade is open: longs pay when the rate is positive, shorts receive. The rate comes from MEXC's
+funding history when the backend can reach it, otherwise `funding_rate_8h` (default +0.0049% per 8h, about 5.4% APR). Net R includes it,
+and each closed trade stores `funding_usd`. Position value uses the entry price, a small approximation of MEXC's mark price.

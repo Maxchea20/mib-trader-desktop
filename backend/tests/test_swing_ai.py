@@ -1003,3 +1003,20 @@ def test_latest_is_valid_json_when_every_trade_wins(tmpdb):
     assert safe == {"a": None, "b": [None, 1.5], "c": {"d": None}}
     _json.dumps(service.latest(), allow_nan=False)
     _json.dumps(service.trades_view(), allow_nan=False)
+
+
+def test_funding_is_charged_per_8h_settlement_and_included_in_net_r(tmpdb):
+    from src.swing_ai import funding
+    assert funding.settlements(1, 8 * 3600) == [8 * 3600] and funding.settlements(1, 8 * 3600 - 1) == []
+    assert len(funding.settlements(1, 3 * 86400)) == 9                      # 00:00, 08:00, 16:00 UTC on each of 3 days
+    assert funding.settlements(100, 100) == []
+    assert funding.funding_usd("LONG", 1.0, 100_000.0, 1, 86400) == pytest.approx(3 * 1.0 * 100_000.0 * funding.DEFAULT_RATE)
+    assert funding.funding_usd("SHORT", 1.0, 100_000.0, 1, 86400) == pytest.approx(-3 * 1.0 * 100_000.0 * funding.DEFAULT_RATE)     # shorts receive
+    for side, sign in (("LONG", 1), ("SHORT", -1)):
+        pid = store.add_trade({"symbol": "BTC_USDT", "status": "OPEN", "side": side, "entry_type": "MARKET", "plan_entry": 100.0, "fill_price": 100.0,
+                               "sl": 90.0 if side == "LONG" else 110.0, "sl0": 90.0 if side == "LONG" else 110.0, "tp": 120.0 if side == "LONG" else 80.0,
+                               "qty": 1.0, "risk_usd": 10.0, "risk_dist": 10.0, "created_ts": 1, "opened_ts": 1, "fee_entry": 0.0, "fee_tp": 0.0, "fee_sl": 0.0})
+        c = paper.close_now(store.get_trade(pid), 100.0, "AI_EXIT_VALID", 2 * 86400)                       # flat price, held 2 days = 6 settlements
+        paid = sign * 6 * 100.0 * funding.DEFAULT_RATE
+        assert c["funding_usd"] == pytest.approx(paid) and c["r_net"] == pytest.approx(-paid / 10.0)
+        assert store.get_trade(pid)["funding_usd"] == pytest.approx(paid)

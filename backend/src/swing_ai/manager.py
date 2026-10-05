@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from . import analytics, engine, paper, prompts, raw_data, risk, store
+from . import analytics, engine, funding, paper, prompts, raw_data, risk, store
 from .config import SwingConfig
 from .schema import AI_EXIT_BY_STATUS
 from .source import DbSource
@@ -28,6 +28,7 @@ class SwingManager:
         self.source = source or DbSource()
         self.llm = llm
         self.watch = WakeWatcher(self.cfg)
+        funding.DEFAULT_RATE = self.cfg.funding_rate_8h
         self.last_entry_review = -1e18
         self.last_manage_review = -1e18
         self.last_ai_call = -1e18

@@ -17,7 +17,7 @@ def line(name, p):
     if not p.get("trades"):
         return f"  {name:<16} no closed trades"
     return (f"  {name:<16} trades {p['trades']:>4}  win {p['win_rate']:.0%}  net {p['net_r']:+.2f}R  avg {p['expectancy_r']:+.3f}R  "
-            f"PF {p['profit_factor']:.2f}  MFE {p['avg_mfe_r']:.2f}  MAE {p['avg_mae_r']:.2f}  fees ${p['fees_usd']:.2f}")
+            f"PF {p['profit_factor']:.2f}  MFE {p['avg_mfe_r']:.2f}  MAE {p['avg_mae_r']:.2f}  fees ${p['fees_usd']:.2f}  funding ${p.get('funding_usd', 0):+.2f}")
 
 
 def main():

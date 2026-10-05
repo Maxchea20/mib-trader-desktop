@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from . import manager as mgr, settings as sett, store
+from . import funding, manager as mgr, settings as sett, store
 from .config import SwingConfig
 from .llm import OpenAILLM
 from .schema import AI_EXIT_REASONS
@@ -53,6 +53,7 @@ def get_manager() -> mgr.SwingManager:
         cfg = SwingConfig()
         sett.apply_to_config(cfg)
         _manager = mgr.SwingManager(cfg, llm=OpenAILLM(cfg.model, cfg.llm_timeout_seconds))
+        funding.USE_HISTORY = True                     # the running app may read MEXC's public funding history; tests never do
     return _manager
 
 

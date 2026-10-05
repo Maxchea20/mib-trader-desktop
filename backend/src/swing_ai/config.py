@@ -46,8 +46,9 @@ class SwingConfig:
     allow_reverse: bool = False           # AI may suggest a reversal; code never flips a position on its own
 
     # --- fees (MEXC BTCUSDT perpetual) ---
-    taker_fee: float = 0.0002
-    maker_fee: float = 0.0
+    taker_fee: float = 0.0002             # 0.02%: market and stop orders, and stop-loss exits
+    maker_fee: float = 0.0                # 0%: resting limit orders and take-profit exits
+    funding_rate_8h: float = 0.000049     # +0.0049% per 8h (MEXC BTCUSDT); longs pay shorts when positive.  Real settled rates are used when MEXC history is reachable
 
 
 DEFAULT = SwingConfig()

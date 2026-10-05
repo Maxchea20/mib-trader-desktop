@@ -3,7 +3,7 @@ price) trades through the level; on the fill bar only the stop is checked (conse
 import json
 from typing import Any, Dict, List, Optional
 
-from . import store
+from . import funding, store
 from .config import SwingConfig
 
 
@@ -39,10 +39,12 @@ def _close(p: Dict[str, Any], price: float, reason: str, now: float) -> Dict[str
     fee_exit = p["fee_tp"] if reason == "TP" else p["fee_sl"]
     fees_usd = p["qty"] * (p["fill_price"] * p["fee_entry"] + price * fee_exit)
     net_r = gross_r - fees_usd / (p["qty"] * rd)
+    fund = funding.funding_usd(p["side"], p["qty"], p["fill_price"], p.get("opened_ts") or now, now)
+    net_r -= fund / (p["qty"] * rd)
     outcome = "WIN" if net_r > 0.05 else "LOSS" if net_r < -0.05 else "FLAT"
     store.update_trade(p["id"], status="CLOSED", exit_price=price, exit_reason=reason, closed_ts=int(now),
-                       r_gross=gross_r, r_net=net_r, fees_usd=fees_usd, outcome=outcome)
-    return {**p, "status": "CLOSED", "exit_price": price, "exit_reason": reason, "r_gross": gross_r, "r_net": net_r, "outcome": outcome}
+                       r_gross=gross_r, r_net=net_r, fees_usd=fees_usd, funding_usd=fund, outcome=outcome)
+    return {**p, "status": "CLOSED", "exit_price": price, "exit_reason": reason, "r_gross": gross_r, "r_net": net_r, "funding_usd": fund, "outcome": outcome}
 
 
 def close_now(p: Dict[str, Any], price: float, reason: str, now: float) -> Dict[str, Any]:
@@ -133,7 +135,7 @@ def performance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "expectancy_r": mean, "t_stat": (mean / (sd / n ** 0.5)) if sd > 0 else 0.0,
             "profit_factor": (wins / losses) if losses > 0 else float("inf"),
             "avg_mfe_r": sum(x["mfe_r"] or 0 for x in closed) / n, "avg_mae_r": sum(x["mae_r"] or 0 for x in closed) / n,
-            "fees_usd": sum(x["fees_usd"] or 0 for x in closed),
+            "fees_usd": sum(x["fees_usd"] or 0 for x in closed), "funding_usd": sum(x.get("funding_usd") or 0 for x in closed),
             "exits": {k: sum(1 for x in closed if x["exit_reason"] == k) for k in {x["exit_reason"] for x in closed}}}
 
 
@@ -158,12 +160,14 @@ def advance_counterfactual(t: Dict[str, Any], bars: List[Dict[str, Any]], now: f
             gross = d * (px - t["fill_price"]) / rd
             fee_exit = t["fee_sl"] if why == "SL" else t["fee_tp"]
             net = gross - t["qty"] * (t["fill_price"] * t["fee_entry"] + px * fee_exit) / (t["qty"] * rd)
+            net -= funding.funding_usd(t["side"], t["qty"], t["fill_price"], t["opened_ts"] or t["closed_ts"], last + 60) / (t["qty"] * rd)
             store.update_trade(t["id"], cf_status="DONE", cf_last_bar_ts=last, cf_r_net=net, cf_exit_reason=why, cf_closed_ts=last + 60)
             return {**t, "cf_status": "DONE", "cf_r_net": net, "cf_exit_reason": why}
         if last + 60 - int(t["closed_ts"]) > CF_MAX_DAYS * 86400:
             px = float(bar["close"])
             gross = d * (px - t["fill_price"]) / rd
             net = gross - (t["fill_price"] * t["fee_entry"] + px * t["fee_sl"]) / rd
+            net -= funding.funding_usd(t["side"], t["qty"], t["fill_price"], t["opened_ts"] or t["closed_ts"], last + 60) / (t["qty"] * rd)
             store.update_trade(t["id"], cf_status="TIMEOUT", cf_last_bar_ts=last, cf_r_net=net, cf_exit_reason="TIMEOUT", cf_closed_ts=last + 60)
             return {**t, "cf_status": "TIMEOUT", "cf_r_net": net, "cf_exit_reason": "TIMEOUT"}
     store.update_trade(t["id"], cf_status="RUNNING", cf_last_bar_ts=last)
