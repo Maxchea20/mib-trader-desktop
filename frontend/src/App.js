@@ -226,10 +226,11 @@ function App() {
               <MultiTimeframeRegime htf={analysis?.htf_regime} />
               <div className="lg:col-span-2"><KeyLevelsPanel analysis={analysis} onHover={setHoveredType} /></div>
             </div>
+            <SwingAiPanel part="trades" />
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
             <SwingAiHero />
-            <SwingAiPanel />
+            <SwingAiPanel part="main" />
           </section>
         </div>
       </main>

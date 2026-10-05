@@ -90,7 +90,7 @@ const TradeCard = ({ t }) => {
 
   if (NOT_FILLED(t)) {
     return (
-      <div className="py-2 border-t border-[#141c29] opacity-80" data-testid="swing-trade-card">
+      <div className="break-inside-avoid py-2 border-t border-[#141c29] opacity-80" data-testid="swing-trade-card">
         <div className="flex items-center gap-2">{side}<span className="text-slate-300">Order never filled</span>{when_}</div>
         <div className="mt-1 text-slate-400">
           Waited to {long ? "buy" : "sell"} at <b className="text-slate-200">{px(t.plan_entry)}</b> (stop {px(t.sl)}, target {px(t.tp)}) — {reasonText(t.exit_reason)}. No money was made or lost.
@@ -101,7 +101,7 @@ const TradeCard = ({ t }) => {
   }
   if (t.status === "PENDING") {
     return (
-      <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+      <div className="break-inside-avoid py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
         <div className="flex items-center gap-2">{side}<span className="text-amber-300">Waiting for price</span>{when_}</div>
         <div className="mt-1 text-slate-300">
           Will {long ? "buy" : "sell"} at <b>{px(t.plan_entry)}</b> ({t.entry_type === "STOP" ? "when price breaks through" : "when price comes back to it"}). Stop {px(t.sl)} · Target {px(t.tp)}
@@ -112,7 +112,7 @@ const TradeCard = ({ t }) => {
   }
   if (t.status === "OPEN") {
     return (
-      <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+      <div className="break-inside-avoid py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
         <div className="flex items-center gap-2">{side}<span className="text-cyan-300">Trade is open</span>{when_}<span className="text-slate-500">· open for {dur(t.held_minutes)}</span></div>
         <div className="mt-1 text-slate-300">
           In at <b>{px(t.fill_price)}</b> · Stop {px(t.sl)} · Target {px(t.tp)}
@@ -127,7 +127,7 @@ const TradeCard = ({ t }) => {
   const loss = Number(t.r_net) < -0.05;
   const color = win ? "text-emerald-400" : loss ? "text-rose-400" : "text-slate-300";
   return (
-    <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+    <div className="break-inside-avoid py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
       <div className="flex flex-wrap items-center gap-2">
         {side}
         <span className={`font-semibold ${color}`}>{win ? "WON" : loss ? "LOST" : "FLAT"} {money(m.net)} ({Number(t.r_net) >= 0 ? "+" : ""}{Number(t.r_net).toFixed(2)}R)</span>
@@ -146,7 +146,9 @@ const TradeCard = ({ t }) => {
   );
 };
 
-export const SwingAiPanel = () => {
+export const SwingAiPanel = ({ part = "all" }) => {        // "main": controls + AI view (narrow column); "trades": trade list + performance (wide column); "all": both
+  const showMain = part !== "trades";
+  const showTrades = part !== "main";
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [trades, setTrades] = useState([]);
@@ -187,13 +189,14 @@ export const SwingAiPanel = () => {
   }, [st?.risk_pct, st?.max_position_usd, st?.live_risk_pct, st?.live_max_usd, st?.max_leverage]);
 
   useEffect(() => {                                   // models this OpenAI key can actually use
+    if (!showMain) return undefined;
     let alive = true;
     getSwingAiModels().then((r) => { if (alive) setModels(r); }).catch(() => {});
     return () => { alive = false; };
   }, []);
 
   useEffect(() => {                                   // MEXC account is only read while the live inputs are open
-    if (!liveSelected) { setAcct(null); return undefined; }
+    if (!liveSelected || !showMain) { setAcct(null); return undefined; }
     let alive = true;
     getMexcAccount().then((r) => { if (alive) setAcct(r); }).catch((e) => { if (alive) setAcct({ connected: false, error: e?.message || "request failed" }); });
     return () => { alive = false; };
@@ -224,7 +227,15 @@ export const SwingAiPanel = () => {
   const freq = an?.frequency || {};
 
   return (
-    <div className="panel p-4" data-testid="swing-ai-panel">
+    <div className="panel p-4" data-testid={showMain ? "swing-ai-panel" : "swing-ai-trades-panel"}>
+      {!showMain && (
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-head font-bold text-slate-200 tracking-wide">SWING AI</span>
+          <span className="widget-label">TRADES &amp; PERFORMANCE</span>
+          {error && <span className="font-mono-t text-[11px] text-rose-400">{error}</span>}
+        </div>
+      )}
+      {showMain && (<>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="font-head font-bold text-slate-200 tracking-wide">SWING AI</span>
@@ -486,8 +497,10 @@ export const SwingAiPanel = () => {
         </div>
       )}
 
-      {data && (
-        <div className="mt-3 pt-2 border-t border-[#1d2635]" data-testid="swing-trades">
+      </>)}
+
+      {showTrades && data && (
+        <div className={showMain ? "mt-3 pt-2 border-t border-[#1d2635]" : ""} data-testid="swing-trades">
           <div className="flex items-center gap-2 mb-2">
             <span className="widget-label">SWING AI TRADES</span>
             {["open", "history"].map((k) => {
@@ -500,7 +513,7 @@ export const SwingAiPanel = () => {
               );
             })}
           </div>
-          <div className="font-mono-t text-[11px]" data-testid="swing-trade-list">
+          <div className={`font-mono-t text-[11px] ${showMain ? "" : "xl:columns-2 xl:gap-x-8"}`} data-testid="swing-trade-list">
             {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).slice(0, 20).map((t) => <TradeCard key={t.id} t={t} />)}
             {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).length === 0 && (
               <div className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</div>
@@ -510,8 +523,8 @@ export const SwingAiPanel = () => {
         </div>
       )}
 
-      {an && (
-        <div className="mt-3 pt-2 border-t border-[#1d2635] grid grid-cols-2 gap-3" data-testid="swing-performance">
+      {showTrades && an && (
+        <div className={`mt-3 pt-2 border-t border-[#1d2635] grid gap-3 ${showMain ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4"}`} data-testid="swing-performance">
           <Stat label="Closed trades" value={overall.trades ?? 0} />
           <Stat label="Win rate" value={overall.trades ? pct(overall.win_rate) : "—"} />
           <Stat label="Net R (fees in)" value={overall.trades ? Number(overall.net_r).toFixed(2) : "—"} />
