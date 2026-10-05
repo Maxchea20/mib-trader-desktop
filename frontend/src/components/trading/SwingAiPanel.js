@@ -425,7 +425,7 @@ export const SwingAiPanel = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 mt-2">
+          <div className="grid grid-cols-1 gap-x-8 mt-2">
             <div>
               <div className="widget-label mt-1">MARKET VIEW · GPT</div>
               <Line label="Daily" text={a.daily_analysis} testId="swing-daily" />
@@ -511,7 +511,7 @@ export const SwingAiPanel = () => {
       )}
 
       {an && (
-        <div className="mt-3 pt-2 border-t border-[#1d2635] grid grid-cols-2 md:grid-cols-7 gap-3" data-testid="swing-performance">
+        <div className="mt-3 pt-2 border-t border-[#1d2635] grid grid-cols-2 gap-3" data-testid="swing-performance">
           <Stat label="Closed trades" value={overall.trades ?? 0} />
           <Stat label="Win rate" value={overall.trades ? pct(overall.win_rate) : "—"} />
           <Stat label="Net R (fees in)" value={overall.trades ? Number(overall.net_r).toFixed(2) : "—"} />

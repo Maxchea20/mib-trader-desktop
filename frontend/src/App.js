@@ -229,10 +229,8 @@ function App() {
           </section>
           <section className="col-span-12 xl:col-span-4 flex flex-col gap-3">
             <SwingAiHero />
+            <SwingAiPanel />
           </section>
-        </div>
-        <div className="mt-4">
-          <SwingAiPanel />
         </div>
       </main>
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} syncStatus={syncStatus} auto={auto} />
