@@ -205,7 +205,7 @@ function App() {
                 <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} /> Recompute
               </button>
             </div>
-            <div className="panel h-[420px] relative overflow-hidden min-w-0">
+            <div className="panel relative overflow-hidden min-w-0 resize-y" style={{ height: 420, minHeight: 240, maxHeight: "90vh" }} data-testid="chart-panel" title="Drag the bottom-right corner to resize the chart">
               <div className="absolute top-2 left-2 z-20 flex items-center gap-2">
                 <button type="button" onClick={() => setStructureVisible((v) => !v)}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded-sm border font-mono-t text-[10px] ${structureVisible ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300" : "bg-[#0d121b]/90 border-[#1d2635] text-slate-500"}`}>

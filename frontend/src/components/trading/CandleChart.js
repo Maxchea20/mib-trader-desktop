@@ -52,6 +52,9 @@ export const CandleChart = ({
       },
       rightPriceScale: { borderColor: "#1d2635" },
       timeScale: { borderColor: "#1d2635", timeVisible: true, secondsVisible: false },
+      // free scaling: wheel / pinch zoom, drag the chart to pan, drag the price or time axis to stretch it, double-click an axis to reset it
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: true }, axisDoubleClickReset: { time: true, price: true } },
       crosshair: {
         mode: 0,
         vertLine: { color: "#38bdf8", width: 1, style: 3, labelBackgroundColor: "#0f6fb3" },
@@ -171,6 +174,16 @@ export const CandleChart = ({
   return (
     <div className="relative w-full h-full overflow-hidden" data-testid="trading-chart-container">
       <div ref={containerRef} className="w-full h-full" />
+      <button type="button" data-testid="chart-auto-scale" title="Reset the price and time scale"
+        onClick={() => {
+          const c = chartRef.current;
+          if (!c) return;
+          c.priceScale("right").applyOptions({ autoScale: true });
+          c.timeScale().fitContent();
+        }}
+        className="absolute top-2 right-20 z-20 px-2 py-1 rounded-sm border border-[#1d2635] bg-[#0d121b]/90 font-mono-t text-[10px] text-slate-400 hover:text-cyan-300 hover:border-cyan-500/50">
+        AUTO SCALE
+      </button>
       <FvgOverlayLayer bands={bands} />
       <StructureEventOverlayLayer lines={structureEventLines} />
       <HuntMapOverlayLayer lines={huntMapLines} />
