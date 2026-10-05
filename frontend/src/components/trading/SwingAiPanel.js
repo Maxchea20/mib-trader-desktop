@@ -33,6 +33,119 @@ const Stat = ({ label, value, color }) => (
   </div>
 );
 
+
+const REASON_TEXT = {
+  TP: "Take-profit hit",
+  SL: "Stop-loss hit",
+  SL_MOVED: "Stop-loss hit (AI had moved it)",
+  AI_INVALID: "AI closed it: its idea was no longer valid",
+  AI_OPPOSITE: "AI closed it: a strong opposite signal appeared",
+  AI_WEAKENING: "AI closed it: its idea was weakening",
+  AI_EXIT_VALID: "AI closed it early (it still called the idea valid)",
+  AI_EXIT: "AI closed it early",
+  EXCHANGE_CLOSED: "Closed on the exchange",
+  AI_NO_TRADE: "AI cancelled the order (changed its mind)",
+  REPLACED: "AI replaced it with a new order",
+  EXPIRED: "Order expired before price reached it",
+};
+const reasonText = (r) => REASON_TEXT[r] || r || "—";
+const isActiveTrade = (t) => t.status === "OPEN" || t.status === "PENDING";
+const NOT_FILLED = (t) => !t.fill_price && (t.status === "CANCELLED" || t.status === "EXPIRED");
+const dur = (m) => {
+  if (m === null || m === undefined) return "—";
+  const mins = Math.round(Number(m));
+  if (mins < 60) return `${Number(m).toFixed(mins < 10 ? 1 : 0)} min`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ${mins % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+};
+const money = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : `${v < 0 ? "-" : "+"}$${Math.abs(v).toFixed(2)}`);
+const tradeMoney = (t) => {
+  const risk = Number(t.qty) * Number(t.risk_dist);
+  const gross = t.r_gross === null || t.r_gross === undefined ? null : Number(t.r_gross) * risk;
+  const fees = Number(t.fees_usd || 0);
+  const funding = Number(t.funding_usd || 0);
+  return { gross, fees, funding, net: gross === null ? null : gross - fees - funding };
+};
+
+const TradeCard = ({ t }) => {
+  const long = t.side === "LONG";
+  const side = <span className={`px-1.5 py-0.5 rounded-sm text-[10px] border ${long ? "text-emerald-300 border-emerald-500/40" : "text-rose-300 border-rose-500/40"}`}>{t.side}</span>;
+  const when_ = <span className="text-slate-500">{when(t.opened_ts || t.created_ts)}</span>;
+  const why = (t.entry_headline || t.entry_thesis) && (
+    <div className="mt-1.5 text-[10px] text-slate-500 leading-snug" data-testid="swing-trade-why">
+      <div><span className="text-slate-400">Why GPT entered:</span> {t.entry_headline || t.entry_thesis}{t.entry_headline && t.entry_thesis ? ` — ${t.entry_thesis}` : ""}</div>
+      {t.exit_note && (
+        <div><span className="text-slate-400">What GPT said later</span> ({t.management_reviews} check{t.management_reviews === 1 ? "" : "s"}{t.exit_wake ? `, woken by ${t.exit_wake}` : ""}): {t.exit_note}</div>
+      )}
+      {t.if_held && (
+        <div data-testid="swing-if-held"><span className="text-slate-400">If the AI had NOT closed it (original stop and target):</span>{" "}
+          {t.if_held.status === "DONE" || t.if_held.status === "TIMEOUT"
+            ? `it would have ended ${t.if_held.ended_by} at ${Number(t.if_held.r_net).toFixed(2)}R instead of ${Number(t.r_net).toFixed(2)}R — ${Number(t.r_net) >= Number(t.if_held.r_net) ? "closing early saved money" : "closing early cost money"}`
+            : "still running, not decided yet"}
+        </div>
+      )}
+    </div>
+  );
+
+  if (NOT_FILLED(t)) {
+    return (
+      <div className="py-2 border-t border-[#141c29] opacity-80" data-testid="swing-trade-card">
+        <div className="flex items-center gap-2">{side}<span className="text-slate-300">Order never filled</span>{when_}</div>
+        <div className="mt-1 text-slate-400">
+          Waited to {long ? "buy" : "sell"} at <b className="text-slate-200">{px(t.plan_entry)}</b> (stop {px(t.sl)}, target {px(t.tp)}) — {reasonText(t.exit_reason)}. No money was made or lost.
+        </div>
+        {why}
+      </div>
+    );
+  }
+  if (t.status === "PENDING") {
+    return (
+      <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+        <div className="flex items-center gap-2">{side}<span className="text-amber-300">Waiting for price</span>{when_}</div>
+        <div className="mt-1 text-slate-300">
+          Will {long ? "buy" : "sell"} at <b>{px(t.plan_entry)}</b> ({t.entry_type === "STOP" ? "when price breaks through" : "when price comes back to it"}). Stop {px(t.sl)} · Target {px(t.tp)}
+        </div>
+        {why}
+      </div>
+    );
+  }
+  if (t.status === "OPEN") {
+    return (
+      <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+        <div className="flex items-center gap-2">{side}<span className="text-cyan-300">Trade is open</span>{when_}<span className="text-slate-500">· open for {dur(t.held_minutes)}</span></div>
+        <div className="mt-1 text-slate-300">
+          In at <b>{px(t.fill_price)}</b> · Stop {px(t.sl)} · Target {px(t.tp)}
+        </div>
+        <div className="mt-0.5 text-slate-500">Best so far {Number(t.mfe_r || 0).toFixed(2)}R · Worst dip {Number(t.mae_r || 0).toFixed(2)}R</div>
+        {why}
+      </div>
+    );
+  }
+  const m = tradeMoney(t);
+  const win = Number(t.r_net) > 0.05;
+  const loss = Number(t.r_net) < -0.05;
+  const color = win ? "text-emerald-400" : loss ? "text-rose-400" : "text-slate-300";
+  return (
+    <div className="py-2 border-t border-[#141c29]" data-testid="swing-trade-card">
+      <div className="flex flex-wrap items-center gap-2">
+        {side}
+        <span className={`font-semibold ${color}`}>{win ? "WON" : loss ? "LOST" : "FLAT"} {money(m.net)} ({Number(t.r_net) >= 0 ? "+" : ""}{Number(t.r_net).toFixed(2)}R)</span>
+        {when_}<span className="text-slate-500">· held {dur(t.held_minutes)}</span>
+      </div>
+      <div className="mt-1 text-slate-300">
+        In <b>{px(t.fill_price)}</b> → Out <b>{px(t.exit_price)}</b> · Stop was {px(t.sl0 || t.sl)} · Target was {px(t.tp)}
+      </div>
+      <div className={`mt-0.5 ${String(t.exit_reason || "").startsWith("AI_") ? "text-amber-300" : "text-slate-400"}`}>Closed because: {reasonText(t.exit_reason)}</div>
+      <div className="mt-0.5 text-slate-500">
+        Price move {money(m.gross)} · Fees {money(-m.fees)}{m.funding ? ` · Funding ${money(-m.funding)}` : ""} = <span className={color}>{money(m.net)}</span>
+        {" "}· Best it went {Number(t.mfe_r || 0).toFixed(2)}R · Worst dip {Number(t.mae_r || 0).toFixed(2)}R
+      </div>
+      {why}
+    </div>
+  );
+};
+
 export const SwingAiPanel = () => {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -334,64 +447,12 @@ export const SwingAiPanel = () => {
               );
             })}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full font-mono-t text-[11px] text-slate-300">
-              <thead>
-                <tr className="text-left text-slate-500 text-[10px]">
-                  {["OPENED", "SIDE", "STATUS", "ENTRY", "SL", "TP", "EXIT", "WHY", "HELD", "R (NET)", "MFE", "MAE", "FEES", "OUTCOME"].map((h) => (
-                    <th key={h} className="pr-3 pb-1 font-normal">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {trades
-                  .filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING"))
-                  .slice(0, 20)
-                  .map((t) => (
-                    <React.Fragment key={t.id}>
-                      <tr className="border-t border-[#141c29]">
-                        <td className="pr-3 py-1">{when(t.opened_ts || t.created_ts)}</td>
-                        <td className={`pr-3 ${t.side === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{t.side}</td>
-                        <td className="pr-3">{t.status}</td>
-                        <td className="pr-3">{px(t.fill_price || t.plan_entry)}</td>
-                        <td className="pr-3">{px(t.sl)}</td>
-                        <td className="pr-3">{px(t.tp)}</td>
-                        <td className="pr-3">{px(t.exit_price)}</td>
-                        <td className={`pr-3 ${String(t.exit_reason || "").startsWith("AI_") ? "text-amber-300" : ""}`}
-                            title={t.exit_wake ? `woken by ${t.exit_wake}` : undefined}>{t.exit_reason || "—"}</td>
-                        <td className="pr-3">{t.held_minutes === null || t.held_minutes === undefined ? "—" : `${t.held_minutes}m`}</td>
-                        <td className={`pr-3 ${t.r_net > 0 ? "text-emerald-400" : t.r_net < 0 ? "text-rose-400" : ""}`}>
-                          {t.r_net === null || t.r_net === undefined ? "—" : Number(t.r_net).toFixed(2)}
-                        </td>
-                        <td className="pr-3">{Number(t.mfe_r || 0).toFixed(2)}</td>
-                        <td className="pr-3">{Number(t.mae_r || 0).toFixed(2)}</td>
-                        <td className="pr-3">{t.fees_usd === null || t.fees_usd === undefined ? "—" : `$${Number(t.fees_usd).toFixed(2)}`}</td>
-                        <td className="pr-3">{t.outcome || "—"}</td>
-                      </tr>
-                      {(t.entry_headline || t.entry_thesis || t.exit_note) && (
-                        <tr>
-                          <td colSpan={14} className="pb-2 text-[10px] text-slate-500 leading-snug" data-testid="swing-trade-why">
-                            <div><span className="text-slate-400">GPT entered:</span> {t.entry_headline || t.entry_thesis}{t.entry_headline && t.entry_thesis ? ` — ${t.entry_thesis}` : ""}</div>
-                            {t.if_held && (
-                              <div data-testid="swing-if-held"><span className="text-slate-400">If it had NOT exited (original stop and target):</span>{" "}
-                                {t.if_held.status === "DONE" || t.if_held.status === "TIMEOUT"
-                                  ? `${t.if_held.ended_by} ${Number(t.if_held.r_net).toFixed(2)}R vs the ${Number(t.r_net).toFixed(2)}R it took — ${Number(t.r_net) >= Number(t.if_held.r_net) ? "the exit saved money" : "the exit cost money"}`
-                                  : "still running, not decided yet"}
-                              </div>
-                            )}
-                            {t.exit_note && (
-                              <div><span className="text-slate-400">GPT then said</span> ({t.management_reviews} review{t.management_reviews === 1 ? "" : "s"}{t.exit_wake ? `, woken by ${t.exit_wake}` : ""}): {t.exit_note}</div>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
-                {trades.filter((t) => (tab === "open" ? t.status === "OPEN" || t.status === "PENDING" : t.status !== "OPEN" && t.status !== "PENDING")).length === 0 && (
-                  <tr><td colSpan={14} className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</td></tr>
-                )}
-              </tbody>
-            </table>
+          <div className="font-mono-t text-[11px]" data-testid="swing-trade-list">
+            {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).slice(0, 20).map((t) => <TradeCard key={t.id} t={t} />)}
+            {trades.filter((t) => (tab === "open" ? isActiveTrade(t) : !isActiveTrade(t))).length === 0 && (
+              <div className="py-3 text-center text-slate-600">{tab === "open" ? "No open or pending Swing AI orders" : "No finished Swing AI trades yet"}</div>
+            )}
+            <div className="pt-2 text-[10px] text-slate-600">R = multiples of the money risked on the trade (1R = the loss if the stop is hit). Net = after fees{tab === "history" ? " and funding" : ""}.</div>
           </div>
         </div>
       )}
