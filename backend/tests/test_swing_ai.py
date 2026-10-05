@@ -1079,7 +1079,8 @@ def test_live_is_blocked_unless_every_switch_is_set(monkeypatch):
     for k in ("MEXC_LIVE_TRADING_ENABLED", "SWING_AI_LIVE_ARMED"):
         monkeypatch.delenv(k, raising=False)
     assert "PAPER" in live.block_reason({"mode": "PAPER"}, fake)
-    assert "not armed" in live.block_reason({"mode": "LIVE"}, fake)
+    r = live.block_reason({"mode": "LIVE"}, fake)
+    assert "not armed" in r and "MEXC_LIVE_TRADING_ENABLED=MISSING" in r and "SWING_AI_LIVE_ARMED=MISSING" in r      # says exactly what the process sees
     monkeypatch.setenv("MEXC_LIVE_TRADING_ENABLED", "true")
     assert "not armed" in live.block_reason({"mode": "LIVE"}, fake)                     # the Swing-specific key is also required
     monkeypatch.setenv("SWING_AI_LIVE_ARMED", "yes")

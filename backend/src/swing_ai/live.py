@@ -59,12 +59,29 @@ def env_armed() -> bool:
     return os.environ.get("MEXC_LIVE_TRADING_ENABLED", "").strip().lower() == "true" and os.environ.get("SWING_AI_LIVE_ARMED", "").strip() == "YES"
 
 
+def _env_files() -> str:
+    """Which .env files the backend can load (run_server.py reads the first one, then the second; a variable already set wins)."""
+    from pathlib import Path
+    appdata = os.environ.get("APPDATA")
+    paths = ([Path(appdata) / "mib-trader" / ".env"] if appdata else []) + [Path(__file__).resolve().parents[2] / ".env"]
+    return "; ".join(f"{p} {'EXISTS' if p.is_file() else 'not found'}" for p in paths)
+
+
+def env_report() -> str:
+    """Exactly what this running backend process sees for the two arming switches (values of these two flags only, never any key)."""
+    def show(name):
+        v = os.environ.get(name)
+        return "MISSING" if v is None else f"'{v}'"
+    return (f"this backend process sees MEXC_LIVE_TRADING_ENABLED={show('MEXC_LIVE_TRADING_ENABLED')} (needs 'true') and "
+            f"SWING_AI_LIVE_ARMED={show('SWING_AI_LIVE_ARMED')} (needs exactly 'YES'). If you already edited .env, restart the backend. Files: {_env_files()}")
+
+
 def block_reason(settings: Dict[str, Any], client=None) -> Optional[str]:
     """None when real orders may be sent, otherwise the reason they may not."""
     if settings.get("mode") != "LIVE":
         return "panel is in PAPER mode"
     if not env_armed():
-        return "not armed: set MEXC_LIVE_TRADING_ENABLED=true and SWING_AI_LIVE_ARMED=YES in the environment and restart"
+        return "not armed: " + env_report()
     c = client or _client()
     if not c.keys_present():
         return "MEXC_API_KEY / MEXC_API_SECRET not set"
