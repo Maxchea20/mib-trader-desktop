@@ -230,7 +230,7 @@ export const SwingAiPanel = () => {
           <span className="font-head font-bold text-slate-200 tracking-wide">SWING AI</span>
           <span className="widget-label">BTC/USDT</span>
           {data?.mode === "LIVE"
-            ? <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-rose-500/60 text-rose-300 bg-rose-500/10" data-testid="swing-mode-badge">LIVE · REAL MONEY</span>
+            ? <span className="breathe-glow text-breathe font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-emerald-500/60 text-emerald-300 bg-emerald-500/10" style={{ ["--glow-rgb"]: "0,245,155" }} data-testid="swing-mode-badge">LIVE · REAL MONEY</span>
             : <span className="font-mono-t text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-500/50 text-amber-300 bg-amber-500/10" data-testid="swing-mode-badge">PAPER</span>}
         </div>
         <div className="flex items-center gap-2">
@@ -258,11 +258,11 @@ export const SwingAiPanel = () => {
         const num = (v) => (acct?.connected ? Number(v).toFixed(2) : "—");
         const field = "px-2 py-1 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm";
         return (
-          <div className={`mb-3 rounded-sm border ${armed ? "border-rose-500/40" : "border-amber-500/30"} bg-[#0d1119]`} data-testid="swing-live-controls">
+          <div className={`mb-3 rounded-sm border bg-[#0d1119] ${armed ? "breathe-glow" : "border-amber-500/30"}`} style={armed ? { ["--glow-rgb"]: "0,245,155" } : undefined} data-testid="swing-live-controls">
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-[#1d2635]">
               <div className="flex items-center gap-2 font-mono-t text-[11px]" data-testid="swing-live-notice">
-                <span className={`inline-block w-2 h-2 rounded-full ${armed ? "bg-rose-500" : "bg-amber-400"}`} />
-                <span className={`font-semibold tracking-wide ${armed ? "text-rose-300" : "text-amber-300"}`}>
+                <span className={`inline-block w-2 h-2 rounded-full ${armed ? "bg-emerald-400 dot-breathe" : "bg-amber-400"}`} style={armed ? { ["--glow-rgb"]: "0,245,155" } : undefined} />
+                <span className={`font-semibold tracking-wide ${armed ? "text-emerald-300 text-breathe" : "text-amber-300"}`} style={armed ? { ["--glow-rgb"]: "0,245,155" } : undefined}>
                   {armed ? "LIVE ARMED · real orders on MEXC" : "LIVE NOT ARMED · still paper"}
                 </span>
                 {armed && <span className="text-slate-500">size ≤ ${st.live_max_usd} · risk {st.live_risk_pct}% · {st.max_leverage}x</span>}
@@ -408,7 +408,7 @@ export const SwingAiPanel = () => {
           <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-3 border-b border-[#1d2635]">
             <div>
               <div className="widget-label mb-1">AI DECISION</div>
-              <div className="font-head font-black text-4xl leading-none" style={{ color: `rgb(${dec.rgb})` }} data-testid="swing-decision">
+              <div className="font-head font-black text-4xl leading-none text-breathe" style={{ color: `rgb(${dec.rgb})`, ["--glow-rgb"]: dec.rgb }} data-testid="swing-decision">
                 {dec.label}
               </div>
               <div className="font-mono-t text-[10px] text-slate-500 mt-1">{a.market_state || "—"}{a.entry_type ? ` · ${a.entry_type}` : ""}</div>

@@ -62,7 +62,7 @@ export const SwingAiHero = () => {
 
       <div className="flex items-end justify-between mt-3">
         <div>
-          <div className="font-head font-black text-5xl leading-none" style={{ color: `rgb(${rgb})` }} data-testid="swing-hero-decision">
+          <div className="font-head font-black text-5xl leading-none text-breathe" style={{ color: `rgb(${rgb})`, ["--glow-rgb"]: rgb }} data-testid="swing-hero-decision">
             {a ? c.label : on ? "…" : "OFF"}
           </div>
           <div className="font-mono-t text-xs text-slate-400 mt-2">{a ? (a.headline || a.thesis || "") : on ? "waiting for the first GPT analysis" : "switch AUTO-TRADE on in the Swing AI panel"}</div>

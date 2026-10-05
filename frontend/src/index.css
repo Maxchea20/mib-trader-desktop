@@ -283,3 +283,19 @@ body {
 .agent-card-glow:hover {
   transform: translateY(-2px);
 }
+
+
+/* Swing AI: breathing glow for the live badge, the armed bar and the LONG / SHORT decision (colour comes from --glow-rgb) */
+@keyframes textBreathe {
+  0%, 100% { text-shadow: 0 0 6px rgba(var(--glow-rgb), 0.35); opacity: 0.82; }
+  50% { text-shadow: 0 0 16px rgba(var(--glow-rgb), 0.95), 0 0 34px rgba(var(--glow-rgb), 0.45); opacity: 1; }
+}
+.text-breathe { animation: textBreathe 3.2s ease-in-out infinite; }
+@keyframes dotBreathe {
+  0%, 100% { box-shadow: 0 0 3px rgba(var(--glow-rgb), 0.5); opacity: 0.7; }
+  50% { box-shadow: 0 0 10px 2px rgba(var(--glow-rgb), 0.95); opacity: 1; }
+}
+.dot-breathe { animation: dotBreathe 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .breathe-glow, .text-breathe, .dot-breathe { animation: none; }
+}
