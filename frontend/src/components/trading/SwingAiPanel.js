@@ -294,7 +294,7 @@ export const SwingAiPanel = () => {
                 className="w-full px-2 py-1.5 bg-[#0d121b] border border-[#1d2635] text-slate-200 font-mono-t text-xs rounded-sm" />
             </div>
           </div>
-          <div className="font-mono-t text-[10px] text-slate-500 mt-2">These limits size every Swing AI trade (paper now, live later). GPT never sets size or leverage.</div>
+          <div className="font-mono-t text-[10px] text-slate-500 mt-2">These limits size every Swing AI trade. In LIVE the size is also capped by SWING_AI_LIVE_MAX_USD and SWING_AI_LIVE_MAX_RISK_PCT (smaller of the two applies) and uses your real available balance. GPT never sets size or leverage.</div>
         </div>
       )}
 
