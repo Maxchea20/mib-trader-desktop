@@ -67,6 +67,17 @@ def _view(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return out
 
 
+def _json_safe(x: Any) -> Any:
+    """NaN / Infinity are not valid JSON (the API would answer 500): e.g. profit factor is infinite while there are no losing trades."""
+    if isinstance(x, float):
+        return x if x == x and x not in (float("inf"), float("-inf")) else None
+    if isinstance(x, dict):
+        return {k: _json_safe(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_safe(v) for v in x]
+    return x
+
+
 def latest() -> Dict[str, Any]:
     """Everything the Swing AI panel shows.  Analysis text comes ONLY from stored GPT responses."""
     m = get_manager()
@@ -75,11 +86,11 @@ def latest() -> Dict[str, Any]:
     if trade:
         rows = [d for d in store.decisions(50) if d["kind"] == "MANAGE" and d["trade_id"] == trade["id"] and d["valid"]]
         mgmt = _view(rows[0]) if rows else None
-    return {"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "symbol": "BTC/USDT", "model": m.cfg.model,
+    return _json_safe({"enabled": enabled(), "mode": sett.effective_mode(), "settings": settings_view(), "symbol": "BTC/USDT", "model": m.cfg.model,
             "openai_key_tail": key_tail(), "state": m.status,
             "last_analysis": _view(store.latest_entry_decision()), "last_review": _view(store.latest_decision()),
             "latest_management": mgmt, "active_trade": trade,
-            "analytics": mgr.report()}
+            "analytics": mgr.report()})
 
 
 _models_cache: Dict[str, Any] = {"at": 0.0, "data": None}
@@ -129,7 +140,7 @@ def trades_view(limit: int = 200) -> list:
                     "if_held": ({"status": t.get("cf_status"), "r_net": t.get("cf_r_net"), "ended_by": t.get("cf_exit_reason")}
                                 if t.get("exit_reason") in AI_EXIT_REASONS else None),
                     "held_minutes": round((end - start) / 60, 1) if end and start else None})
-    return out
+    return _json_safe(out)
 
 
 def status() -> Dict[str, Any]:

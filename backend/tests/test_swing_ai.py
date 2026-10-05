@@ -988,3 +988,18 @@ def test_diagnose_flags_ai_mistakes(tmpdb):
     assert codes["SCALP_GEOMETRY"] >= 1 and codes["SIDE_FLIP"] == 2 and codes["PROPOSALS_REJECTED"] == 1
     assert codes["MANAGE_CONTRADICTION"] == 1 and codes["AI_ERRORS"] == 1 and codes["SLOW_CALLS"] == 1
     assert out["findings"][0]["severity"] == "HIGH"
+
+
+def test_latest_is_valid_json_when_every_trade_wins(tmpdb):
+    import json as _json
+    from src.swing_ai import service
+    for i in range(3):                                   # winning trades only: profit factor is infinite
+        store.add_trade({"symbol": "BTC_USDT", "status": "CLOSED", "side": "LONG", "entry_type": "MARKET", "plan_entry": 100.0, "fill_price": 100.0,
+                         "sl": 99.0, "sl0": 99.0, "tp": 102.0, "qty": 1.0, "risk_usd": 1.0, "risk_dist": 1.0, "created_ts": 1000 + i, "opened_ts": 1000 + i,
+                         "exit_price": 102.0, "exit_reason": "TP", "closed_ts": 2000 + i, "r_gross": 2.0, "r_net": 1.9, "fees_usd": 0.0, "outcome": "WIN",
+                         "mfe_r": 2.0, "mae_r": 0.1})
+    assert paper.performance(store.trades("CLOSED"))["profit_factor"] == float("inf")
+    safe = service._json_safe({"a": float("inf"), "b": [float("nan"), 1.5], "c": {"d": -float("inf")}})
+    assert safe == {"a": None, "b": [None, 1.5], "c": {"d": None}}
+    _json.dumps(service.latest(), allow_nan=False)
+    _json.dumps(service.trades_view(), allow_nan=False)
