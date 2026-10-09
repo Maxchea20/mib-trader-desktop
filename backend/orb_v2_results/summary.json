@@ -1,0 +1,1254 @@
+{
+  "db": "/tmp/market_data_clean.db",
+  "sha256": "84fdee4e54dea3ac8d075a4a06e7a3be75669bf46fb4058bf71e1d9c2348d26f",
+  "bytes": 46624768,
+  "baseline_repro": {
+    "5m_primary_match": "yes",
+    "1m_primary_match": "yes",
+    "5m_primary_mismatches": [],
+    "1m_primary_mismatches": [],
+    "5m_primary": [
+      {
+        "config_id": "BTC_USDT|5m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "out_of_sample",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "5m",
+        "signals": 61,
+        "filled_trades": 61,
+        "fill_rate": 1.0,
+        "closed_trades": 61,
+        "unresolved_trades": 0,
+        "wins": 19,
+        "losses": 42,
+        "breakeven": 0,
+        "win_rate": 0.3114754098360656,
+        "gross_pnl": -20.178139999997995,
+        "net_pnl": -154.87414659400176,
+        "profit_factor": 0.6663689244179603,
+        "expectancy": -2.538920435967242,
+        "average_r": -0.26635714015940903,
+        "max_drawdown_fraction": 0.17929170693557225,
+        "ending_equity_realized": 845.125853405998,
+        "fees": 89.387956594,
+        "execution_drag": 45.3080500000038,
+        "ambiguous_closed_trades": 1,
+        "unambiguous_closed_trades": 60,
+        "unambiguous_net_pnl": -143.42031311400177,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 35,
+          "net_pnl": -29.95375123000158,
+          "win_rate": 0.37142857142857144
+        },
+        "short": {
+          "trades": 26,
+          "net_pnl": -124.92039536400021,
+          "win_rate": 0.23076923076923078
+        },
+        "pnl_by_ny_date": {
+          "2026-07-14": 5.761136139999646,
+          "2026-07-15": -12.070995199999999,
+          "2026-07-16": -11.918901720000001,
+          "2026-07-17": 17.629251048000274,
+          "2026-07-20": -11.98871674199973,
+          "2026-07-21": -11.835149152000174,
+          "2026-07-22": -11.691654894,
+          "2026-07-23": -11.569608864000173,
+          "2026-07-24": -11.43121735,
+          "2026-07-27": 16.914422839999997,
+          "2026-07-28": -11.484449765999912,
+          "2026-07-29": -22.558367679999748,
+          "2026-07-30": -22.02603793199992,
+          "2026-07-31": 16.199565616,
+          "2026-08-03": 16.50217296200017,
+          "2026-08-04": -22.26856092000017,
+          "2026-08-05": 16.384541964000164,
+          "2026-08-06": 16.690217471999915,
+          "2026-08-07": -11.336770633999917,
+          "2026-08-10": -11.2042988,
+          "2026-08-11": 16.594204957999917,
+          "2026-08-12": 16.883883743999917,
+          "2026-08-13": -11.471564363999741,
+          "2026-08-14": -11.333866194000088,
+          "2026-08-18": 16.779222519999916,
+          "2026-08-19": 17.074972978000343,
+          "2026-08-21": -11.599012486000001,
+          "2026-08-24": -11.453833479999998,
+          "2026-08-25": -22.507227692000136,
+          "2026-08-26": -21.976148364000686,
+          "2026-08-27": 5.186602504000138,
+          "2026-08-28": 5.222710458000002,
+          "2026-08-31": -21.71338927200067,
+          "2026-09-01": -10.660021190000265,
+          "2026-09-03": 15.76812187200013,
+          "2026-09-04": -21.285259519999478,
+          "2026-09-08": 15.676469789999873,
+          "2026-09-09": -10.652399280000262,
+          "2026-09-10": -10.505883248000266,
+          "2026-09-11": 15.568112322,
+          "2026-09-14": -10.566182300000001,
+          "2026-09-15": -10.450042902000135,
+          "2026-09-16": -20.545677824000663,
+          "2026-09-17": -10.075392839999745,
+          "2026-09-18": 14.928705360000123,
+          "2026-09-21": -10.124692139999887,
+          "2026-09-22": -10.022486526,
+          "2026-09-23": 14.848111817999886,
+          "2026-09-24": 15.095325691999655,
+          "2026-09-25": -10.254089376000119
+        },
+        "reason_counts": {
+          "exit:stop": 42,
+          "exit:take_profit": 19
+        },
+        "ohlc_proxy": false
+      },
+      {
+        "config_id": "BTC_USDT|5m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "train",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "5m",
+        "signals": 175,
+        "filled_trades": 175,
+        "fill_rate": 1.0,
+        "closed_trades": 175,
+        "unresolved_trades": 0,
+        "wins": 57,
+        "losses": 118,
+        "breakeven": 0,
+        "win_rate": 0.32571428571428573,
+        "gross_pnl": 4.81846000000324,
+        "net_pnl": -335.1674975220025,
+        "profit_factor": 0.7086613313379154,
+        "expectancy": -1.9152428429828716,
+        "average_r": -0.2234923981503606,
+        "max_drawdown_fraction": 0.357332256802002,
+        "ending_equity_realized": 664.8325024779977,
+        "fees": 225.81254752200002,
+        "execution_drag": 114.17341000000582,
+        "ambiguous_closed_trades": 2,
+        "unambiguous_closed_trades": 173,
+        "unambiguous_net_pnl": -316.73760657200245,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 83,
+          "net_pnl": -132.049264938001,
+          "win_rate": 0.3373493975903614
+        },
+        "short": {
+          "trades": 92,
+          "net_pnl": -203.11823258400162,
+          "win_rate": 0.31521739130434784
+        },
+        "pnl_by_ny_date": {
+          "2025-09-16": -11.999442288000104,
+          "2025-09-17": -11.860166867999803,
+          "2025-09-18": -11.688003890000193,
+          "2025-09-19": 5.591876224000101,
+          "2025-09-22": -11.640887663999901,
+          "2025-09-23": -22.8355140200001,
+          "2025-09-24": 5.387183595999522,
+          "2025-09-26": -22.4173987060002,
+          "2025-09-29": 16.506923256000285,
+          "2025-09-30": -11.19560508,
+          "2025-10-01": 16.59549208,
+          "2025-10-02": -22.40142999600009,
+          "2025-10-03": 5.28090895199991,
+          "2025-10-06": -11.063299450000173,
+          "2025-10-07": -10.937654230000087,
+          "2025-10-08": -10.816065700000001,
+          "2025-10-09": 16.021936199999832,
+          "2025-10-10": 16.267832262000084,
+          "2025-10-13": -11.046429604000092,
+          "2025-10-14": 16.3614160480001,
+          "2025-10-15": -22.115597830000013,
+          "2025-10-16": 16.263132660000192,
+          "2025-10-17": 16.594302113999895,
+          "2025-10-20": -11.2603969920001,
+          "2025-10-21": 16.63602159,
+          "2025-10-22": -11.320400304000103,
+          "2025-10-23": -22.223715635999895,
+          "2025-10-24": -10.911234991999809,
+          "2025-10-27": -21.45085562000009,
+          "2025-10-28": 5.057884583999549,
+          "2025-10-29": 15.879086578000093,
+          "2025-10-31": 16.167420858,
+          "2025-11-03": 5.2635164540002926,
+          "2025-11-04": 16.5226436680001,
+          "2025-11-05": -11.237663740000212,
+          "2025-11-06": -11.094768584000212,
+          "2025-11-07": -10.957683528000315,
+          "2025-11-10": -10.8293318279997,
+          "2025-11-11": -10.6948785719999,
+          "2025-11-12": -10.570025423999901,
+          "2025-11-13": 5.051130251999409,
+          "2025-11-14": 15.744210427999896,
+          "2025-11-17": -10.70400187999967,
+          "2025-11-18": -21.012735925999337,
+          "2025-11-19": 31.201987055999894,
+          "2025-11-20": -10.706950950000229,
+          "2025-11-21": 5.083764917999879,
+          "2025-11-25": -10.62865317000024,
+          "2025-11-26": -20.86469169600012,
+          "2025-12-01": 15.350927659999767,
+          "2025-12-02": -10.441739100000229,
+          "2025-12-04": -20.51481242399968,
+          "2025-12-05": -10.06534979199968,
+          "2025-12-08": 14.899799975999892,
+          "2025-12-09": -10.117156644000323,
+          "2025-12-10": -9.994229256000212,
+          "2025-12-11": -19.638363812000105,
+          "2025-12-12": 14.447813799999796,
+          "2025-12-15": 14.723737631999787,
+          "2025-12-16": 14.9673564,
+          "2025-12-17": -10.17870735999989,
+          "2025-12-18": -10.04908275000011,
+          "2025-12-19": 14.883444507999673,
+          "2025-12-22": -20.093094477999784,
+          "2025-12-23": 14.804856863999781,
+          "2025-12-26": 15.07650985200011,
+          "2025-12-29": -10.21608744,
+          "2025-12-30": 15.129141954,
+          "2025-12-31": 15.414076776000002,
+          "2026-01-02": -10.482043792000228,
+          "2026-01-05": -10.343853756000001,
+          "2026-01-06": -10.224597041999685,
+          "2026-01-07": -10.091922696,
+          "2026-01-08": 14.930524493999892,
+          "2026-01-09": 4.881696751999462,
+          "2026-01-12": 15.29434578400022,
+          "2026-01-13": 4.978002064000542,
+          "2026-01-14": -10.461101320000422,
+          "2026-01-15": -10.335615840000106,
+          "2026-01-16": -10.195934994000002,
+          "2026-01-20": -10.10008495200011,
+          "2026-01-21": -9.950647872000323,
+          "2026-01-22": -9.839403680000427,
+          "2026-01-23": -9.731871933999894,
+          "2026-01-26": -9.607176757999897,
+          "2026-01-27": -9.493523849999791,
+          "2026-01-28": -9.387325918000203,
+          "2026-01-29": 13.8841352839999,
+          "2026-01-30": -9.447822354000333,
+          "2026-02-02": -18.54043184199977,
+          "2026-02-03": 13.647900356,
+          "2026-02-04": -9.26559295,
+          "2026-02-05": -9.164298,
+          "2026-02-06": -9.03451648,
+          "2026-02-11": -8.934918260000002,
+          "2026-02-12": -8.824020240000126,
+          "2026-02-13": -8.71857742400025,
+          "2026-02-17": -8.613266376000002,
+          "2026-02-18": -16.919871999999877,
+          "2026-02-19": -8.312416284000122,
+          "2026-02-20": -8.214520047999764,
+          "2026-02-24": -8.104349649999815,
+          "2026-02-25": 12.0090816,
+          "2026-02-26": -8.167406207999882,
+          "2026-03-02": 12.072161941999767,
+          "2026-03-03": -16.330105610000476,
+          "2026-03-04": -8.013108839999575,
+          "2026-03-05": 11.859585916000109,
+          "2026-03-06": -8.058802193999886,
+          "2026-03-09": -7.965933506000111,
+          "2026-03-10": 23.79720963200044,
+          "2026-03-11": -8.148341440000001,
+          "2026-03-12": -8.055619584000112,
+          "2026-03-13": 3.820816861999684,
+          "2026-03-16": 11.98378121599979,
+          "2026-03-17": 3.8990536020002082,
+          "2026-03-18": 12.295742367999889,
+          "2026-03-19": -16.587369789999887,
+          "2026-03-20": -8.151339400000227,
+          "2026-03-23": -8.041623749999783,
+          "2026-03-24": -7.947889117999891,
+          "2026-03-25": 11.779868111999786,
+          "2026-03-26": -7.9804559719996675,
+          "2026-03-27": 11.833817580000463,
+          "2026-03-30": -8.03732608799977,
+          "2026-03-31": -15.787955987999887,
+          "2026-04-02": 11.611907580000114,
+          "2026-04-06": -15.681132121999454,
+          "2026-04-07": 11.53892488000022,
+          "2026-04-08": 11.75122829,
+          "2026-04-09": -7.983084608,
+          "2026-04-10": 11.814583506,
+          "2026-04-13": -8.033352447999892,
+          "2026-04-14": 11.888294886000308,
+          "2026-04-15": -8.080476396000002,
+          "2026-04-16": -7.9780209840000005,
+          "2026-04-17": 11.809642943999902,
+          "2026-04-20": -8.020141871999794,
+          "2026-04-21": -7.933606740000403,
+          "2026-04-22": 11.75079804,
+          "2026-04-23": 3.8368424839997006,
+          "2026-04-24": 12.0321100339998,
+          "2026-04-27": -8.1571172159999,
+          "2026-04-28": -8.071865520000207
+        },
+        "reason_counts": {
+          "exit:stop": 118,
+          "exit:take_profit": 57
+        },
+        "ohlc_proxy": false
+      },
+      {
+        "config_id": "BTC_USDT|5m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "validation",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "5m",
+        "signals": 54,
+        "filled_trades": 54,
+        "fill_rate": 1.0,
+        "closed_trades": 54,
+        "unresolved_trades": 0,
+        "wins": 16,
+        "losses": 38,
+        "breakeven": 0,
+        "win_rate": 0.2962962962962963,
+        "gross_pnl": -36.548990000001616,
+        "net_pnl": -159.33460073999692,
+        "profit_factor": 0.6299611425737626,
+        "expectancy": -2.9506407544443873,
+        "average_r": -0.31183054229409624,
+        "max_drawdown_fraction": 0.15933460073999686,
+        "ending_equity_realized": 840.6653992600031,
+        "fees": 81.46706073999998,
+        "execution_drag": 41.31854999999531,
+        "ambiguous_closed_trades": 1,
+        "unambiguous_closed_trades": 53,
+        "unambiguous_net_pnl": -148.99857509999677,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 25,
+          "net_pnl": -142.40594181199987,
+          "win_rate": 0.2
+        },
+        "short": {
+          "trades": 29,
+          "net_pnl": -16.928658927997056,
+          "win_rate": 0.3793103448275862
+        },
+        "pnl_by_ny_date": {
+          "2026-05-01": -11.983217765999704,
+          "2026-05-04": 5.674940207999999,
+          "2026-05-05": -23.70017761599958,
+          "2026-05-06": 17.456667050000277,
+          "2026-05-07": -11.854755744000144,
+          "2026-05-08": 17.514270223999716,
+          "2026-05-11": -11.922295536,
+          "2026-05-12": -11.761635374000141,
+          "2026-05-13": -11.619550440000566,
+          "2026-05-14": -11.474488467999583,
+          "2026-05-15": 16.995998396000278,
+          "2026-05-18": 17.314543244,
+          "2026-05-19": -11.774110265999703,
+          "2026-05-20": -11.616742000000437,
+          "2026-05-22": 17.193970944000434,
+          "2026-05-26": -11.674314115999854,
+          "2026-05-28": -11.549014049999847,
+          "2026-05-29": -11.402583659999392,
+          "2026-06-01": 16.89275595000015,
+          "2026-06-02": 17.196014806000328,
+          "2026-06-03": -11.691676496000001,
+          "2026-06-04": -11.540135828000174,
+          "2026-06-05": 17.07908916000009,
+          "2026-06-08": -11.603908584,
+          "2026-06-09": 17.18437428000027,
+          "2026-06-10": -11.670970499999639,
+          "2026-06-11": -11.539362680000002,
+          "2026-06-12": -11.39736879,
+          "2026-06-15": -11.271816669999671,
+          "2026-06-16": 5.364945380000405,
+          "2026-06-17": -11.191169466000083,
+          "2026-06-18": -11.064736076000084,
+          "2026-06-22": -21.706821880000163,
+          "2026-06-23": 15.975241724000163,
+          "2026-06-24": 16.274516340000172,
+          "2026-06-25": 16.568404076000093,
+          "2026-06-26": 16.849587941999815,
+          "2026-06-29": -11.451795695999907,
+          "2026-06-30": -11.314700153999999,
+          "2026-07-01": 16.743703344000092,
+          "2026-07-02": -22.630432661999734,
+          "2026-07-06": -11.1059962,
+          "2026-07-07": -21.812079446000418,
+          "2026-07-08": -10.711190815999917,
+          "2026-07-09": -10.587681440000082,
+          "2026-07-10": -20.788753800000315,
+          "2026-07-13": -10.200141588000081
+        },
+        "reason_counts": {
+          "exit:stop": 38,
+          "exit:take_profit": 16
+        },
+        "ohlc_proxy": false
+      }
+    ],
+    "1m_primary": [
+      {
+        "config_id": "BTC_USDT|1m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "out_of_sample",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "1m",
+        "signals": 10,
+        "filled_trades": 10,
+        "fill_rate": 1.0,
+        "closed_trades": 10,
+        "unresolved_trades": 0,
+        "wins": 3,
+        "losses": 7,
+        "breakeven": 0,
+        "win_rate": 0.3,
+        "gross_pnl": -6.517629999999761,
+        "net_pnl": -30.574166445997484,
+        "profit_factor": 0.6365081236659997,
+        "expectancy": -3.0574166445997486,
+        "average_r": -0.30070858094496733,
+        "max_drawdown_fraction": 0.05312210957137327,
+        "ending_equity_realized": 969.4258335540026,
+        "fees": 15.971456446000003,
+        "execution_drag": 8.08507999999772,
+        "ambiguous_closed_trades": 0,
+        "unambiguous_closed_trades": 10,
+        "unambiguous_net_pnl": -30.574166445997484,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 6,
+          "net_pnl": -12.501635701998158,
+          "win_rate": 0.3333333333333333
+        },
+        "short": {
+          "trades": 4,
+          "net_pnl": -18.072530743999327,
+          "win_rate": 0.25
+        },
+        "pnl_by_ny_date": {
+          "2026-09-17": -11.978368309999395,
+          "2026-09-18": 17.74130562400014,
+          "2026-09-21": 18.04999923600041,
+          "2026-09-22": -24.412438567999722,
+          "2026-09-23": 5.758814250000539,
+          "2026-09-24": -23.95760906199986,
+          "2026-09-25": -11.775869615999591
+        },
+        "reason_counts": {
+          "exit:stop": 7,
+          "exit:take_profit": 3
+        },
+        "ohlc_proxy": false
+      },
+      {
+        "config_id": "BTC_USDT|1m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "train",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "1m",
+        "signals": 26,
+        "filled_trades": 26,
+        "fill_rate": 1.0,
+        "closed_trades": 26,
+        "unresolved_trades": 0,
+        "wins": 7,
+        "losses": 19,
+        "breakeven": 0,
+        "win_rate": 0.2692307692307692,
+        "gross_pnl": -37.78311999999993,
+        "net_pnl": -99.26146190400105,
+        "profit_factor": 0.5555711177140347,
+        "expectancy": -3.8177485347692715,
+        "average_r": -0.39306467929361383,
+        "max_drawdown_fraction": 0.13026940579932572,
+        "ending_equity_realized": 900.7385380959989,
+        "fees": 40.798861904000006,
+        "execution_drag": 20.67948000000111,
+        "ambiguous_closed_trades": 0,
+        "unambiguous_closed_trades": 26,
+        "unambiguous_net_pnl": -99.26146190400105,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 17,
+          "net_pnl": -52.00592089200136,
+          "win_rate": 0.29411764705882354
+        },
+        "short": {
+          "trades": 9,
+          "net_pnl": -47.255541011999696,
+          "win_rate": 0.2222222222222222
+        },
+        "pnl_by_ny_date": {
+          "2026-08-12": 5.775852650000093,
+          "2026-08-13": -12.058113668000274,
+          "2026-08-14": -11.916535932000095,
+          "2026-08-17": 17.64508185,
+          "2026-08-18": 17.936991323999912,
+          "2026-08-19": 18.269078772000547,
+          "2026-08-20": -12.41672250000067,
+          "2026-08-21": -12.266542463999691,
+          "2026-08-24": 5.8239309460001465,
+          "2026-08-25": -24.246704035999997,
+          "2026-08-26": -23.649275095999563,
+          "2026-08-27": 5.579670263999862,
+          "2026-08-28": 5.625574717999855,
+          "2026-08-31": -23.35542401800073,
+          "2026-09-01": -11.479750380000286,
+          "2026-09-02": -11.337233568000427,
+          "2026-09-03": -11.201626678000139,
+          "2026-09-04": -21.9897140879996
+        },
+        "reason_counts": {
+          "exit:stop": 19,
+          "exit:take_profit": 7
+        },
+        "ohlc_proxy": false
+      },
+      {
+        "config_id": "BTC_USDT|1m|ORB-15|close|both|baseline_25bps_2R|normal",
+        "split": "validation",
+        "orb": "ORB-15",
+        "entry_model": "close",
+        "sides": "both",
+        "risk_profile": "baseline_25bps_2R",
+        "slippage_profile": "normal",
+        "timeframe": "1m",
+        "signals": 8,
+        "filled_trades": 8,
+        "fill_rate": 1.0,
+        "closed_trades": 8,
+        "unresolved_trades": 0,
+        "wins": 2,
+        "losses": 6,
+        "breakeven": 0,
+        "win_rate": 0.25,
+        "gross_pnl": -17.039990000000017,
+        "net_pnl": -36.07001957399866,
+        "profit_factor": 0.49396322894556705,
+        "expectancy": -4.508752446749832,
+        "average_r": -0.4506565603182215,
+        "max_drawdown_fraction": 0.041598403161416025,
+        "ending_equity_realized": 963.9299804260013,
+        "fees": 12.627929574000001,
+        "execution_drag": 6.402099999998635,
+        "ambiguous_closed_trades": 0,
+        "unambiguous_closed_trades": 8,
+        "unambiguous_net_pnl": -36.07001957399866,
+        "unresolved_mtm_pnl": 0,
+        "long": {
+          "trades": 4,
+          "net_pnl": -17.780405673999553,
+          "win_rate": 0.25
+        },
+        "short": {
+          "trades": 4,
+          "net_pnl": -18.289613899999104,
+          "win_rate": 0.25
+        },
+        "pnl_by_ny_date": {
+          "2026-09-08": 5.768337204000305,
+          "2026-09-09": -12.057785383999853,
+          "2026-09-10": -11.916840439999552,
+          "2026-09-14": -11.772078161999854,
+          "2026-09-15": 17.454501120000298,
+          "2026-09-16": -23.546153912
+        },
+        "reason_counts": {
+          "exit:stop": 6,
+          "exit:take_profit": 2
+        },
+        "ohlc_proxy": false
+      }
+    ]
+  },
+  "survey_counts": {
+    "dates": 378,
+    "usable": 31,
+    "range_status": {
+      "missing_opening_range": 1,
+      "missing_1m_opening_range": 228,
+      "not_nyse_session_day": 118,
+      "ok": 31
+    },
+    "split_counts": {
+      "train": 18,
+      "validation": 6,
+      "out_of_sample": 7
+    },
+    "split_dates": {
+      "train": [
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04"
+      ],
+      "validation": [
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16"
+      ],
+      "out_of_sample": [
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-25"
+      ]
+    }
+  },
+  "v2_primary": {
+    "config": {
+      "config_id": "BTC_USDT|ORB-V2|5m-body+1m-continuation|baseline_25bps_2R|normal|distance=off",
+      "strategy": "ORB-V2",
+      "definition": "09:30-09:35 NY range, first 5m body breakout, next 1m continuation",
+      "stop_loss_fraction": 0.0025,
+      "take_profit_fraction": 0.005,
+      "risk_fraction": 0.01,
+      "leverage": 5.0,
+      "max_daily_loss_fraction": 0.03,
+      "max_open_positions": 1,
+      "starting_equity": 1000.0,
+      "slippage_bps": 1.0,
+      "spread_usd": 0.1,
+      "slippage_profile": "normal",
+      "risk_profile": "baseline_25bps_2R",
+      "entry_cutoff_local": "11:00:00",
+      "compound": true,
+      "max_entry_distance_range_multiple": null,
+      "one_entry_per_session": true,
+      "live_submit": false,
+      "fills": "ohlc_simulation",
+      "contract": {
+        "symbol": "BTC_USDT",
+        "contract_size": 0.0001,
+        "price_unit": 0.1,
+        "price_scale": 1,
+        "vol_unit": 1.0,
+        "vol_scale": 0,
+        "min_vol": 1.0,
+        "max_vol": 400000.0,
+        "min_leverage": 1.0,
+        "max_leverage": 500.0,
+        "taker_fee_rate": 0.0002,
+        "maker_fee_rate": 0.0,
+        "maintenance_margin_rate": 0.001,
+        "liquidation_fee_rate": 0.0004,
+        "isolated": true,
+        "risk_tiers": [
+          {
+            "max_vol": 120000,
+            "max_leverage": 500
+          },
+          {
+            "max_vol": 310000,
+            "max_leverage": 200
+          },
+          {
+            "max_vol": 480000,
+            "max_leverage": 100
+          },
+          {
+            "max_vol": 2800000,
+            "max_leverage": 50
+          },
+          {
+            "max_vol": 17500000,
+            "max_leverage": 20
+          },
+          {
+            "max_vol": 19000000,
+            "max_leverage": 10
+          }
+        ],
+        "as_of": "2026-10-09T11:38:00Z",
+        "source": "https://contract.mexc.com/api/v1/contract/detail?symbol=BTC_USDT",
+        "adapter_order_types": {
+          "limit": 1,
+          "market": 5
+        },
+        "adapter_gap": "mexc_private.submit_order supports market and limit with attached stopLossPrice/takeProfitPrice. It does not implement MEXC plan orders, so a resting intrabar stop-entry is not live-wired."
+      }
+    },
+    "activity": {
+      "train": {
+        "valid_sessions": 18,
+        "first": "2026-08-12",
+        "last": "2026-09-04",
+        "long_breakouts": 9,
+        "short_breakouts": 9,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [
+          "2026-08-27"
+        ],
+        "entry_signals": 17,
+        "filled_trades": 17,
+        "unfilled_reasons": {}
+      },
+      "validation": {
+        "valid_sessions": 6,
+        "first": "2026-09-08",
+        "last": "2026-09-16",
+        "long_breakouts": 2,
+        "short_breakouts": 4,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [],
+        "entry_signals": 6,
+        "filled_trades": 6,
+        "unfilled_reasons": {}
+      },
+      "out_of_sample": {
+        "valid_sessions": 7,
+        "first": "2026-09-17",
+        "last": "2026-09-25",
+        "long_breakouts": 6,
+        "short_breakouts": 1,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [
+          "2026-09-25"
+        ],
+        "entry_signals": 6,
+        "filled_trades": 6,
+        "unfilled_reasons": {}
+      }
+    },
+    "stats": {
+      "train": {
+        "closed_trades": 17,
+        "wins": 5,
+        "losses": 12,
+        "win_rate": 0.29411764705882354,
+        "gross_pnl": -13.152859999999256,
+        "fees": 27.28448858,
+        "execution_drag": 13.84034000000059,
+        "net_pnl": -54.27768857999985,
+        "profit_factor": 0.624265237020042,
+        "expectancy": -3.1928052105882263,
+        "average_r": -0.3185484872934994,
+        "max_drawdown_fraction": 0.08155865640239067,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 9,
+          "wins": 4,
+          "net_pnl": 12.824601603998882,
+          "win_rate": 0.4444444444444444
+        },
+        "short": {
+          "trades": 8,
+          "wins": 1,
+          "net_pnl": -67.10229018399875,
+          "win_rate": 0.125
+        }
+      },
+      "validation": {
+        "closed_trades": 6,
+        "wins": 2,
+        "losses": 4,
+        "win_rate": 0.3333333333333333,
+        "gross_pnl": 1.9272599999989115,
+        "fees": 9.640917454,
+        "execution_drag": 4.884189999997256,
+        "net_pnl": -12.597847453998343,
+        "profit_factor": 0.7398390409014503,
+        "expectancy": -2.0996412423330573,
+        "average_r": -0.20078592327087094,
+        "max_drawdown_fraction": 0.03557723184171501,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 2,
+          "wins": 1,
+          "net_pnl": 5.780062584000916,
+          "win_rate": 0.5
+        },
+        "short": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -18.377910037999257,
+          "win_rate": 0.25
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 6,
+        "wins": 2,
+        "losses": 4,
+        "win_rate": 0.3333333333333333,
+        "gross_pnl": 1.7478499999996444,
+        "fees": 9.495434784,
+        "execution_drag": 4.803789999998886,
+        "net_pnl": -12.551374783999243,
+        "profit_factor": 0.7370762210698139,
+        "expectancy": -2.091895797333207,
+        "average_r": -0.20074153323783347,
+        "max_drawdown_fraction": 0.0355378214818817,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 5,
+          "wins": 2,
+          "net_pnl": -0.556254583999241,
+          "win_rate": 0.4
+        },
+        "short": {
+          "trades": 1,
+          "wins": 0,
+          "net_pnl": -11.995120200000002,
+          "win_rate": 0.0
+        }
+      }
+    }
+  },
+  "v2_distance_filter": {
+    "config": {
+      "config_id": "BTC_USDT|ORB-V2|5m-body+1m-continuation|baseline_25bps_2R|normal|distance=1x",
+      "strategy": "ORB-V2",
+      "definition": "09:30-09:35 NY range, first 5m body breakout, next 1m continuation",
+      "stop_loss_fraction": 0.0025,
+      "take_profit_fraction": 0.005,
+      "risk_fraction": 0.01,
+      "leverage": 5.0,
+      "max_daily_loss_fraction": 0.03,
+      "max_open_positions": 1,
+      "starting_equity": 1000.0,
+      "slippage_bps": 1.0,
+      "spread_usd": 0.1,
+      "slippage_profile": "normal",
+      "risk_profile": "baseline_25bps_2R",
+      "entry_cutoff_local": "11:00:00",
+      "compound": true,
+      "max_entry_distance_range_multiple": 1.0,
+      "one_entry_per_session": true,
+      "live_submit": false,
+      "fills": "ohlc_simulation",
+      "contract": {
+        "symbol": "BTC_USDT",
+        "contract_size": 0.0001,
+        "price_unit": 0.1,
+        "price_scale": 1,
+        "vol_unit": 1.0,
+        "vol_scale": 0,
+        "min_vol": 1.0,
+        "max_vol": 400000.0,
+        "min_leverage": 1.0,
+        "max_leverage": 500.0,
+        "taker_fee_rate": 0.0002,
+        "maker_fee_rate": 0.0,
+        "maintenance_margin_rate": 0.001,
+        "liquidation_fee_rate": 0.0004,
+        "isolated": true,
+        "risk_tiers": [
+          {
+            "max_vol": 120000,
+            "max_leverage": 500
+          },
+          {
+            "max_vol": 310000,
+            "max_leverage": 200
+          },
+          {
+            "max_vol": 480000,
+            "max_leverage": 100
+          },
+          {
+            "max_vol": 2800000,
+            "max_leverage": 50
+          },
+          {
+            "max_vol": 17500000,
+            "max_leverage": 20
+          },
+          {
+            "max_vol": 19000000,
+            "max_leverage": 10
+          }
+        ],
+        "as_of": "2026-10-09T11:38:00Z",
+        "source": "https://contract.mexc.com/api/v1/contract/detail?symbol=BTC_USDT",
+        "adapter_order_types": {
+          "limit": 1,
+          "market": 5
+        },
+        "adapter_gap": "mexc_private.submit_order supports market and limit with attached stopLossPrice/takeProfitPrice. It does not implement MEXC plan orders, so a resting intrabar stop-entry is not live-wired."
+      }
+    },
+    "activity": {
+      "train": {
+        "valid_sessions": 18,
+        "first": "2026-08-12",
+        "last": "2026-09-04",
+        "long_breakouts": 9,
+        "short_breakouts": 9,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [
+          "2026-08-27"
+        ],
+        "entry_signals": 17,
+        "filled_trades": 15,
+        "unfilled_reasons": {
+          "entry_distance": 2
+        }
+      },
+      "validation": {
+        "valid_sessions": 6,
+        "first": "2026-09-08",
+        "last": "2026-09-16",
+        "long_breakouts": 2,
+        "short_breakouts": 4,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [],
+        "entry_signals": 6,
+        "filled_trades": 3,
+        "unfilled_reasons": {
+          "entry_distance": 3
+        }
+      },
+      "out_of_sample": {
+        "valid_sessions": 7,
+        "first": "2026-09-17",
+        "last": "2026-09-25",
+        "long_breakouts": 6,
+        "short_breakouts": 1,
+        "no_breakout": 0,
+        "incomplete_breakout_path": 0,
+        "breakout_without_1m_signal": [
+          "2026-09-25"
+        ],
+        "entry_signals": 6,
+        "filled_trades": 4,
+        "unfilled_reasons": {
+          "entry_distance": 2
+        }
+      }
+    },
+    "stats": {
+      "train": {
+        "closed_trades": 15,
+        "wins": 5,
+        "losses": 10,
+        "win_rate": 0.3333333333333333,
+        "gross_pnl": 5.389800000000598,
+        "fees": 24.252902832000004,
+        "execution_drag": 12.30610000000016,
+        "net_pnl": -31.169202831999563,
+        "profit_factor": 0.7435945350587422,
+        "expectancy": -2.0779468554666374,
+        "average_r": -0.20096644901941454,
+        "max_drawdown_fraction": 0.06982245379488757,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 8,
+          "wins": 4,
+          "net_pnl": 24.081097439999162,
+          "win_rate": 0.5
+        },
+        "short": {
+          "trades": 7,
+          "wins": 1,
+          "net_pnl": -55.25030027199874,
+          "win_rate": 0.14285714285714285
+        }
+      },
+      "validation": {
+        "closed_trades": 3,
+        "wins": 1,
+        "losses": 2,
+        "win_rate": 0.3333333333333333,
+        "gross_pnl": 0.9653099999992296,
+        "fees": 4.837096986000001,
+        "execution_drag": 2.4505199999986313,
+        "net_pnl": -6.322306985999402,
+        "profit_factor": 0.7396294895695845,
+        "expectancy": -2.107435661999801,
+        "average_r": -0.20084034400606962,
+        "max_drawdown_fraction": 0.023853560823398196,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 2,
+          "wins": 1,
+          "net_pnl": 5.746708854000907,
+          "win_rate": 0.5
+        },
+        "short": {
+          "trades": 1,
+          "wins": 0,
+          "net_pnl": -12.06901584000031,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 4,
+        "wins": 1,
+        "losses": 3,
+        "win_rate": 0.25,
+        "gross_pnl": -8.759359999999777,
+        "fees": 6.27665637,
+        "execution_drag": 3.176849999999426,
+        "net_pnl": -18.212866369999208,
+        "profit_factor": 0.48737844259620183,
+        "expectancy": -4.553216592499802,
+        "average_r": -0.4506769014948683,
+        "max_drawdown_fraction": 0.03552887331199906,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 3,
+          "wins": 1,
+          "net_pnl": -6.217746169999206,
+          "win_rate": 0.3333333333333333
+        },
+        "short": {
+          "trades": 1,
+          "wins": 0,
+          "net_pnl": -11.995120200000002,
+          "win_rate": 0.0
+        }
+      }
+    },
+    "note": "Separate from the primary comparison. Not used to choose a risk setting."
+  },
+  "same_window_baseline": {
+    "ORB-15": {
+      "activity": {
+        "train": {
+          "filled_trades": 21,
+          "long": 13,
+          "short": 8
+        },
+        "validation": {
+          "filled_trades": 7,
+          "long": 4,
+          "short": 3
+        },
+        "out_of_sample": {
+          "filled_trades": 7,
+          "long": 5,
+          "short": 2
+        }
+      },
+      "stats": {
+        "train": {
+          "closed_trades": 21,
+          "wins": 6,
+          "losses": 15,
+          "win_rate": 0.2857142857142857,
+          "gross_pnl": -21.939259999997883,
+          "fees": 32.827543118,
+          "execution_drag": 16.619850000002778,
+          "net_pnl": -71.38665311800067,
+          "profit_factor": 0.5951183010382143,
+          "expectancy": -3.399364434190508,
+          "average_r": -0.34356820416552164,
+          "max_drawdown_fraction": 0.09817131829043092,
+          "ambiguous_closed_trades": 1,
+          "long": {
+            "trades": 13,
+            "wins": 4,
+            "net_pnl": -36.3506861320009,
+            "win_rate": 0.3076923076923077
+          },
+          "short": {
+            "trades": 8,
+            "wins": 2,
+            "net_pnl": -35.035966985999764,
+            "win_rate": 0.25
+          }
+        },
+        "validation": {
+          "closed_trades": 7,
+          "wins": 1,
+          "losses": 6,
+          "win_rate": 0.14285714285714285,
+          "gross_pnl": -36.437490000000146,
+          "fees": 11.074388030000001,
+          "execution_drag": 5.611040000001498,
+          "net_pnl": -53.12291803000165,
+          "profit_factor": 0.2527288094711712,
+          "expectancy": -7.588988290000236,
+          "average_r": -0.7720923939416264,
+          "max_drawdown_fraction": 0.06983454153948782,
+          "ambiguous_closed_trades": 0,
+          "long": {
+            "trades": 4,
+            "wins": 1,
+            "net_pnl": -17.632911248000898,
+            "win_rate": 0.25
+          },
+          "short": {
+            "trades": 3,
+            "wins": 0,
+            "net_pnl": -35.49000678200075,
+            "win_rate": 0.0
+          }
+        },
+        "out_of_sample": {
+          "closed_trades": 7,
+          "wins": 3,
+          "losses": 4,
+          "win_rate": 0.42857142857142855,
+          "gross_pnl": 22.007390000000164,
+          "fees": 11.164355914,
+          "execution_drag": 5.6428600000002636,
+          "net_pnl": 5.200174085999901,
+          "profit_factor": 1.1079787812531865,
+          "expectancy": 0.7428820122857002,
+          "average_r": 0.08510994865142253,
+          "max_drawdown_fraction": 0.02382230169994647,
+          "ambiguous_closed_trades": 0,
+          "long": {
+            "trades": 5,
+            "wins": 2,
+            "net_pnl": -0.23431436199982514,
+            "win_rate": 0.4
+          },
+          "short": {
+            "trades": 2,
+            "wins": 1,
+            "net_pnl": 5.434488447999726,
+            "win_rate": 0.5
+          }
+        }
+      }
+    },
+    "ORB-5": {
+      "activity": {
+        "train": {
+          "filled_trades": 27,
+          "long": 15,
+          "short": 12
+        },
+        "validation": {
+          "filled_trades": 8,
+          "long": 4,
+          "short": 4
+        },
+        "out_of_sample": {
+          "filled_trades": 10,
+          "long": 7,
+          "short": 3
+        }
+      },
+      "stats": {
+        "train": {
+          "closed_trades": 27,
+          "wins": 8,
+          "losses": 19,
+          "win_rate": 0.2962962962962963,
+          "gross_pnl": -18.285809999997923,
+          "fees": 43.02307478600001,
+          "execution_drag": 21.796600000000062,
+          "net_pnl": -83.10548478599797,
+          "profit_factor": 0.6336079262948691,
+          "expectancy": -3.077980917999925,
+          "average_r": -0.3119492409086048,
+          "max_drawdown_fraction": 0.13526549744042346,
+          "ambiguous_closed_trades": 1,
+          "long": {
+            "trades": 15,
+            "wins": 6,
+            "net_pnl": -0.04031474199869045,
+            "win_rate": 0.4
+          },
+          "short": {
+            "trades": 12,
+            "wins": 2,
+            "net_pnl": -83.06517004399929,
+            "win_rate": 0.16666666666666666
+          }
+        },
+        "validation": {
+          "closed_trades": 8,
+          "wins": 2,
+          "losses": 6,
+          "win_rate": 0.25,
+          "gross_pnl": -16.842609999998945,
+          "fees": 12.77181775,
+          "execution_drag": 6.4675600000008995,
+          "net_pnl": -36.08198774999985,
+          "profit_factor": 0.4983364525939951,
+          "expectancy": -4.510248468749981,
+          "average_r": -0.4506948447605121,
+          "max_drawdown_fraction": 0.058540593634078375,
+          "ambiguous_closed_trades": 0,
+          "long": {
+            "trades": 4,
+            "wins": 1,
+            "net_pnl": -18.343315816000285,
+            "win_rate": 0.25
+          },
+          "short": {
+            "trades": 4,
+            "wins": 1,
+            "net_pnl": -17.738671933999562,
+            "win_rate": 0.25
+          }
+        },
+        "out_of_sample": {
+          "closed_trades": 10,
+          "wins": 3,
+          "losses": 7,
+          "win_rate": 0.3,
+          "gross_pnl": -6.921139999998774,
+          "fees": 15.689595526000002,
+          "execution_drag": 7.93483000000062,
+          "net_pnl": -30.545565525999393,
+          "profit_factor": 0.6312723179487958,
+          "expectancy": -3.0545565525999394,
+          "average_r": -0.3005389137799843,
+          "max_drawdown_fraction": 0.04163610218799954,
+          "ambiguous_closed_trades": 0,
+          "long": {
+            "trades": 7,
+            "wins": 2,
+            "net_pnl": -24.000768129999678,
+            "win_rate": 0.2857142857142857
+          },
+          "short": {
+            "trades": 3,
+            "wins": 1,
+            "net_pnl": -6.544797395999719,
+            "win_rate": 0.3333333333333333
+          }
+        }
+      }
+    }
+  },
+  "reading": "On the only dates where the 1-minute continuation can be simulated, V2 net versus the previous ORB-15 primary was higher on train, validation. Versus the previous ORB-5 close entry it was higher on train, validation, out_of_sample. Higher on a six-week sample is not evidence of an edge. V2 nets were train -54.28, validation -12.60, out of sample -12.55. ORB-15 on those dates was -71.39, -53.12, 5.20. ORB-5 on those dates was -83.11, -36.08, -30.55. The ORB-15 out-of-sample gain on this window is seven sessions inside a full-sample result that lost 154.87. The full-sample baseline remains negative on every split. The separate 1x-range distance filter was also negative on every split and was not adopted. No parameter was changed to improve these numbers.",
+  "live_orders_sent": 0
+}
