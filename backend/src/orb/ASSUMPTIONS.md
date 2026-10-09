@@ -147,3 +147,12 @@ fees, slippage, spread, and leverage are the original primary preset
 (0.25% stop, 0.50% target, 1% equity risk, 5x, 1 bp, 0.10 spread, 1,000
 USDT restarted on every chronological split). Nothing was searched.
 
+Funding is a flat snapshot of the MEXC `BTC_USDT` rate taken at
+2026-10-09 13:21:54 UTC: `+0.000015` (+0.0015%) every 8 hours, settled at
+00:00, 08:00 and 16:00 UTC. A positive rate means longs pay and shorts
+receive. The mark is that minute's open, because the file has no fair-price
+series. It is not the funding path from August and September 2026. A
+position opened on the settlement minute is not charged for that print.
+A position closed before the settlement is not charged. Taker commission
+is unchanged at 0.02% of notional on entry and on exit.
+

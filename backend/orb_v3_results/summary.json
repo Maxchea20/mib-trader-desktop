@@ -26,6 +26,10 @@
     "direction_locked": true,
     "live_submit": false,
     "fills": "ohlc_simulation",
+    "funding_rate": 1.5e-05,
+    "funding_interval_hours": 8,
+    "funding_as_of": "2026-10-09T13:21:54Z",
+    "funding_note": "Flat snapshot. Positive rate: longs pay, shorts receive, at 00:00, 08:00 and 16:00 UTC, on mark = that minute's open. Not the historical funding path.",
     "contract": {
       "symbol": "BTC_USDT",
       "contract_size": 0.0001,
@@ -193,6 +197,7 @@
         "win_rate": 0.2857142857142857,
         "gross_pnl": -14.80324000000064,
         "fees": 22.197712274,
+        "funding": 0.0,
         "execution_drag": 11.24666999999978,
         "net_pnl": -48.24762227400043,
         "profit_factor": 0.5952937490899072,
@@ -222,6 +227,7 @@
         "win_rate": 0.16666666666666666,
         "gross_pnl": -27.2469100000009,
         "fees": 9.540976182000001,
+        "funding": 0.0,
         "execution_drag": 4.833379999999574,
         "net_pnl": -41.621266182000475,
         "profit_factor": 0.3015666295681316,
@@ -251,6 +257,7 @@
         "win_rate": 0.7142857142857143,
         "gross_pnl": 84.32247999999944,
         "fees": 11.452718028,
+        "funding": 0.0,
         "execution_drag": 5.794139999999125,
         "net_pnl": 67.0756219720003,
         "profit_factor": 3.7157756405144,
@@ -285,6 +292,7 @@
         "win_rate": 0.2857142857142857,
         "gross_pnl": -21.939259999997883,
         "fees": 32.827543118,
+        "funding": 0.0,
         "execution_drag": 16.619850000002778,
         "net_pnl": -71.38665311800067,
         "profit_factor": 0.5951183010382143,
@@ -314,6 +322,7 @@
         "win_rate": 0.14285714285714285,
         "gross_pnl": -36.437490000000146,
         "fees": 11.074388030000001,
+        "funding": 0.0,
         "execution_drag": 5.611040000001498,
         "net_pnl": -53.12291803000165,
         "profit_factor": 0.2527288094711712,
@@ -343,6 +352,7 @@
         "win_rate": 0.42857142857142855,
         "gross_pnl": 22.007390000000164,
         "fees": 11.164355914,
+        "funding": 0.0,
         "execution_drag": 5.6428600000002636,
         "net_pnl": 5.200174085999901,
         "profit_factor": 1.1079787812531865,
@@ -367,7 +377,7 @@
       }
     }
   },
-  "reading": "Train net was -48.25 and validation net was -41.62. Out-of-sample net was 67.08. That out-of-sample gain is seven closed trades after two losing splits, inside a six-week 1-minute file. It is not evidence of an edge and it was not used to change a threshold. The unchanged original ORB-15 close engine on the same dates was -71.39, -53.12, 5.20. Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints.",
-  "trades_csv_sha256": "d0439ed2ca856a52a62cfb5afa1b231fe262b2da2861b9828ba1b6d96dfba5fb",
+  "reading": "Train net was -48.25 and validation net was -41.62. Out-of-sample net was 67.08. That out-of-sample gain is seven closed trades after two losing splits, inside a six-week 1-minute file. It is not evidence of an edge and it was not used to change a threshold. The unchanged original ORB-15 close engine on the same dates was -71.39, -53.12, 5.20. That engine does not charge funding. V3 funding is the flat MEXC snapshot of +0.0015% every 8 hours taken at 2026-10-09 13:21 UTC, not the historical path. Closed-trade funding cash was train 0.00, validation 0.00, out of sample 0.00 (negative means longs paid). Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints.",
+  "trades_csv_sha256": "38cfcaff6373c003397bb6ecad2af0fffbad20f54a02af80c882532e20e0a2f0",
   "trades_csv_rows": 28
 }

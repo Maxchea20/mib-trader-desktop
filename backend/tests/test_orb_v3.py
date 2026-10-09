@@ -12,7 +12,14 @@ import pytest
 
 from src.orb.market import Bar, execution_price, size_contracts, stop_and_target
 from src.orb.session import entry_cutoff_ts, range_bounds_ts
-from src.orb.v3 import find_breakout, opening_range_v3, run_v3_backtest, v3_primary_config
+from src.orb.v3 import (
+    find_breakout,
+    funding_cash,
+    is_funding_ts,
+    opening_range_v3,
+    run_v3_backtest,
+    v3_primary_config,
+)
 
 
 NY = ZoneInfo("America/New_York")
@@ -364,7 +371,10 @@ def test_fill_fees_stop_and_target_match_the_shared_formulas():
     assert trade["simulated_fill"] is True
     assert trade["leverage"] == 5.0
     assert trade["fill_price"] > trade["raw_entry"]
+    assert trade["funding"] == 0
+    assert trade["funding_events"] == 0
     assert v3_primary_config().to_dict()["live_submit"] is False
+    assert v3_primary_config().funding_rate == 0.000015
 
 
 def test_same_bar_stop_and_target_take_the_stop():
@@ -402,3 +412,71 @@ def test_a_five_minute_candle_that_closes_at_1100_is_not_a_breakout():
     assert not isinstance(found, str) and found is not None
     assert found.close_ts < cutoff
     assert found.close == 107
+
+
+def test_funding_is_the_live_mexc_snapshot_and_only_if_held_at_settlement():
+    # 11:00 EST on 15 Jan 2026 is 16:00 UTC, a MEXC settlement.
+    start, _ = range_bounds_ts(WINTER, 15)
+    settle = start + 90 * 60
+    assert is_funding_ts(settle)
+    assert datetime.fromtimestamp(settle, timezone.utc).hour == 16
+
+    # Held through 16:00. Long pays. Mark is the 16:00 open.
+    bars_15, bars_5, bars_1 = _session(
+        WINTER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (87, (102.0, 103.0, 101.8, 102.6)),
+            (88, (102.7, 102.9, 102.6, 102.8)),
+            (89, (102.8, 103.0, 102.6, 102.9)),
+            (90, (102.8, 103.0, 102.6, 102.9)),
+            (91, (102.9, 110.0, 102.8, 109.0)),
+        ],
+    )
+    long_trade = _closed(run_v3_backtest(bars_15, bars_5, bars_1, _cfg()))[0]
+    assert long_trade["direction"] == "LONG"
+    assert long_trade["funding_events"] == 1
+    expected = funding_cash("LONG", long_trade["qty"], 102.8, 0.000015, 0.0001)
+    assert long_trade["funding"] == pytest.approx(expected)
+    assert long_trade["funding"] < 0
+    assert long_trade["net_pnl"] == pytest.approx(
+        (long_trade["exit_price"] - long_trade["fill_price"]) * long_trade["qty"] * 0.0001
+        - long_trade["fees"]
+        + long_trade["funding"]
+    )
+
+    # Same path, but the target prints before 16:00, so no funding.
+    bars_15, bars_5, bars_1 = _session(
+        WINTER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (87, (102.0, 103.0, 101.8, 102.6)),
+            (88, (102.7, 102.9, 102.6, 102.8)),
+            (89, (102.8, 110.0, 102.7, 109.0)),
+        ],
+    )
+    early = _closed(run_v3_backtest(bars_15, bars_5, bars_1, _cfg()))[0]
+    assert early["exit_ts"] < settle
+    assert early["funding"] == 0
+    assert early["funding_events"] == 0
+
+    # Short held across the same settlement receives the payment.
+    bars_15, bars_5, bars_1 = _session(
+        WINTER,
+        [(100.2, 100.6, 96.0, 97.0)],
+        [
+            (87, (98.0, 98.2, 96.4, 96.8)),
+            (88, (96.6, 96.7, 96.4, 96.5)),
+            (89, (96.5, 96.7, 96.4, 96.6)),
+            (90, (96.8, 96.85, 96.5, 96.6)),
+            (91, (96.6, 96.7, 90.0, 91.0)),
+        ],
+    )
+    short_trade = _closed(run_v3_backtest(bars_15, bars_5, bars_1, _cfg()))[0]
+    assert short_trade["direction"] == "SHORT"
+    assert short_trade["funding_events"] == 1
+    assert short_trade["funding"] == pytest.approx(
+        funding_cash("SHORT", short_trade["qty"], 96.8, 0.000015, 0.0001)
+    )
+    assert short_trade["funding"] > 0
+

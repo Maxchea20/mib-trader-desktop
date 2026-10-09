@@ -22,11 +22,11 @@ Each split restarts at 1,000 USDT. A split does not inherit size or losses from 
 
 ## V3 primary
 
-| Split | Closed | Win rate | Gross | Fees | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| train | 14 | 28.6% | -14.80 | 22.20 | 11.25 | -48.25 | 0.60 | -3.45 | -0.34 | 8.1% |
-| validation | 6 | 16.7% | -27.25 | 9.54 | 4.83 | -41.62 | 0.30 | -6.94 | -0.70 | 5.9% |
-| out_of_sample | 7 | 71.4% | 84.32 | 11.45 | 5.79 | 67.08 | 3.72 | 9.58 | 0.94 | 2.4% |
+| Split | Closed | Win rate | Gross | Fees | Funding | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| train | 14 | 28.6% | -14.80 | 22.20 | 0.00 | 11.25 | -48.25 | 0.60 | -3.45 | -0.34 | 8.1% |
+| validation | 6 | 16.7% | -27.25 | 9.54 | 0.00 | 4.83 | -41.62 | 0.30 | -6.94 | -0.70 | 5.9% |
+| out_of_sample | 7 | 71.4% | 84.32 | 11.45 | 0.00 | 5.79 | 67.08 | 3.72 | 9.58 | 0.94 | 2.4% |
 
 | Split | Sessions | Long breakouts | Short breakouts | No breakout | 1m signals | Filled |
 |---|---:|---:|---:|---:|---:|---:|
@@ -48,14 +48,14 @@ Long versus short, closed trades only:
 
 This is not V3. It is the original close-entry engine, ORB-15 built from the three 5-minute candles inside 09:30-09:45, same risk, fees, and slippage, same session dates, each split restarted at 1,000 USDT. On these dates the 15-minute candle and that three-candle range matched.
 
-| Split | Closed | Win rate | Gross | Fees | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| train | 21 | 28.6% | -21.94 | 32.83 | 16.62 | -71.39 | 0.60 | -3.40 | -0.34 | 9.8% |
-| validation | 7 | 14.3% | -36.44 | 11.07 | 5.61 | -53.12 | 0.25 | -7.59 | -0.77 | 7.0% |
-| out_of_sample | 7 | 42.9% | 22.01 | 11.16 | 5.64 | 5.20 | 1.11 | 0.74 | 0.09 | 2.4% |
+| Split | Closed | Win rate | Gross | Fees | Funding | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| train | 21 | 28.6% | -21.94 | 32.83 | 0.00 | 16.62 | -71.39 | 0.60 | -3.40 | -0.34 | 9.8% |
+| validation | 7 | 14.3% | -36.44 | 11.07 | 0.00 | 5.61 | -53.12 | 0.25 | -7.59 | -0.77 | 7.0% |
+| out_of_sample | 7 | 42.9% | 22.01 | 11.16 | 0.00 | 5.64 | 5.20 | 1.11 | 0.74 | 0.09 | 2.4% |
 
 ## Reading
 
-Train net was -48.25 and validation net was -41.62. Out-of-sample net was 67.08. That out-of-sample gain is seven closed trades after two losing splits, inside a six-week 1-minute file. It is not evidence of an edge and it was not used to change a threshold. The unchanged original ORB-15 close engine on the same dates was -71.39, -53.12, 5.20. Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints.
+Train net was -48.25 and validation net was -41.62. Out-of-sample net was 67.08. That out-of-sample gain is seven closed trades after two losing splits, inside a six-week 1-minute file. It is not evidence of an edge and it was not used to change a threshold. The unchanged original ORB-15 close engine on the same dates was -71.39, -53.12, 5.20. That engine does not charge funding. V3 funding is the flat MEXC snapshot of +0.0015% every 8 hours taken at 2026-10-09 13:21 UTC, not the historical path. Closed-trade funding cash was train 0.00, validation 0.00, out of sample 0.00 (negative means longs paid). Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints.
 
 Fills are OHLC simulations (`ohlc_proxy=true`, `simulated_fill=true`). If a 1-minute bar trades both the stop and the target, the stop is taken and `path_ambiguous` is set. A 1-minute hole while a position is open leaves that trade unresolved instead of marking it across the hole.

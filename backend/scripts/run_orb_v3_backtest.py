@@ -37,7 +37,7 @@ COLUMNS = [
     "fill_price", "raw_entry", "stop_price", "target_price", "exit_ts",
     "exit_price", "raw_exit", "exit_reason", "path_ambiguous", "ohlc_proxy",
     "simulated_fill", "qty", "notional", "leverage", "fee_entry", "fee_exit",
-    "fees", "gross_pnl", "execution_drag", "net_pnl", "r_multiple", "equity_after",
+    "fees", "funding", "funding_events", "gross_pnl", "execution_drag", "net_pnl", "r_multiple", "equity_after",
     "risk_profile", "slippage_profile",
 ]
 
@@ -104,6 +104,7 @@ def _closed_stats(rows):
             "win_rate": (len(wins) / len(subset)) if subset else None,
             "gross_pnl": sum(_f(row.get("gross_pnl")) for row in subset),
             "fees": sum(_f(row.get("fee_entry")) + _f(row.get("fee_exit")) for row in subset),
+            "funding": sum(_f(row.get("funding")) for row in subset),
             "execution_drag": sum(_f(row.get("execution_drag")) for row in subset),
             "net_pnl": sum(_f(row.get("net_pnl")) for row in subset),
             "profit_factor": (gross_win / abs(gross_loss)) if gross_loss < 0 else None,
@@ -168,18 +169,19 @@ def _num(value):
 
 def _table(stats):
     lines = [
-        "| Split | Closed | Win rate | Gross | Fees | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Split | Closed | Win rate | Gross | Fees | Funding | Execution drag | Net | Profit factor | Expectancy | Avg R | Max DD |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name in ("train", "validation", "out_of_sample"):
         row = stats[name]
         lines.append(
-            "| {name} | {n} | {win} | {gross} | {fees} | {drag} | {net} | {pf} | {exp} | {r} | {dd} |".format(
+            "| {name} | {n} | {win} | {gross} | {fees} | {funding} | {drag} | {net} | {pf} | {exp} | {r} | {dd} |".format(
                 name=name,
                 n=row["closed_trades"],
                 win=_pct(row["win_rate"]),
                 gross=_money(row["gross_pnl"]),
                 fees=_money(row["fees"]),
+                funding=_money(row.get("funding")),
                 drag=_money(row["execution_drag"]),
                 net=_money(row["net_pnl"]),
                 pf=_num(row["profit_factor"]),
@@ -316,6 +318,12 @@ def _reading(v3_stats, old_stats) -> str:
         "It is not evidence of an edge and it was not used to change a threshold. "
         "The unchanged original ORB-15 close engine on the same dates was "
         f"{old['train']:.2f}, {old['validation']:.2f}, {old['out_of_sample']:.2f}. "
+        "That engine does not charge funding. V3 funding is the flat MEXC snapshot "
+        f"of +0.0015% every 8 hours taken at 2026-10-09 13:21 UTC, not the historical path. "
+        f"Closed-trade funding cash was train {v3_stats['train']['funding']:.2f}, "
+        f"validation {v3_stats['validation']['funding']:.2f}, "
+        f"out of sample {v3_stats['out_of_sample']['funding']:.2f} "
+        "(negative means longs paid). "
         "Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints."
     )
 

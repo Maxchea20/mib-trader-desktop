@@ -30,7 +30,7 @@ No order is submitted.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from .contract_spec import BTC_USDT, ContractSpec
@@ -55,6 +55,12 @@ FIFTEEN_MIN = 900
 FIVE_MIN = 300
 ONE_MIN = 60
 
+# Live MEXC BTC_USDT snapshot, 2026-10-09 13:21:54 UTC.
+# GET https://contract.mexc.com/api/v1/contract/funding_rate/BTC_USDT
+# fundingRate 0.000015, collectCycle 8 hours. Not the historical path.
+FUNDING_RATE_SNAPSHOT = 0.000015
+FUNDING_AS_OF = "2026-10-09T13:21:54Z"
+
 
 @dataclass(frozen=True)
 class OrbV3Config:
@@ -75,6 +81,9 @@ class OrbV3Config:
     entry_cutoff: time = DEFAULT_ENTRY_CUTOFF
     compound: bool = True
     spec: ContractSpec = BTC_USDT
+    funding_rate: float = FUNDING_RATE_SNAPSHOT
+    funding_interval_hours: int = 8
+    funding_as_of: str = FUNDING_AS_OF
 
     def config_id(self) -> str:
         return "|".join(
@@ -112,6 +121,14 @@ class OrbV3Config:
             "direction_locked": True,
             "live_submit": False,
             "fills": "ohlc_simulation",
+            "funding_rate": self.funding_rate,
+            "funding_interval_hours": self.funding_interval_hours,
+            "funding_as_of": self.funding_as_of,
+            "funding_note": (
+                "Flat snapshot. Positive rate: longs pay, shorts receive, "
+                "at 00:00, 08:00 and 16:00 UTC, on mark = that minute's open. "
+                "Not the historical funding path."
+            ),
             "contract": self.spec.to_dict(),
         }
 
@@ -135,6 +152,9 @@ def v3_primary_config(**overrides: Any) -> OrbV3Config:
         entry_cutoff=base.entry_cutoff,
         compound=base.compound,
         spec=base.spec,
+        funding_rate=FUNDING_RATE_SNAPSHOT,
+        funding_interval_hours=8,
+        funding_as_of=FUNDING_AS_OF,
     )
     fields.update(overrides)
     return OrbV3Config(**fields)
@@ -191,6 +211,20 @@ def _valid_ohlc(bar: Bar) -> bool:
         and bar.low <= bar.open
         and bar.low <= bar.close
     )
+
+
+def is_funding_ts(ts: int, interval_hours: int = 8) -> bool:
+    """True at MEXC settlement minutes: 00:00, 08:00 and 16:00 UTC when interval is 8."""
+    if interval_hours <= 0:
+        return False
+    moment = datetime.fromtimestamp(int(ts), timezone.utc)
+    return moment.minute == 0 and moment.second == 0 and moment.hour % interval_hours == 0
+
+
+def funding_cash(side: str, qty: float, mark: float, rate: float, contract_size: float) -> float:
+    """Account cash at one settlement. Positive rate: longs pay, shorts receive."""
+    cash = qty * contract_size * mark * rate
+    return -cash if side == "LONG" else cash
 
 
 def _matches(left: float, right: float) -> bool:
@@ -403,6 +437,8 @@ def _blank(cfg: OrbV3Config, day: date, split: str, rng: OpeningRangeV3 | None, 
         "fee_entry": None,
         "fee_exit": None,
         "fees": None,
+        "funding": None,
+        "funding_events": None,
         "gross_pnl": None,
         "net_pnl": None,
         "execution_drag": None,
@@ -601,6 +637,9 @@ def run_v3_backtest(
             "pending": pending_order,
             "same_bar_exit": False,
             "path_ambiguous": False,
+            "funding": 0.0,
+            "funding_events": 0,
+            "funding_ts": set(),
         }
 
     def close_position(pos: dict[str, Any], bar: Bar, raw_exit: float, reason: str, ambiguous: bool) -> None:
@@ -619,7 +658,7 @@ def run_v3_backtest(
             room = pos["notional"] * max(0.0, (1.0 / cfg.leverage) - spec.maintenance_margin_rate)
             liq_fee = pos["notional"] * spec.liquidation_fee_rate
             gross = -room
-            net = -room - liq_fee - pos["entry_fee"]
+            net = -room - liq_fee - pos["entry_fee"] + float(pos.get("funding") or 0.0)
             exit_fee = liq_fee
             drag = 0.0
             ambiguous = True
@@ -631,7 +670,7 @@ def run_v3_backtest(
             gross = (raw_exit - pos["raw_entry"]) * direction * qty * spec.contract_size
             price_pnl = (fill_exit - pos["fill"]) * direction * qty * spec.contract_size
             exit_fee = abs(qty * spec.contract_size * fill_exit) * spec.taker_fee_rate
-            net = price_pnl - pos["entry_fee"] - exit_fee
+            net = price_pnl - pos["entry_fee"] - exit_fee + float(pos.get("funding") or 0.0)
             drag = gross - price_pnl
         equity += net
         exit_day = ny_date_of_utc_ts(bar.ts)
@@ -661,6 +700,8 @@ def run_v3_backtest(
                 fee_entry=pos["entry_fee"],
                 fee_exit=exit_fee,
                 fees=pos["entry_fee"] + exit_fee,
+                funding=float(pos.get("funding") or 0.0),
+                funding_events=int(pos.get("funding_events") or 0),
                 gross_pnl=gross,
                 net_pnl=net,
                 execution_drag=drag,
@@ -683,6 +724,17 @@ def run_v3_backtest(
             pos["path_ambiguous"] = True
         close_position(pos, bar, res.raw_price, res.reason or "stop", res.ambiguous)
         return True
+
+    def apply_funding(pos: dict[str, Any], bar: Bar) -> None:
+        """Charge the settlement if this minute is one and the position was already open."""
+        if cfg.funding_rate == 0.0 or not is_funding_ts(bar.ts, cfg.funding_interval_hours):
+            return
+        if pos["fill_ts"] >= bar.ts or bar.ts in pos["funding_ts"]:
+            return
+        cash = funding_cash(pos["side"], pos["qty"], bar.open, cfg.funding_rate, spec.contract_size)
+        pos["funding"] = float(pos.get("funding") or 0.0) + cash
+        pos["funding_events"] = int(pos.get("funding_events") or 0) + 1
+        pos["funding_ts"].add(bar.ts)
 
     def qualify(bar: Bar, side: str, rng: OpeningRangeV3) -> bool:
         if rng.high is None or rng.low is None:
@@ -726,6 +778,8 @@ def run_v3_backtest(
                         exit_reason="data_gap",
                         fee_entry=position["entry_fee"],
                         fees=position["entry_fee"],
+                        funding=float(position.get("funding") or 0.0),
+                        funding_events=int(position.get("funding_events") or 0),
                         mtm_pnl=(
                             (ordered[index - 1].close - position["fill"])
                             * (1.0 if position["side"] == "LONG" else -1.0)
@@ -737,6 +791,7 @@ def run_v3_backtest(
                 )
                 position = None
             else:
+                apply_funding(position, bar)
                 position["last_bar_ts"] = bar.ts
                 manage(bar, position, same_bar=False)
 
@@ -828,6 +883,8 @@ def run_v3_backtest(
                 exit_reason="open_at_data_end",
                 fee_entry=position["entry_fee"],
                 fees=position["entry_fee"],
+                funding=float(position.get("funding") or 0.0),
+                funding_events=int(position.get("funding_events") or 0),
                 mtm_pnl=mtm,
                 path_ambiguous=position["path_ambiguous"],
             )
