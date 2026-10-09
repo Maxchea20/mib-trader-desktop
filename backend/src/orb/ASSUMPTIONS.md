@@ -104,3 +104,46 @@ the original primary preset. Exits are still an OHLC proxy, resolved on
 `market_data_clean.db` does not cover the full 5-minute sample, so V2 cannot
 be run on the 2025-09-16 to 2026-07-13 baseline window. Sessions outside the
 1-minute file are skipped, not synthesized.
+
+## ORB V3
+
+V3 corrects V2's opening range. V2's code and results are left in place and
+are not the V3 result. The original ORB engine is also unchanged. V3 does not
+import Hunt, S1, or S2, and it does not submit orders.
+
+Sequence, New York cash open only:
+
+1. The 15-minute candle that opens at 09:30 and closes at 09:45 sets
+   `OR_HIGH` and `OR_LOW`. Those prices are frozen at 09:45. The first
+   five-minute candle is not the range. When the three 5-minute candles
+   inside 09:30-09:45 all exist, they must rebuild the 15-minute OHLC or
+   the session is skipped. One-minute candles are not required to build
+   the range and are never fabricated from five-minute OHLC.
+2. The first 5-minute body breakout is sought from the 09:45 candle onward,
+   not from 09:35, and not only on the 09:45 candle. LONG is `close > OR_HIGH`.
+   SHORT is `close < OR_LOW`. A wick with the close back inside is not a
+   breakout. The first valid side is locked for the session. A missing
+   5-minute slot before 11:00 stops the search. The breakout candle must
+   close strictly before 11:00.
+3. The entry is the next completed 1-minute continuation after that close.
+   LONG needs `close > open` and `close > OR_HIGH`. SHORT needs `close < open`
+   and `close < OR_LOW`. No retest. Minutes that completed at or before the
+   5-minute confirmation are ignored. The fill is the next 1-minute open,
+   not the signal close. If that next open is not the immediately following
+   minute, the order is not filled. If it is at or after 11:00, it is
+   cancelled. No new entry is taken when a breakout has no qualifying
+   1-minute continuation before 11:00.
+4. One entry per session. Direction does not reverse. A later opposite
+   5-minute close does not flip the day.
+5. Stops and targets keep managing after 11:00 on 1-minute bars. If a
+   1-minute hole opens while a position is still on, the trade is left
+   unresolved (`data_gap`) rather than marked to a later bar across the
+   hole. Same-bar stop and target takes the stop and sets `path_ambiguous`.
+
+The reported backtest uses only sessions where the 15-minute range, the
+5-minute breakout path, and the real 1-minute entry window are all present.
+Earlier 5-minute history is not turned into fake 1-minute entries. Risk,
+fees, slippage, spread, and leverage are the original primary preset
+(0.25% stop, 0.50% target, 1% equity risk, 5x, 1 bp, 0.10 spread, 1,000
+USDT restarted on every chronological split). Nothing was searched.
+

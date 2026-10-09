@@ -1,0 +1,373 @@
+{
+  "strategy": "ORB-V3",
+  "definition": "09:30-09:45 NY 15m range, first 5m body breakout from 09:45, next 1m direct continuation",
+  "db": "/tmp/market_data_clean.db",
+  "db_name": "backend/market_data_clean.db",
+  "sha256": "84fdee4e54dea3ac8d075a4a06e7a3be75669bf46fb4058bf71e1d9c2348d26f",
+  "bytes": 46624768,
+  "config": {
+    "config_id": "BTC_USDT|ORB-V3|15m-range+5m-body+1m-continuation|baseline_25bps_2R|normal",
+    "strategy": "ORB-V3",
+    "definition": "09:30-09:45 NY 15m range, first 5m body breakout from 09:45, next 1m direct continuation",
+    "stop_loss_fraction": 0.0025,
+    "take_profit_fraction": 0.005,
+    "risk_fraction": 0.01,
+    "leverage": 5.0,
+    "max_daily_loss_fraction": 0.03,
+    "max_open_positions": 1,
+    "starting_equity": 1000.0,
+    "slippage_bps": 1.0,
+    "spread_usd": 0.1,
+    "slippage_profile": "normal",
+    "risk_profile": "baseline_25bps_2R",
+    "entry_cutoff_local": "11:00:00",
+    "compound": true,
+    "one_entry_per_session": true,
+    "direction_locked": true,
+    "live_submit": false,
+    "fills": "ohlc_simulation",
+    "contract": {
+      "symbol": "BTC_USDT",
+      "contract_size": 0.0001,
+      "price_unit": 0.1,
+      "price_scale": 1,
+      "vol_unit": 1.0,
+      "vol_scale": 0,
+      "min_vol": 1.0,
+      "max_vol": 400000.0,
+      "min_leverage": 1.0,
+      "max_leverage": 500.0,
+      "taker_fee_rate": 0.0002,
+      "maker_fee_rate": 0.0,
+      "maintenance_margin_rate": 0.001,
+      "liquidation_fee_rate": 0.0004,
+      "isolated": true,
+      "risk_tiers": [
+        {
+          "max_vol": 120000,
+          "max_leverage": 500
+        },
+        {
+          "max_vol": 310000,
+          "max_leverage": 200
+        },
+        {
+          "max_vol": 480000,
+          "max_leverage": 100
+        },
+        {
+          "max_vol": 2800000,
+          "max_leverage": 50
+        },
+        {
+          "max_vol": 17500000,
+          "max_leverage": 20
+        },
+        {
+          "max_vol": 19000000,
+          "max_leverage": 10
+        }
+      ],
+      "as_of": "2026-10-09T11:38:00Z",
+      "source": "https://contract.mexc.com/api/v1/contract/detail?symbol=BTC_USDT",
+      "adapter_order_types": {
+        "limit": 1,
+        "market": 5
+      },
+      "adapter_gap": "mexc_private.submit_order supports market and limit with attached stopLossPrice/takeProfitPrice. It does not implement MEXC plan orders, so a resting intrabar stop-entry is not live-wired."
+    }
+  },
+  "live_orders_sent": 0,
+  "row_audit_problems": [],
+  "orb15_range_mismatches_on_tradable_days": [],
+  "survey_counts": {
+    "dates": 378,
+    "tradable": 31,
+    "range_status": {
+      "missing_opening_range": 1,
+      "ok": 259,
+      "not_nyse_session_day": 118
+    },
+    "breakouts_on_tradable": {
+      "SHORT": 9,
+      "LONG": 19,
+      "none": 3
+    },
+    "split_counts": {
+      "train": 18,
+      "validation": 6,
+      "out_of_sample": 7
+    },
+    "split_dates": {
+      "train": [
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04"
+      ],
+      "validation": [
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16"
+      ],
+      "out_of_sample": [
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-25"
+      ]
+    }
+  },
+  "coverage_note": "`15m` runs 2025-09-15T20:15:00+00:00 to 2026-09-27T11:00:00+00:00 (36156 bars). `5m` runs 2025-09-15T19:05:00+00:00 to 2026-09-27T11:00:00+00:00 (108480 bars). `1m` runs 2026-08-11T18:01:00+00:00 to 2026-09-27T11:02:00+00:00 (65150 bars) and has one hole (2026-09-11 09:46 UTC through 2026-09-12 20:59 UTC). V3 needs that real 1-minute continuation, so earlier sessions were not traded and no 1-minute candle was built from 5-minute OHLC. 2026-08-11 has a 15-minute range but the 1-minute file starts after the New York open. 2026-09-11 is inside the hole. Both were skipped.",
+  "v3": {
+    "activity": {
+      "train": {
+        "valid_sessions": 18,
+        "first": "2026-08-12",
+        "last": "2026-09-04",
+        "long_breakouts": 10,
+        "short_breakouts": 5,
+        "no_breakout": 3,
+        "entry_signals": 14,
+        "filled_trades": 14,
+        "closed_trades": 14,
+        "unfilled_reasons": {
+          "no_1m_continuation": 1
+        },
+        "breakout_without_1m_signal": [
+          "2026-08-27"
+        ]
+      },
+      "validation": {
+        "valid_sessions": 6,
+        "first": "2026-09-08",
+        "last": "2026-09-16",
+        "long_breakouts": 4,
+        "short_breakouts": 2,
+        "no_breakout": 0,
+        "entry_signals": 6,
+        "filled_trades": 6,
+        "closed_trades": 6,
+        "unfilled_reasons": {},
+        "breakout_without_1m_signal": []
+      },
+      "out_of_sample": {
+        "valid_sessions": 7,
+        "first": "2026-09-17",
+        "last": "2026-09-25",
+        "long_breakouts": 5,
+        "short_breakouts": 2,
+        "no_breakout": 0,
+        "entry_signals": 7,
+        "filled_trades": 7,
+        "closed_trades": 7,
+        "unfilled_reasons": {},
+        "breakout_without_1m_signal": []
+      }
+    },
+    "stats": {
+      "train": {
+        "closed_trades": 14,
+        "wins": 4,
+        "losses": 10,
+        "win_rate": 0.2857142857142857,
+        "gross_pnl": -14.80324000000064,
+        "fees": 22.197712274,
+        "execution_drag": 11.24666999999978,
+        "net_pnl": -48.24762227400043,
+        "profit_factor": 0.5952937490899072,
+        "expectancy": -3.4462587338571735,
+        "average_r": -0.3436163106787803,
+        "max_drawdown_fraction": 0.08097951326741566,
+        "ambiguous_closed_trades": 1,
+        "long": {
+          "trades": 10,
+          "wins": 3,
+          "net_pnl": -30.460766470000713,
+          "gross_pnl": -6.607199999999873,
+          "win_rate": 0.3
+        },
+        "short": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -17.786855803999714,
+          "gross_pnl": -8.196040000000771,
+          "win_rate": 0.25
+        }
+      },
+      "validation": {
+        "closed_trades": 6,
+        "wins": 1,
+        "losses": 5,
+        "win_rate": 0.16666666666666666,
+        "gross_pnl": -27.2469100000009,
+        "fees": 9.540976182000001,
+        "execution_drag": 4.833379999999574,
+        "net_pnl": -41.621266182000475,
+        "profit_factor": 0.3015666295681316,
+        "expectancy": -6.936877697000079,
+        "average_r": -0.7007136339192644,
+        "max_drawdown_fraction": 0.05854029099534152,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -17.622320677999873,
+          "gross_pnl": -8.070450000000749,
+          "win_rate": 0.25
+        },
+        "short": {
+          "trades": 2,
+          "wins": 0,
+          "net_pnl": -23.998945504000602,
+          "gross_pnl": -19.176460000000148,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 7,
+        "wins": 5,
+        "losses": 2,
+        "win_rate": 0.7142857142857143,
+        "gross_pnl": 84.32247999999944,
+        "fees": 11.452718028,
+        "execution_drag": 5.794139999999125,
+        "net_pnl": 67.0756219720003,
+        "profit_factor": 3.7157756405144,
+        "expectancy": 9.582231710285757,
+        "average_r": 0.9418642871838829,
+        "max_drawdown_fraction": 0.023834164939286032,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 5,
+          "wins": 3,
+          "net_pnl": 30.059797972000865,
+          "gross_pnl": 42.36247999999973,
+          "win_rate": 0.6
+        },
+        "short": {
+          "trades": 2,
+          "wins": 2,
+          "net_pnl": 37.01582399999945,
+          "gross_pnl": 41.95999999999971,
+          "win_rate": 1.0
+        }
+      }
+    }
+  },
+  "original_orb15": {
+    "note": "Unchanged original engine. Not a V3 result.",
+    "stats": {
+      "train": {
+        "closed_trades": 21,
+        "wins": 6,
+        "losses": 15,
+        "win_rate": 0.2857142857142857,
+        "gross_pnl": -21.939259999997883,
+        "fees": 32.827543118,
+        "execution_drag": 16.619850000002778,
+        "net_pnl": -71.38665311800067,
+        "profit_factor": 0.5951183010382143,
+        "expectancy": -3.399364434190508,
+        "average_r": -0.34356820416552164,
+        "max_drawdown_fraction": 0.09817131829043092,
+        "ambiguous_closed_trades": 1,
+        "long": {
+          "trades": 13,
+          "wins": 4,
+          "net_pnl": -36.3506861320009,
+          "gross_pnl": -5.690719999999548,
+          "win_rate": 0.3076923076923077
+        },
+        "short": {
+          "trades": 8,
+          "wins": 2,
+          "net_pnl": -35.035966985999764,
+          "gross_pnl": -16.248539999998336,
+          "win_rate": 0.25
+        }
+      },
+      "validation": {
+        "closed_trades": 7,
+        "wins": 1,
+        "losses": 6,
+        "win_rate": 0.14285714285714285,
+        "gross_pnl": -36.437490000000146,
+        "fees": 11.074388030000001,
+        "execution_drag": 5.611040000001498,
+        "net_pnl": -53.12291803000165,
+        "profit_factor": 0.2527288094711712,
+        "expectancy": -7.588988290000236,
+        "average_r": -0.7720923939416264,
+        "max_drawdown_fraction": 0.06983454153948782,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -17.632911248000898,
+          "gross_pnl": -8.082020000000291,
+          "win_rate": 0.25
+        },
+        "short": {
+          "trades": 3,
+          "wins": 0,
+          "net_pnl": -35.49000678200075,
+          "gross_pnl": -28.355469999999855,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 7,
+        "wins": 3,
+        "losses": 4,
+        "win_rate": 0.42857142857142855,
+        "gross_pnl": 22.007390000000164,
+        "fees": 11.164355914,
+        "execution_drag": 5.6428600000002636,
+        "net_pnl": 5.200174085999901,
+        "profit_factor": 1.1079787812531865,
+        "expectancy": 0.7428820122857002,
+        "average_r": 0.08510994865142253,
+        "max_drawdown_fraction": 0.02382230169994647,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 5,
+          "wins": 2,
+          "net_pnl": -0.23431436199982514,
+          "gross_pnl": 11.7608699999999,
+          "win_rate": 0.4
+        },
+        "short": {
+          "trades": 2,
+          "wins": 1,
+          "net_pnl": 5.434488447999726,
+          "gross_pnl": 10.246520000000261,
+          "win_rate": 0.5
+        }
+      }
+    }
+  },
+  "reading": "Train net was -48.25 and validation net was -41.62. Out-of-sample net was 67.08. That out-of-sample gain is seven closed trades after two losing splits, inside a six-week 1-minute file. It is not evidence of an edge and it was not used to change a threshold. The unchanged original ORB-15 close engine on the same dates was -71.39, -53.12, 5.20. Each figure restarts from 1,000 USDT. Fills are simulated OHLC, not exchange prints.",
+  "trades_csv_sha256": "d0439ed2ca856a52a62cfb5afa1b231fe262b2da2861b9828ba1b6d96dfba5fb",
+  "trades_csv_rows": 28
+}

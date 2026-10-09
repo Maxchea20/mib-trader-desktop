@@ -1,0 +1,141 @@
+{
+  "database": {
+    "path": "/tmp/market_data_clean.db",
+    "bytes": 46624768,
+    "sha256": "84fdee4e54dea3ac8d075a4a06e7a3be75669bf46fb4058bf71e1d9c2348d26f",
+    "tables": [
+      "agent_decisions",
+      "candles",
+      "decisions",
+      "lb_models",
+      "lb_outcomes",
+      "lb_snapshots",
+      "market_changes",
+      "market_checkpoints",
+      "paper_trades",
+      "scenario_c_watch",
+      "setups",
+      "sqlite_sequence",
+      "sync_meta",
+      "trade_events",
+      "trade_executions",
+      "trade_outcomes",
+      "trigger_events",
+      "walkforward_runs"
+    ],
+    "symbols_timeframes": [
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "15m",
+        "rows": 36156,
+        "start_utc": "2025-09-15T20:15:00+00:00",
+        "end_utc": "2026-09-27T11:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "1d",
+        "rows": 2306,
+        "start_utc": "2020-06-05T00:00:00+00:00",
+        "end_utc": "2026-09-27T00:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "1h",
+        "rows": 55323,
+        "start_utc": "2020-06-05T03:00:00+00:00",
+        "end_utc": "2026-09-27T10:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "1m",
+        "rows": 65150,
+        "start_utc": "2026-08-11T18:01:00+00:00",
+        "end_utc": "2026-09-27T11:02:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "1w",
+        "rows": 328,
+        "start_utc": "2020-06-01T00:00:00+00:00",
+        "end_utc": "2026-09-07T00:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "30m",
+        "rows": 110643,
+        "start_utc": "2020-06-05T03:30:00+00:00",
+        "end_utc": "2026-09-27T10:30:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "4h",
+        "rows": 13833,
+        "start_utc": "2020-06-05T00:00:00+00:00",
+        "end_utc": "2026-09-27T08:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "5m",
+        "rows": 108480,
+        "start_utc": "2025-09-15T19:05:00+00:00",
+        "end_utc": "2026-09-27T11:00:00+00:00"
+      },
+      {
+        "symbol": "BTC_USDT",
+        "timeframe": "8h",
+        "rows": 6869,
+        "start_utc": "2020-06-05T00:00:00+00:00",
+        "end_utc": "2026-09-11T08:00:00+00:00"
+      }
+    ],
+    "duplicate_candle_groups": 0,
+    "invalid_ohlc_rows": 0,
+    "bid_ask_trades_or_book_tables": false,
+    "decision_spread_samples": {
+      "n": 4,
+      "values": [
+        0.09999999999126885,
+        0.10000000000582077,
+        0.10000000000582077,
+        1.4000000000087311
+      ],
+      "note": "These are live decision-log snapshots stored in the same file, not a historical bid/ask series. They are not used as a spread path."
+    }
+  },
+  "coverage_note": "`15m` runs 2025-09-15T20:15:00+00:00 to 2026-09-27T11:00:00+00:00 (36156 bars). `5m` runs 2025-09-15T19:05:00+00:00 to 2026-09-27T11:00:00+00:00 (108480 bars). `1m` runs 2026-08-11T18:01:00+00:00 to 2026-09-27T11:02:00+00:00 (65150 bars) and has one hole (2026-09-11 09:46 UTC through 2026-09-12 20:59 UTC). V3 needs that real 1-minute continuation, so earlier sessions were not traded and no 1-minute candle was built from 5-minute OHLC. 2026-08-11 has a 15-minute range but the 1-minute file starts after the New York open. 2026-09-11 is inside the hole. Both were skipped.",
+  "one_minute_session_windows": {
+    "bars": 65150,
+    "gap_events_listed": [
+      {
+        "from_utc": "2026-09-11T09:46:00+00:00",
+        "to_utc": "2026-09-12T20:59:00+00:00",
+        "missing_bars": 2112
+      }
+    ],
+    "missing_bars_estimate": 2112,
+    "ny_dates_with_any_bar": 48,
+    "first_ny_date": "2026-08-11",
+    "last_ny_date": "2026-09-27",
+    "windows": {
+      "ORB-5": {
+        "complete_nyse_sessions": 31,
+        "nyse_dates_in_span": 33,
+        "incomplete_nyse_sessions": 2,
+        "non_session_dates_with_bars": 15
+      },
+      "ORB-15": {
+        "complete_nyse_sessions": 31,
+        "nyse_dates_in_span": 33,
+        "incomplete_nyse_sessions": 2,
+        "non_session_dates_with_bars": 15
+      },
+      "ORB-30": {
+        "complete_nyse_sessions": 31,
+        "nyse_dates_in_span": 33,
+        "incomplete_nyse_sessions": 2,
+        "non_session_dates_with_bars": 15
+      }
+    },
+    "timezone": "America/New_York"
+  }
+}
