@@ -482,6 +482,24 @@ def test_funding_is_the_live_mexc_snapshot_and_only_if_held_at_settlement():
     assert short_trade["funding"] > 0
 
 
+def test_a_range_line_stop_is_that_line_and_the_target_is_two_r():
+    from src.orb.v3 import OpeningRangeV3, _stop_at_range
+
+    rng = OpeningRangeV3(SUMMER, "ok", 101.0, 99.0, 0, 900)
+    sl, tp = _stop_at_range("LONG", 102.0, rng, "range_far", 0.1)
+    assert sl == 99.0
+    assert tp == 108.0
+    sl, tp = _stop_at_range("LONG", 102.0, rng, "range_near", 0.1)
+    assert sl == 101.0
+    assert tp == 104.0
+    sl, tp = _stop_at_range("SHORT", 98.0, rng, "range_far", 0.1)
+    assert sl == 101.0
+    assert tp == 92.0
+    sl, tp = _stop_at_range("SHORT", 98.0, rng, "range_near", 0.1)
+    assert sl == 99.0
+    assert tp == 96.0
+
+
 def _b(**kwargs):
     return _cfg(continuation="next_5m", **kwargs)
 

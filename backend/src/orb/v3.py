@@ -41,6 +41,7 @@ from .market import (
     isolated_liquidation_price,
     resolve_exit,
     size_contracts,
+    snap_worse,
     stop_and_target,
 )
 from .session import (
@@ -86,6 +87,9 @@ class OrbV3Config:
     funding_as_of: str = FUNDING_AS_OF
     # "range" is the original V3 entry. "next_5m" is rule B and is opt-in.
     continuation: str = "range"
+    # "fixed" is the 0.25% stop. "range_far" stops at the other side of the
+    # opening range. "range_near" stops at the line that was broken.
+    stop_at: str = "fixed"
 
     def config_id(self) -> str:
         entry = "15m-range+5m-body+1m-continuation"
@@ -518,6 +522,30 @@ def _signal_fields(order: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _stop_at_range(side: str, fill: float, rng: OpeningRangeV3, mode: str, unit: float) -> tuple[float, float]:
+    """Stop on an opening-range line. Target is twice that distance, before fees.
+
+    ``range_far`` is the other side of the range: a long stops at OR_LOW and a
+    short stops at OR_HIGH. ``range_near`` is the line that just broke: a long
+    stops at OR_HIGH and a short stops at OR_LOW.
+    """
+    if rng.high is None or rng.low is None:
+        return fill, fill
+    if mode == "range_far":
+        level = rng.low if side == "LONG" else rng.high
+    else:
+        level = rng.high if side == "LONG" else rng.low
+    if side == "LONG":
+        sl = snap_worse(level, unit, worse_up=False)
+        dist = fill - sl
+        tp = snap_worse(fill + 2.0 * dist, unit, worse_up=False) if dist > 0 else fill
+    else:
+        sl = snap_worse(level, unit, worse_up=True)
+        dist = sl - fill
+        tp = snap_worse(fill - 2.0 * dist, unit, worse_up=True) if dist > 0 else fill
+    return sl, tp
+
+
 def run_v3_backtest(
     bars_15m: list[Bar],
     bars_5m: list[Bar],
@@ -537,6 +565,8 @@ def run_v3_backtest(
     cfg = config or v3_primary_config()
     if cfg.continuation not in ("range", "next_5m"):
         raise ValueError(f"unknown continuation: {cfg.continuation}")
+    if cfg.stop_at not in ("fixed", "range_far", "range_near"):
+        raise ValueError(f"unknown stop_at: {cfg.stop_at}")
     spec = cfg.spec
     by15 = _index(list(bars_15m), "15m")
     by5 = _index(list(bars_5m), "5m")
@@ -623,9 +653,14 @@ def run_v3_backtest(
             raw_entry, side, "entry",
             slippage_bps=cfg.slippage_bps, spread_usd=cfg.spread_usd, unit=spec.price_unit,
         )
-        sl, tp = stop_and_target(
-            side, fill, cfg.stop_loss_fraction, cfg.take_profit_fraction, spec.price_unit,
-        )
+        if cfg.stop_at == "fixed":
+            sl, tp = stop_and_target(
+                side, fill, cfg.stop_loss_fraction, cfg.take_profit_fraction, spec.price_unit,
+            )
+        else:
+            sl, tp = _stop_at_range(
+                side, fill, rng, cfg.stop_at, spec.price_unit,
+            )
         valid = sl < fill < tp if side == "LONG" else tp < fill < sl
         if not valid:
             remember(
