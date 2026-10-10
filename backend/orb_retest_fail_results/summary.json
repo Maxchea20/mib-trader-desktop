@@ -1,0 +1,195 @@
+{
+  "dates_match_preserved_v3": true,
+  "fade_unfilled": {
+    "no_retest_failure": 10
+  },
+  "with_unfilled": {
+    "no_retest_failure": 10
+  },
+  "fade": {
+    "train": {
+      "closed_trades": 9,
+      "wins": 6,
+      "losses": 3,
+      "win_rate": 0.6666666666666666,
+      "gross_pnl": 95.8795899999997,
+      "fees": 15.062728448,
+      "funding": 0.0,
+      "execution_drag": 7.6264300000006635,
+      "net_pnl": 73.19043155199904,
+      "profit_factor": 2.9043707896727526,
+      "expectancy": 8.132270172444338,
+      "average_r": 0.7988644804402373,
+      "max_drawdown_fraction": 0.012004121219300513,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 4,
+        "wins": 4,
+        "net_pnl": 74.59173966400014,
+        "gross_pnl": 84.61825000000081,
+        "win_rate": 1.0
+      },
+      "short": {
+        "trades": 5,
+        "wins": 2,
+        "net_pnl": -1.4013081120011144,
+        "gross_pnl": 11.261339999998896,
+        "win_rate": 0.4
+      }
+    },
+    "validation": {
+      "closed_trades": 5,
+      "wins": 0,
+      "losses": 5,
+      "win_rate": 0.0,
+      "gross_pnl": -46.78889999999956,
+      "fees": 7.805489116,
+      "funding": 0.0,
+      "execution_drag": 3.945519999999574,
+      "net_pnl": -58.53990911599913,
+      "profit_factor": 0.0,
+      "expectancy": -11.707981823199827,
+      "average_r": -1.2005342382269375,
+      "max_drawdown_fraction": 0.0585399091159992,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 1,
+        "wins": 0,
+        "net_pnl": -11.845326407999854,
+        "gross_pnl": -9.471959999999855,
+        "win_rate": 0.0
+      },
+      "short": {
+        "trades": 4,
+        "wins": 0,
+        "net_pnl": -46.694582707999274,
+        "gross_pnl": -37.3169399999997,
+        "win_rate": 0.0
+      }
+    },
+    "out_of_sample": {
+      "closed_trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "win_rate": 0.25,
+      "gross_pnl": -8.699659999999406,
+      "fees": 6.318272004000001,
+      "funding": 0.0,
+      "execution_drag": 3.1958200000008876,
+      "net_pnl": -18.2137520040003,
+      "profit_factor": 0.49042753604525746,
+      "expectancy": -4.553438001000075,
+      "average_r": -0.4505845210799517,
+      "max_drawdown_fraction": 0.023835799364000196,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 1,
+        "wins": 0,
+        "net_pnl": -11.907403600000551,
+        "gross_pnl": -9.52024000000055,
+        "win_rate": 0.0
+      },
+      "short": {
+        "trades": 3,
+        "wins": 1,
+        "net_pnl": -6.3063484039997455,
+        "gross_pnl": 0.8205800000011436,
+        "win_rate": 0.3333333333333333
+      }
+    }
+  },
+  "with": {
+    "train": {
+      "closed_trades": 9,
+      "wins": 1,
+      "losses": 8,
+      "win_rate": 0.1111111111111111,
+      "gross_pnl": -54.65017999999995,
+      "fees": 13.989698276000002,
+      "funding": 0.0,
+      "execution_drag": 7.0788999999983915,
+      "net_pnl": -75.71877827599836,
+      "profit_factor": 0.18803278444229304,
+      "expectancy": -8.41319758622204,
+      "average_r": -0.8672594372917158,
+      "max_drawdown_fraction": 0.07571877827599849,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 5,
+        "wins": 1,
+        "net_pnl": -28.81324942999885,
+        "gross_pnl": -17.17436999999915,
+        "win_rate": 0.2
+      },
+      "short": {
+        "trades": 4,
+        "wins": 0,
+        "net_pnl": -46.9055288459995,
+        "gross_pnl": -37.475810000000806,
+        "win_rate": 0.0
+      }
+    },
+    "validation": {
+      "closed_trades": 5,
+      "wins": 3,
+      "losses": 2,
+      "win_rate": 0.6,
+      "gross_pnl": 42.026730000000484,
+      "fees": 8.182314648000002,
+      "funding": -0.06231541020000001,
+      "execution_drag": 4.149550000000174,
+      "net_pnl": 29.632549941800306,
+      "profit_factor": 2.1854053690885227,
+      "expectancy": 5.926509988360062,
+      "average_r": 0.5978432436839551,
+      "max_drawdown_fraction": 0.012062080399187223,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 4,
+        "wins": 2,
+        "net_pnl": 11.344878675800008,
+        "gross_pnl": 21.29640000000018,
+        "win_rate": 0.5
+      },
+      "short": {
+        "trades": 1,
+        "wins": 1,
+        "net_pnl": 18.2876712660003,
+        "gross_pnl": 20.7303300000003,
+        "win_rate": 1.0
+      }
+    },
+    "out_of_sample": {
+      "closed_trades": 4,
+      "wins": 2,
+      "losses": 2,
+      "win_rate": 0.5,
+      "gross_pnl": 21.20647999999955,
+      "fees": 6.414968970000001,
+      "funding": 0.0,
+      "execution_drag": 3.2503299999997317,
+      "net_pnl": 11.54118102999982,
+      "profit_factor": 1.475592353516387,
+      "expectancy": 2.885295257499955,
+      "average_r": 0.2993030822963925,
+      "max_drawdown_fraction": 0.023838739775300502,
+      "ambiguous_closed_trades": 0,
+      "long": {
+        "trades": 3,
+        "wins": 1,
+        "net_pnl": -6.303717306000458,
+        "gross_pnl": 0.9765599999992727,
+        "win_rate": 0.3333333333333333
+      },
+      "short": {
+        "trades": 1,
+        "wins": 1,
+        "net_pnl": 17.844898336000277,
+        "gross_pnl": 20.229920000000277,
+        "win_rate": 1.0
+      }
+    }
+  },
+  "reading": "Fade closed 18 trades and netted 73.19 / -58.54 / -18.21. Taking the original direction on the same failure candles closed 18 trades and netted -75.72 / 29.63 / 11.54. These are the same signals with the side flipped. A gain on one side of a 7-session slice is not an edge. Fills are simulated OHLC, not exchange prints.",
+  "live_orders_sent": 0
+}
