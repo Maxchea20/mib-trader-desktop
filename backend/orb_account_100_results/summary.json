@@ -1,0 +1,380 @@
+{
+  "account": {
+    "starting_equity": 100.0,
+    "risk_fraction": 0.1,
+    "leverage": 50.0,
+    "risk_profile": "equity100_risk10_target20"
+  },
+  "first_trade_risk_usdt": 9.9847,
+  "stats": {
+    "current": {
+      "train": {
+        "closed_trades": 14,
+        "wins": 4,
+        "losses": 10,
+        "win_rate": 0.2857142857142857,
+        "gross_pnl": -15.700510000000556,
+        "fees": 20.144503294000003,
+        "funding": 0.0,
+        "execution_drag": 10.209399999999919,
+        "net_pnl": -46.054413294000476,
+        "profit_factor": 0.5778834007089443,
+        "expectancy": -3.2896009495714624,
+        "average_r": -0.34361631067878046,
+        "max_drawdown_fraction": 0.5910713450483277,
+        "ambiguous_closed_trades": 1,
+        "long": {
+          "trades": 10,
+          "wins": 3,
+          "net_pnl": -31.68161686800067,
+          "gross_pnl": -10.23233999999988,
+          "win_rate": 0.3
+        },
+        "short": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -14.372796425999807,
+          "gross_pnl": -5.468170000000673,
+          "win_rate": 0.25
+        }
+      },
+      "validation": {
+        "closed_trades": 6,
+        "wins": 1,
+        "losses": 5,
+        "win_rate": 0.16666666666666666,
+        "gross_pnl": -24.12950000000093,
+        "fees": 9.021774480000001,
+        "funding": 0.0,
+        "execution_drag": 4.569039999999628,
+        "net_pnl": -37.72031448000057,
+        "profit_factor": 0.32269013316205186,
+        "expectancy": -6.286719080000094,
+        "average_r": -0.7007136339192646,
+        "max_drawdown_fraction": 0.47207655994829956,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 4,
+          "wins": 1,
+          "net_pnl": -13.913830123999968,
+          "gross_pnl": -5.106300000000706,
+          "win_rate": 0.25
+        },
+        "short": {
+          "trades": 2,
+          "wins": 0,
+          "net_pnl": -23.806484356000595,
+          "gross_pnl": -19.023200000000223,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 7,
+        "wins": 5,
+        "losses": 2,
+        "win_rate": 0.7142857142857143,
+        "gross_pnl": 97.81546999999921,
+        "fees": 13.816828800000003,
+        "funding": 0.0,
+        "execution_drag": 6.989369999998713,
+        "net_pnl": 77.00927120000048,
+        "profit_factor": 3.454856349437672,
+        "expectancy": 11.001324457142927,
+        "average_r": 0.9418642871838829,
+        "max_drawdown_fraction": 0.2253898029590829,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 5,
+          "wins": 3,
+          "net_pnl": 30.671865200001076,
+          "gross_pnl": 45.28902999999961,
+          "win_rate": 0.6
+        },
+        "short": {
+          "trades": 2,
+          "wins": 2,
+          "net_pnl": 46.33740599999941,
+          "gross_pnl": 52.52643999999958,
+          "win_rate": 1.0
+        }
+      }
+    },
+    "rule_b": {
+      "train": {
+        "closed_trades": 10,
+        "wins": 3,
+        "losses": 7,
+        "win_rate": 0.3,
+        "gross_pnl": -10.632630000000546,
+        "fees": 14.775938684000002,
+        "funding": 0.0,
+        "execution_drag": 7.480430000000032,
+        "net_pnl": -32.88899868400058,
+        "profit_factor": 0.5873078820057241,
+        "expectancy": -3.2888998684000583,
+        "average_r": -0.3006332081064649,
+        "max_drawdown_fraction": 0.5352768644605682,
+        "ambiguous_closed_trades": 1,
+        "long": {
+          "trades": 8,
+          "wins": 2,
+          "net_pnl": -39.48292585200066,
+          "gross_pnl": -21.911179999999987,
+          "win_rate": 0.25
+        },
+        "short": {
+          "trades": 2,
+          "wins": 1,
+          "net_pnl": 6.593927168000089,
+          "gross_pnl": 11.278549999999443,
+          "win_rate": 0.5
+        }
+      },
+      "validation": {
+        "closed_trades": 4,
+        "wins": 1,
+        "losses": 3,
+        "win_rate": 0.25,
+        "gross_pnl": -9.650740000000669,
+        "fees": 6.611609660000001,
+        "funding": 0.0,
+        "execution_drag": 3.34766000000044,
+        "net_pnl": -19.61000966000111,
+        "profit_factor": 0.47819441776174304,
+        "expectancy": -4.902502415000278,
+        "average_r": -0.45094360622545426,
+        "max_drawdown_fraction": 0.3185617446255922,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 2,
+          "wins": 1,
+          "net_pnl": 5.515575539999517,
+          "gross_pnl": 10.426319999999539,
+          "win_rate": 0.5
+        },
+        "short": {
+          "trades": 2,
+          "wins": 0,
+          "net_pnl": -25.12558520000063,
+          "gross_pnl": -20.07706000000021,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 4,
+        "wins": 3,
+        "losses": 1,
+        "win_rate": 0.75,
+        "gross_pnl": 55.14998999999954,
+        "fees": 7.097974184,
+        "funding": 0.0,
+        "execution_drag": 3.5876099999993905,
+        "net_pnl": 44.46440581600015,
+        "profit_factor": 4.14551435212731,
+        "expectancy": 11.116101454000038,
+        "average_r": 1.0489723381913252,
+        "max_drawdown_fraction": 0.11982688884090564,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 3,
+          "wins": 2,
+          "net_pnl": 25.819591336000716,
+          "gross_pnl": 34.014189999999545,
+          "win_rate": 0.6666666666666666
+        },
+        "short": {
+          "trades": 1,
+          "wins": 1,
+          "net_pnl": 18.644814479999432,
+          "gross_pnl": 21.1358,
+          "win_rate": 1.0
+        }
+      }
+    },
+    "fade": {
+      "train": {
+        "closed_trades": 9,
+        "wins": 6,
+        "losses": 3,
+        "win_rate": 0.6666666666666666,
+        "gross_pnl": 116.96342999999908,
+        "fees": 22.102382246,
+        "funding": 0.0,
+        "execution_drag": 11.186100000001048,
+        "net_pnl": 83.67494775399805,
+        "profit_factor": 2.2700504234957615,
+        "expectancy": 9.297216417110896,
+        "average_r": 0.7988644804402374,
+        "max_drawdown_fraction": 0.1200368048708858,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 4,
+          "wins": 4,
+          "net_pnl": 102.37190753200011,
+          "gross_pnl": 116.12959000000109,
+          "win_rate": 1.0
+        },
+        "short": {
+          "trades": 5,
+          "wins": 2,
+          "net_pnl": -18.69695977800207,
+          "gross_pnl": 0.8338399999980268,
+          "win_rate": 0.4
+        }
+      },
+      "validation": {
+        "closed_trades": 5,
+        "wins": 0,
+        "losses": 5,
+        "win_rate": 0.0,
+        "gross_pnl": -37.72377999999949,
+        "fees": 6.292746276000001,
+        "funding": 0.0,
+        "execution_drag": 3.179799999999795,
+        "net_pnl": -47.1963262759993,
+        "profit_factor": 0.0,
+        "expectancy": -9.43926525519986,
+        "average_r": -1.200534238226938,
+        "max_drawdown_fraction": 0.47196326275999284,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 1,
+          "wins": 0,
+          "net_pnl": -10.560893423999872,
+          "gross_pnl": -8.444879999999872,
+          "win_rate": 0.0
+        },
+        "short": {
+          "trades": 4,
+          "wins": 0,
+          "net_pnl": -36.635432851999425,
+          "gross_pnl": -29.278899999999624,
+          "win_rate": 0.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 4,
+        "wins": 1,
+        "losses": 3,
+        "win_rate": 0.25,
+        "gross_pnl": -11.002279999999436,
+        "fees": 5.697412728,
+        "funding": 0.0,
+        "execution_drag": 2.8819800000008993,
+        "net_pnl": -19.581672728000335,
+        "profit_factor": 0.41533528243795526,
+        "expectancy": -4.895418182000084,
+        "average_r": -0.4505845210799516,
+        "max_drawdown_fraction": 0.22543383564000152,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 1,
+          "wins": 0,
+          "net_pnl": -10.948756700000505,
+          "gross_pnl": -8.753780000000505,
+          "win_rate": 0.0
+        },
+        "short": {
+          "trades": 3,
+          "wins": 1,
+          "net_pnl": -8.632916027999828,
+          "gross_pnl": -2.2484999999989306,
+          "win_rate": 0.3333333333333333
+        }
+      }
+    },
+    "with_break": {
+      "train": {
+        "closed_trades": 9,
+        "wins": 1,
+        "losses": 8,
+        "win_rate": 0.1111111111111111,
+        "gross_pnl": -41.3309800000001,
+        "fees": 10.762776420000002,
+        "funding": 0.0,
+        "execution_drag": 5.448619999998651,
+        "net_pnl": -57.542376419998746,
+        "profit_factor": 0.1947222954343673,
+        "expectancy": -6.393597379999861,
+        "average_r": -0.8672594372917156,
+        "max_drawdown_fraction": 0.5754237641999872,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 5,
+          "wins": 1,
+          "net_pnl": -19.522038361999122,
+          "gross_pnl": -10.9559099999994,
+          "win_rate": 0.2
+        },
+        "short": {
+          "trades": 4,
+          "wins": 0,
+          "net_pnl": -38.02033805799963,
+          "gross_pnl": -30.3750700000007,
+          "win_rate": 0.0
+        }
+      },
+      "validation": {
+        "closed_trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 0.6,
+        "gross_pnl": 42.19775000000069,
+        "fees": 9.971916834000002,
+        "funding": -0.0836277438,
+        "execution_drag": 5.058040000000281,
+        "net_pnl": 27.084165422200396,
+        "profit_factor": 1.7944833676469523,
+        "expectancy": 5.416833084440079,
+        "average_r": 0.5978432436839551,
+        "max_drawdown_fraction": 0.12053154617974204,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 4,
+          "wins": 2,
+          "net_pnl": 5.873318632200057,
+          "gross_pnl": 18.153800000000338,
+          "win_rate": 0.5
+        },
+        "short": {
+          "trades": 1,
+          "wins": 1,
+          "net_pnl": 21.210846790000346,
+          "gross_pnl": 24.043950000000347,
+          "win_rate": 1.0
+        }
+      },
+      "out_of_sample": {
+        "closed_trades": 4,
+        "wins": 2,
+        "losses": 2,
+        "win_rate": 0.5,
+        "gross_pnl": 17.72679999999948,
+        "fees": 6.595760174000001,
+        "funding": 0.0,
+        "execution_drag": 3.341729999999684,
+        "net_pnl": 7.789309825999794,
+        "profit_factor": 1.2930276514131054,
+        "expectancy": 1.9473274564999485,
+        "average_r": 0.29930308229639235,
+        "max_drawdown_fraction": 0.22534279087477127,
+        "ambiguous_closed_trades": 0,
+        "long": {
+          "trades": 3,
+          "wins": 1,
+          "net_pnl": -8.618922966000458,
+          "gross_pnl": -0.8744400000007726,
+          "win_rate": 0.3333333333333333
+        },
+        "short": {
+          "trades": 1,
+          "wins": 1,
+          "net_pnl": 16.408232792000252,
+          "gross_pnl": 18.601240000000253,
+          "win_rate": 1.0
+        }
+      }
+    }
+  },
+  "live_orders_sent": 0
+}
