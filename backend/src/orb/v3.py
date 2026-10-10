@@ -84,13 +84,18 @@ class OrbV3Config:
     funding_rate: float = FUNDING_RATE_SNAPSHOT
     funding_interval_hours: int = 8
     funding_as_of: str = FUNDING_AS_OF
+    # "range" is the original V3 entry. "next_5m" is rule B and is opt-in.
+    continuation: str = "range"
 
     def config_id(self) -> str:
+        entry = "15m-range+5m-body+1m-continuation"
+        if self.continuation == "next_5m":
+            entry = "15m-range+5m-body+1m-next5m-breakout-close"
         return "|".join(
             (
                 self.symbol,
                 "ORB-V3",
-                "15m-range+5m-body+1m-continuation",
+                entry,
                 self.risk_profile,
                 self.slippage_profile,
             )
@@ -101,6 +106,11 @@ class OrbV3Config:
             "config_id": self.config_id(),
             "strategy": "ORB-V3",
             "definition": (
+                "09:30-09:45 NY 15m range, first 5m body breakout from 09:45, "
+                "1m continuation only inside the next 5m candle and only "
+                "through that breakout candle's close"
+                if self.continuation == "next_5m"
+                else
                 "09:30-09:45 NY 15m range, first 5m body breakout from 09:45, "
                 "next 1m direct continuation"
             ),
@@ -124,6 +134,7 @@ class OrbV3Config:
             "funding_rate": self.funding_rate,
             "funding_interval_hours": self.funding_interval_hours,
             "funding_as_of": self.funding_as_of,
+            "continuation": self.continuation,
             "funding_note": (
                 "Flat snapshot. Positive rate: longs pay, shorts receive, "
                 "at 00:00, 08:00 and 16:00 UTC, on mark = that minute's open. "
@@ -157,7 +168,17 @@ def v3_primary_config(**overrides: Any) -> OrbV3Config:
         funding_as_of=FUNDING_AS_OF,
     )
     fields.update(overrides)
+    mode = fields.get("continuation", "range")
+    if mode not in ("range", "next_5m"):
+        raise ValueError(f"unknown continuation: {mode}")
     return OrbV3Config(**fields)
+
+
+def v3b_primary_config(**overrides: Any) -> OrbV3Config:
+    """Rule B. Same costs as the V3 primary. Only the 1-minute trigger differs."""
+    fields = dict(overrides)
+    fields["continuation"] = "next_5m"
+    return v3_primary_config(**fields)
 
 
 @dataclass(frozen=True)
@@ -295,6 +316,19 @@ def opening_range_v3(
         candle_close=candle.close,
         **{k: v for k, v in blank.items() if k in ("ny_date", "start_ts", "end_ts")},
     )
+
+
+def _continues_breakout_close(bar: Bar, side: str, breakout_close: float) -> bool:
+    """Rule B. A 1-minute body must close beyond the 5-minute breakout close.
+
+    Closing back over the opening range is not enough. The candle must be
+    green for a long and red for a short, and the close is strict.
+    """
+    if side == "LONG":
+        return bar.close > bar.open and bar.close > breakout_close
+    if side == "SHORT":
+        return bar.close < bar.open and bar.close < breakout_close
+    return False
 
 
 def _body_breakout(bar: Bar, or_high: float, or_low: float) -> str | None:
@@ -501,6 +535,8 @@ def run_v3_backtest(
     reads a later bar.
     """
     cfg = config or v3_primary_config()
+    if cfg.continuation not in ("range", "next_5m"):
+        raise ValueError(f"unknown continuation: {cfg.continuation}")
     spec = cfg.spec
     by15 = _index(list(bars_15m), "15m")
     by5 = _index(list(bars_5m), "5m")
@@ -824,13 +860,30 @@ def run_v3_backtest(
             continue
         close_ts = bar.close_ts(ONE_MIN)
         entry_end = entry_cutoff_ts(day, cfg.entry_cutoff)
-        # Opens at or after the 5-minute confirmation and closes before 11:00.
-        # Minutes inside the breakout candle are already closed when the
-        # breakout becomes known, so they are not a continuation.
-        if bar.ts < brk.close_ts or close_ts <= brk.close_ts or close_ts >= entry_end:
-            continue
-        if not qualify(bar, brk.side, rng):
-            continue
+        if cfg.continuation == "next_5m":
+            # The next 5-minute candle opens when the breakout closes.
+            # Its five 1-minute bars are the only continuation candidates.
+            window_open = brk.close_ts
+            window_limit = brk.close_ts + FIVE_MIN
+            if bar.ts >= window_limit:
+                signaled.add(day)
+                remember(
+                    day, rng, status="unfilled", unfilled_reason="no_1m_continuation",
+                    **_breakout_fields(brk),
+                )
+                continue
+            if bar.ts < window_open or close_ts <= window_open or close_ts >= entry_end:
+                continue
+            if not _continues_breakout_close(bar, brk.side, brk.close):
+                continue
+        else:
+            # Opens at or after the 5-minute confirmation and closes before 11:00.
+            # Minutes inside the breakout candle are already closed when the
+            # breakout becomes known, so they are not a continuation.
+            if bar.ts < brk.close_ts or close_ts <= brk.close_ts or close_ts >= entry_end:
+                continue
+            if not qualify(bar, brk.side, rng):
+                continue
         signaled.add(day)
         pending = {
             "fill_index": index + 1,

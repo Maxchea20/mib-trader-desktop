@@ -19,6 +19,7 @@ from src.orb.v3 import (
     opening_range_v3,
     run_v3_backtest,
     v3_primary_config,
+    v3b_primary_config,
 )
 
 
@@ -479,4 +480,106 @@ def test_funding_is_the_live_mexc_snapshot_and_only_if_held_at_settlement():
         funding_cash("SHORT", short_trade["qty"], 96.8, 0.000015, 0.0001)
     )
     assert short_trade["funding"] > 0
+
+
+def _b(**kwargs):
+    return _cfg(continuation="next_5m", **kwargs)
+
+
+def test_rule_b_requires_a_close_beyond_the_breakout_close_inside_the_next_five_minutes():
+    # Breakout close is 103. A green close above OR_HIGH but below 103 is the
+    # old signal. Rule B does not take it, and it does not take a later minute
+    # outside the next 5-minute candle.
+    bars_15, bars_5, bars_1 = _session(
+        SUMMER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (18, (101.0, 106.0, 101.0, 105.0)),
+            (20, (102.0, 102.6, 101.8, 102.5)),
+            (21, (102.5, 102.7, 102.4, 102.6)),
+            (25, (103.2, 104.0, 103.1, 103.8)),
+        ],
+    )
+    current = _filled(run_v3_backtest(bars_15, bars_5, bars_1, _cfg()))
+    assert len(current) == 1
+    assert current[0]["entry_signal_close"] == 102.5
+
+    skipped = run_v3_backtest(bars_15, bars_5, bars_1, _b())
+    assert _filled(skipped) == []
+    assert skipped[0]["status"] == "unfilled"
+    assert skipped[0]["unfilled_reason"] == "no_1m_continuation"
+    assert skipped[0]["breakout_close"] == 103.0
+    assert v3_primary_config().continuation == "range"
+    assert v3b_primary_config().continuation == "next_5m"
+    assert v3_primary_config().stop_loss_fraction == v3b_primary_config().stop_loss_fraction
+    assert v3_primary_config().spec.taker_fee_rate == v3b_primary_config().spec.taker_fee_rate
+
+    # Red through the breakout close does not count. The next green one does.
+    # That bar is still inside the five-minute window, so the old rule and B agree.
+    bars_15, bars_5, bars_1 = _session(
+        SUMMER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (20, (103.6, 103.8, 103.1, 103.2)),
+            (21, (103.1, 103.6, 103.0, 103.4)),
+            (22, (103.4, 103.5, 103.2, 103.3)),
+        ],
+    )
+    current_trade = _filled(run_v3_backtest(bars_15, bars_5, bars_1, _cfg()))[0]
+    b_trade = _filled(run_v3_backtest(bars_15, bars_5, bars_1, _b()))[0]
+    assert current_trade["entry_signal_close"] == 103.4
+    assert b_trade["entry_signal_close"] == 103.4
+    assert b_trade["entry_signal_close"] > b_trade["breakout_close"]
+    assert b_trade["fill_ts"] == b_trade["entry_signal_ts"]
+    assert b_trade["entry_signal_ts"] <= b_trade["breakout_close_ts"] + 300
+
+    # The fifth minute of the window can signal. Its fill is the next open,
+    # which is no longer inside the window.
+    bars_15, bars_5, bars_1 = _session(
+        SUMMER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (20, (102.0, 102.4, 101.8, 102.2)),
+            (21, (102.2, 102.5, 102.0, 102.3)),
+            (22, (102.3, 102.6, 102.1, 102.4)),
+            (23, (102.4, 102.7, 102.2, 102.5)),
+            (24, (103.1, 103.6, 103.0, 103.5)),
+            (25, (103.5, 103.6, 103.4, 103.5)),
+        ],
+    )
+    fifth = _filled(run_v3_backtest(bars_15, bars_5, bars_1, _b()))[0]
+    assert fifth["entry_signal_close"] == 103.5
+    assert fifth["entry_signal_ts"] == fifth["breakout_close_ts"] + 300
+    assert fifth["fill_ts"] == fifth["breakout_close_ts"] + 300
+
+    # A bar after those five minutes is not a signal, even if it closes
+    # beyond the breakout close.
+    bars_15, bars_5, bars_1 = _session(
+        SUMMER,
+        [(100.6, 104.0, 100.4, 103.0)],
+        [
+            (20, (102.0, 102.4, 101.8, 102.2)),
+            (24, (102.4, 102.6, 102.2, 102.5)),
+            (25, (103.2, 104.0, 103.1, 103.8)),
+        ],
+    )
+    late = run_v3_backtest(bars_15, bars_5, bars_1, _b())
+    assert _filled(late) == []
+    assert late[0]["unfilled_reason"] == "no_1m_continuation"
+
+    # Short is the mirror, and a close equal to the breakout close is not enough.
+    bars_15, bars_5, bars_1 = _session(
+        SUMMER,
+        [(100.2, 100.4, 95.0, 96.0)],
+        [
+            (20, (96.4, 96.5, 95.9, 96.0)),
+            (21, (96.4, 96.5, 95.8, 95.9)),
+            (22, (95.9, 96.0, 95.7, 95.8)),
+        ],
+    )
+    short_trade = _filled(run_v3_backtest(bars_15, bars_5, bars_1, _b()))[0]
+    assert short_trade["direction"] == "SHORT"
+    assert short_trade["entry_signal_close"] == 95.9
+    assert short_trade["entry_signal_close"] < short_trade["breakout_close"]
+
 

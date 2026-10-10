@@ -9,7 +9,7 @@ V3 does not change the V2 range or the original engine.
 from .engine import OrbConfig, comparison_grid, primary_config, run_backtest
 from .session import ORB_MINUTES
 from .v2 import OrbV2Config, run_v2_backtest, v2_primary_config
-from .v3 import OrbV3Config, run_v3_backtest, v3_primary_config
+from .v3 import OrbV3Config, run_v3_backtest, v3_primary_config, v3b_primary_config
 
 __all__ = [
     "ORB_MINUTES",
@@ -23,4 +23,5 @@ __all__ = [
     "run_v3_backtest",
     "v2_primary_config",
     "v3_primary_config",
+    "v3b_primary_config",
 ]

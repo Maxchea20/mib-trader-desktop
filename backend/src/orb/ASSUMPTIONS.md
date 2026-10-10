@@ -156,3 +156,12 @@ position opened on the settlement minute is not charged for that print.
 A position closed before the settlement is not charged. Taker commission
 is unchanged at 0.02% of notional on entry and on exit.
 
+Rule B is a separate entry, `continuation="next_5m"`. The 15-minute range,
+the 5-minute body breakout, the 11:00 cutoff, and every cost are unchanged.
+After the 5-minute breakout closes, only the five 1-minute bars inside the
+next 5-minute candle are eligible. A long signal must close above its open
+and above that breakout candle's close. A short signal must close below its
+open and below that breakout close. Closing back over the opening range is
+not a signal. If none of those five bars qualifies, the day is skipped. The
+original V3 entry remains `continuation="range"` and is not replaced.
+
